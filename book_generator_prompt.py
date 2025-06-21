@@ -92,8 +92,4 @@ The goal is to ignite the imagination of any writer, reader, or AI model who rec
     return response.choices[0].message.content
 
 
-if __name__ == "__main__":
-    prompt = book_prompt(
-     " a romantic comedy between two rich people who are rivals in businesss, set in Mumbai, with a twist ending where they realize they were actually childhood friends separated at birth."   
-    )
-    print("\n\nExpanded Prompt:\n", prompt)
+

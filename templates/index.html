@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Story Generator</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-center mb-8 text-gray-800">Story Generator</h1>
+        
+        <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
+            <!-- Format Selection -->
+            <div class="mb-6">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Choose Format:</label>
+                <div class="flex space-x-4">
+                    <button id="bookBtn" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+                        Book (Chapter 1)
+                    </button>
+                    <button id="movieBtn" class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
+                        Movie Script
+                    </button>
+                </div>
+            </div>
+
+            <!-- Story Input -->
+            <div class="mb-6">
+                <label for="storyIdea" class="block text-gray-700 text-sm font-bold mb-2">Enter Your Story Idea:</label>
+                <textarea id="storyIdea" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" rows="4" placeholder="Type your story idea here..."></textarea>
+            </div>
+
+            <!-- Generate Button -->
+            <button id="generateBtn" class="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded mb-6">
+                Generate Story
+            </button>
+
+            <!-- Loading Indicator -->
+            <div id="loading" class="hidden text-center mb-6">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto"></div>
+                <p class="mt-2 text-gray-600">Generating your story...</p>
+            </div>
+
+            <!-- Story Outline Preview -->
+            <div id="outlinePreview" class="hidden mb-6">
+                <h2 class="text-xl font-bold mb-4 text-gray-800">Story Outline Preview</h2>
+                <div id="outlineContent" class="bg-gray-50 p-4 rounded-lg mb-4"></div>
+                <div class="flex space-x-4">
+                    <button id="approveBtn" class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
+                        I Like This
+                    </button>
+                    <button id="retryBtn" class="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded">
+                        Try Another
+                    </button>
+                </div>
+            </div>
+
+            <!-- Generated Content -->
+            <div id="generatedContent" class="hidden">
+                <h2 class="text-xl font-bold mb-4 text-gray-800">Generated Content</h2>
+                <div id="content" class="bg-gray-50 p-4 rounded-lg whitespace-pre-wrap"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        let currentFormat = 'book';
+        let currentOutline = '';
+
+        // Format selection
+        document.getElementById('bookBtn').addEventListener('click', () => {
+            currentFormat = 'book';
+            document.getElementById('bookBtn').classList.add('bg-blue-600');
+            document.getElementById('movieBtn').classList.remove('bg-green-600');
+        });
+
+        document.getElementById('movieBtn').addEventListener('click', () => {
+            currentFormat = 'movie';
+            document.getElementById('movieBtn').classList.add('bg-green-600');
+            document.getElementById('bookBtn').classList.remove('bg-blue-600');
+        });
+
+        // Generate story
+        document.getElementById('generateBtn').addEventListener('click', async () => {
+            const storyIdea = document.getElementById('storyIdea').value.trim();
+            if (!storyIdea) {
+                alert('Please enter a story idea');
+                return;
+            }
+
+            showLoading();
+            try {
+                const response = await fetch('http://localhost:8000/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        idea: storyIdea,
+                        format: currentFormat
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (currentFormat === 'book') {
+                    currentOutline = data.expanded_prompt;
+                    showOutlinePreview(data.expanded_prompt);
+                } else {
+                    showGeneratedContent(data.expanded_prompt);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while generating the story');
+            } finally {
+                hideLoading();
+            }
+        });
+
+        // Approve outline
+        document.getElementById('approveBtn').addEventListener('click', async () => {
+            showLoading();
+            try {
+                const response = await fetch('http://localhost:8000/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        idea: currentOutline,
+                        format: 'book',
+                        generate_chapter: true
+                    })
+                });
+
+                const data = await response.json();
+                showGeneratedContent(data.expanded_prompt);
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while generating the chapter');
+            } finally {
+                hideLoading();
+            }
+        });
+
+        // Retry outline
+        document.getElementById('retryBtn').addEventListener('click', () => {
+            document.getElementById('generateBtn').click();
+        });
+
+        function showLoading() {
+            document.getElementById('loading').classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        function showOutlinePreview(outline) {
+            document.getElementById('outlineContent').innerHTML = marked.parse(outline);
+            document.getElementById('outlinePreview').classList.remove('hidden');
+            document.getElementById('generatedContent').classList.add('hidden');
+        }
+
+        function showGeneratedContent(content) {
+            document.getElementById('content').textContent = content;
+            document.getElementById('generatedContent').classList.remove('hidden');
+            document.getElementById('outlinePreview').classList.add('hidden');
+        }
+    </script>
+</body>
+</html> 
