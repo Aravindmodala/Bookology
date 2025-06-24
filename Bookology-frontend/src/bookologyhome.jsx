@@ -1,19 +1,7 @@
 import { motion } from "framer-motion";
-
-function Navbar() {
-  return (
-    <nav className="fixed top-0 left-0 w-full z-50 bg-white/10 backdrop-blur-md border-b border-white/20 flex items-center justify-between px-8 py-4">
-      <div className="text-2xl font-bold tracking-wide text-white">Bookology</div>
-      <div className="flex gap-6">
-        <a href="#" className="text-white/80 hover:text-white transition">Home</a>
-        <a href="#" className="text-white/80 hover:text-white transition">About</a>
-        <a href="#" className="text-white/80 hover:text-white transition">Contact</a>
-        <a href="#" className="text-white/80 hover:text-white transition">GitHub</a>
-        <a href="#" className="text-white/80 hover:text-white transition font-semibold">Login</a>
-      </div>
-    </nav>
-  );
-}
+import { Link } from "react-router-dom";
+import { useAuth } from "./AuthContext";
+import Navbar from "./Navbar";
 
 // 1. Hero Section
 function HeroSection({ onStart }) {

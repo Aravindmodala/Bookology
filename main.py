@@ -1,5 +1,5 @@
 # main.py
-from fastapi import FastAPI, Request, Body
+from fastapi import FastAPI, Request, Body, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -10,6 +10,12 @@ from book_generator_prompt import book_prompt
 from fastapi.middleware.cors import CORSMiddleware
 from lc_book_generator_prompt import generate_book_outline
 from lc_book_generator import generate_chapter_from_outline
+import os
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from dotenv import load_dotenv
+from supabase import create_client, Client
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -24,6 +30,11 @@ app.add_middleware(
 
 # Mount templates directory
 templates = Jinja2Templates(directory="templates")
+
+# --- Supabase Client Initialization ---
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 class StoryInput(BaseModel):
     idea: str
@@ -70,3 +81,38 @@ def lc_generate_chapter(data: dict = Body(...)):
         return {"error": "Missing outline"}
     result = generate_chapter_from_outline(outline)
     return {"chapter_1": result}
+
+# --- New endpoint to save a story ---
+class StorySaveInput(BaseModel):
+    story_outline: str
+    chapter_1_content: str
+    story_title: str
+
+auth_scheme = HTTPBearer()
+
+@app.post("/stories/save")
+def save_story(story_data: StorySaveInput, token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
+    try:
+        # Verify the user's token to get their user data
+        user_response = supabase.auth.get_user(token.credentials)
+        user = user_response.user
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+        # Prepare the data for insertion
+        data_to_insert = {
+            "user_id": user.id,
+            "story_outline": story_data.story_outline,
+            "chapter_1_content": story_data.chapter_1_content,
+            "story_title": story_data.story_title,
+        }
+
+        # Insert the data into the 'Stories' table (note the capitalization)
+        response = supabase.table('Stories').insert(data_to_insert).execute()
+        
+        # The returned 'data' is a list of inserted rows. We access the first one.
+        return {"message": "Story saved successfully!", "data": response.data[0]}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
