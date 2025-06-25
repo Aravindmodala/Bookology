@@ -53,6 +53,3 @@ def generate_book_outline(idea: str):
         return f"❌ Error generating book outline: {str(e)}"
 
 # Entry point
-if __name__ == "__main__":
-    idea = input("📝 Enter your book idea: ")
-    print(generate_book_outline(idea))
