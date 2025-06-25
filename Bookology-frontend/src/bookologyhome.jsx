@@ -1,3 +1,12 @@
+// bookologyhome.jsx - Bookology Frontend Home/Landing Page
+//
+// This file implements the main landing page for Bookology, including hero, how-it-works, demo, genres, and footer.
+// It provides navigation to the story generator UI and introduces the app to new users.
+// Data Flow:
+// - User lands here, can navigate to generator via the Start a Story button.
+// - No backend calls are made from this file directly.
+//
+// (Add or update section/component-level comments throughout the file)
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useAuth } from "./AuthContext";

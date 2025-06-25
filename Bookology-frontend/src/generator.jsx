@@ -1,3 +1,15 @@
+// generator.jsx - Bookology Frontend Story Generator
+//
+// This file implements the main UI for generating, viewing, and saving stories in Bookology.
+// It handles user input, calls backend API endpoints to generate outlines/chapters, and saves stories by POSTing to /stories/save.
+// Data Flow:
+// - User enters a story idea and generates an outline/chapter via backend endpoints.
+// - When saving, the story and chapter 1 are sent to the backend, which handles chunking/embedding.
+// - Saved stories and chapters are fetched from Supabase for display.
+//
+// Each function is commented with its purpose and where it is used.
+//
+// (Add or update function-level comments throughout the file)
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { useAuth } from './AuthContext';
@@ -140,30 +152,35 @@ export default function Generator() {
       setSaveLoading(false);
       return;
     }
-    // 1. Insert into Stories
-    const { data: storyData, error: storyError } = await supabase.from('Stories').insert([
-      {
-        user_id: user.id,
-        story_title: idea,
-        story_outline: result,
-      },
-    ]).select().single();
-    if (storyError) {
-      setSaveError(storyError.message);
+
+    // Get the user's JWT token from Supabase Auth
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    try {
+      const response = await fetch('http://localhost:8000/stories/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          story_outline: result,      // The outline text
+          chapter_1_content: chapter, // The generated chapter 1 text
+          story_title: idea,          // The story title
+        }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setSaveSuccess('Story saved successfully!');
+      } else {
+        setSaveError(data.detail || 'Error saving story.');
+      }
+    } catch (err) {
+      setSaveError('Error connecting to backend.');
+    } finally {
       setSaveLoading(false);
-      return;
     }
-    // 2. Insert chapter 1 into Chapters
-    const { error: chapterError } = await supabase.from('Chapters').insert([
-      {
-        story_id: storyData.id,
-        chapter_number: 1,
-        content: chapter,
-      },
-    ]);
-    if (chapterError) setSaveError(chapterError.message);
-    else setSaveSuccess('Story saved successfully!');
-    setSaveLoading(false);
   };
 
   // Delete story from Supabase (will cascade delete chapters if FK is set to CASCADE)
@@ -179,6 +196,39 @@ export default function Generator() {
       setSavedStories((prev) => prev.filter((s) => s.id !== storyId));
     }
     setDeleteLoading(false);
+  };
+
+  // Function to generate the next chapter for a saved story
+  const handleContinueStory = async (story) => {
+    setChapterLoading(true);
+    setError('');
+    setSaveSuccess('');
+    setSaveError('');
+    try {
+      // Call backend to generate the next chapter using the story's outline
+      const response = await fetch('http://localhost:8000/lc_generate_chapter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outline: story.story_outline, // Send the outline for context
+          // Optionally, send previous chapters for more context
+        }),
+      });
+      const data = await response.json();
+      if (data.chapter_1) {
+        // For now, show the generated chapter in an alert
+        alert('Next chapter generated:\n\n' + data.chapter_1);
+        // TODO: Add UI to edit/save as Chapter 2
+      } else if (data.error) {
+        setError(data.error);
+      } else {
+        setError('Unexpected response from backend');
+      }
+    } catch (err) {
+      setError('Error connecting to backend');
+    } finally {
+      setChapterLoading(false);
+    }
   };
 
   // Modal close handler
@@ -211,6 +261,13 @@ export default function Generator() {
                 disabled={deleteLoading}
               >
                 {deleteLoading ? 'Deleting...' : 'Delete Story'}
+              </button>
+              <button
+                className="px-6 py-2 rounded-full bg-blue-600/80 text-white font-bold shadow hover:bg-blue-700 transition-all border border-blue-500"
+                onClick={() => handleContinueStory(selectedStory)}
+                disabled={chapterLoading}
+              >
+                {chapterLoading ? 'Generating...' : 'Generate Next Chapter'}
               </button>
               {deleteError && <div className="text-red-400 text-center">{deleteError}</div>}
             </div>

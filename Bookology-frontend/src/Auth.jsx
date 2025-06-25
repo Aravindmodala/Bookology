@@ -1,3 +1,12 @@
+// Auth.jsx - Bookology Frontend Auth UI
+//
+// This file implements the login and signup forms for Bookology, using Supabase Auth for authentication.
+// It uses AuthContext to get/set auth state and redirects users after login/signup.
+// Data Flow:
+// - User enters credentials or uses social login.
+// - Calls Supabase Auth methods to sign in/up.
+// - On success, updates AuthContext and redirects to the main app.
+//
 import React, { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 import { useAuth } from './AuthContext'

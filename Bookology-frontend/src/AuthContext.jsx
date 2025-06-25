@@ -3,6 +3,16 @@ import { supabase } from './supabaseClient';
 
 const AuthContext = createContext();
 
+// AuthContext.jsx - Bookology Frontend Auth Provider
+//
+// This file provides React context for authentication state using Supabase Auth.
+// It wraps the app and exposes user/session info and signOut to all components.
+// Data Flow:
+// - On mount, fetches session from Supabase and listens for auth changes.
+// - Makes user/session available via useAuth() hook to any component.
+//
+// (Add or update function-level comments throughout the file)
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
