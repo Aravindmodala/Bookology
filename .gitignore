@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.env.local
 
 # Python
 __pycache__/
@@ -35,4 +36,11 @@ package-lock.json
 *.ntvs*
 *.njsproj
 *.sln
-*.sw? 
+*.sw?
+
+# Common OS/editor files
+.DS_Store
+*.log
+
+# Coverage
+coverage/ 
