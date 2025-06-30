@@ -1,4 +1,4 @@
-from langchain_community.llms import OpenAI  # Or switch to `langchain_openai` if needed
+from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from dotenv import load_dotenv
@@ -68,12 +68,12 @@ Just write the actual chapter content. Make it so immersive that the reader forg
 )
 
 # Build the chain
-chapter_chain = LLMChain(llm=llm, prompt=prompt)
+chain = prompt | llm
 
 def generate_chapter_from_outline(outline: str):
     try:
-        result = chapter_chain.invoke({"outline": outline})
-        return result["text"].strip()  # <-- This returns to FastAPI
+        result = chain.invoke({"outline": outline})
+        return result.strip()  # <-- This returns to FastAPI
     except Exception as e:
         return f"❌ Error generating Chapter 1: {str(e)}"
 

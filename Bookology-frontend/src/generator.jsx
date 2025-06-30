@@ -33,6 +33,16 @@ export default function Generator() {
   const [selectedStory, setSelectedStory] = useState(null); // For modal
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [storyId, setStoryId] = useState(null);
+  const [nextChapterLoading, setNextChapterLoading] = useState(false);
+  const [nextChapterError, setNextChapterError] = useState('');
+  const [nextChapterText, setNextChapterText] = useState('');
+  const [currentChapterNumber, setCurrentChapterNumber] = useState(2); // Assuming chapter 1 is already generated
+  const [saveChapterLoading, setSaveChapterLoading] = useState(false);
+  const [saveChapterSuccess, setSaveChapterSuccess] = useState('');
+  const [saveChapterError, setSaveChapterError] = useState('');
+  const [allChapters, setAllChapters] = useState([]);
+  const [fetchingChapters, setFetchingChapters] = useState(false);
 
   // Fetch saved stories and their first chapter from Supabase when switching to 'saved' tab
   useEffect(() => {
@@ -84,6 +94,49 @@ export default function Generator() {
     fetchStories();
   }, [activeTab, user]);
 
+  // Fetch all chapters for the selected story when modal opens
+  useEffect(() => {
+    const fetchChapters = async () => {
+      if (selectedStory) {
+        setFetchingChapters(true);
+        const { data: chapters, error } = await supabase
+          .from('Chapters')
+          .select('*')
+          .eq('story_id', selectedStory.id)
+          .order('chapter_number', { ascending: true });
+        if (!error) setAllChapters(chapters || []);
+        else setAllChapters([]);
+        setFetchingChapters(false);
+      }
+    };
+    fetchChapters();
+  }, [selectedStory]);
+
+  // Reset state when switching stories or chapters
+  useEffect(() => {
+    if (selectedStory) {
+      setNextChapterText('');
+      setSaveChapterSuccess('');
+      setSaveChapterError('');
+      setCurrentChapterNumber(allChapters.length + 1);
+    }
+  }, [selectedStory, allChapters]);
+
+  // After saving a chapter, refresh the chapter list
+  useEffect(() => {
+    if (selectedStory && saveChapterSuccess) {
+      // Re-fetch chapters after a successful save
+      (async () => {
+        const { data: chapters, error } = await supabase
+          .from('Chapters')
+          .select('*')
+          .eq('story_id', selectedStory.id)
+          .order('chapter_number', { ascending: true });
+        if (!error) setAllChapters(chapters || []);
+      })();
+    }
+  }, [saveChapterSuccess, selectedStory]);
+
   const handleGenerate = async () => {
     setLoading(true);
     setError('');
@@ -95,7 +148,10 @@ export default function Generator() {
       const response = await fetch('http://127.0.0.1:8000/lc_generate_outline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea })
+        body: JSON.stringify({
+          idea,
+          story_id: storyId
+        })
       });
       const data = await response.json();
       if (data.expanded_prompt) {
@@ -173,6 +229,7 @@ export default function Generator() {
       const data = await response.json();
       if (response.ok) {
         setSaveSuccess('Story saved successfully!');
+        setStoryId(data.story_id);
       } else {
         setSaveError(data.detail || 'Error saving story.');
       }
@@ -234,6 +291,72 @@ export default function Generator() {
   // Modal close handler
   const closeModal = () => setSelectedStory(null);
 
+  // Helper to count chapters in outline
+  function getTotalChaptersFromOutline(outline) {
+    if (!outline) return 0;
+    const matches = outline.match(/Chapter\s+\d+/g);
+    return matches ? matches.length : 0;
+  }
+
+  const totalChapters = selectedStory ? getTotalChaptersFromOutline(selectedStory.story_outline) : 0;
+
+  // Handler for "Generate Next Chapter"
+  const handleGenerateNextChapter = async () => {
+    setNextChapterLoading(true);
+    setNextChapterError('');
+    try {
+      const response = await fetch('http://localhost:8000/generate_next_chapter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          story_id: selectedStory.id,
+          chapter_number: currentChapterNumber,
+          story_outline: selectedStory.story_outline,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setNextChapterText(data.chapter);
+      } else {
+        setNextChapterError(data.detail || 'Error generating next chapter.');
+      }
+    } catch (err) {
+      setNextChapterError('Error connecting to backend.');
+    } finally {
+      setNextChapterLoading(false);
+    }
+  };
+
+  // Handler for saving a generated chapter (not chapter 1)
+  const handleSaveChapter = async () => {
+    setSaveChapterLoading(true);
+    setSaveChapterSuccess('');
+    setSaveChapterError('');
+    try {
+      const response = await fetch('http://localhost:8000/save_chapter/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          story_id: selectedStory.id,
+          chapter_number: currentChapterNumber,
+          content: nextChapterText,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setSaveChapterSuccess('Chapter saved successfully!');
+        setNextChapterText('');
+        setCurrentChapterNumber(prev => prev + 1);
+      } else {
+        setSaveChapterError(data.detail || 'Error saving chapter.');
+      }
+    } catch (err) {
+      setSaveChapterError('Error connecting to backend.');
+    } finally {
+      setSaveChapterLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen w-screen bg-black flex items-center justify-center relative">
       {/* Modal for viewing full story - render at root level for proper overlay */}
@@ -251,8 +374,15 @@ export default function Generator() {
             <div className="mb-6">
               <div className="text-white/70 mb-2 font-semibold">Outline:</div>
               <div className="text-white/80 whitespace-pre-wrap mb-6 bg-black/30 p-4 rounded-xl border border-white/10 max-h-40 overflow-y-auto">{selectedStory.story_outline}</div>
-              <div className="text-white/70 mb-2 font-semibold">Chapter 1:</div>
-              <div className="text-white/80 whitespace-pre-wrap bg-black/30 p-4 rounded-xl border border-white/10 max-h-60 overflow-y-auto">{selectedStory.chapter_1_content}</div>
+              {/* Render all chapters for this story */}
+              {allChapters.map(chap => (
+                <div key={chap.chapter_number} className="mb-4">
+                  <div className="text-white/70 mb-2 font-semibold">Chapter {chap.chapter_number}:</div>
+                  <div className="text-white/80 whitespace-pre-wrap bg-black/30 p-4 rounded-xl border border-white/10 max-h-60 overflow-y-auto">
+                    {chap.content}
+                  </div>
+                </div>
+              ))}
             </div>
             <div className="flex flex-col items-center gap-2 mt-2">
               <button
@@ -262,15 +392,37 @@ export default function Generator() {
               >
                 {deleteLoading ? 'Deleting...' : 'Delete Story'}
               </button>
-              <button
-                className="px-6 py-2 rounded-full bg-blue-600/80 text-white font-bold shadow hover:bg-blue-700 transition-all border border-blue-500"
-                onClick={() => handleContinueStory(selectedStory)}
-                disabled={chapterLoading}
-              >
-                {chapterLoading ? 'Generating...' : 'Generate Next Chapter'}
-              </button>
+              {/* Only show the button if there is no generated chapter currently displayed and chapters remain */}
+              {!nextChapterText && currentChapterNumber <= totalChapters && (
+                <button
+                  className="px-6 py-2 rounded-full bg-blue-600/80 text-white font-bold shadow hover:bg-blue-700 transition-all border border-blue-500"
+                  onClick={handleGenerateNextChapter}
+                  disabled={nextChapterLoading}
+                >
+                  {nextChapterLoading ? 'Generating...' : `Generate Chapter ${currentChapterNumber}`}
+                </button>
+              )}
               {deleteError && <div className="text-red-400 text-center">{deleteError}</div>}
             </div>
+            {/* Show generated next chapter if available */}
+            {nextChapterText && (
+              <div className="mt-6 w-full bg-black/80 text-white p-6 rounded-xl border border-white/20 shadow-inner whitespace-pre-wrap">
+                <h2 className="text-2xl font-bold mb-4">{`Chapter ${currentChapterNumber}:`}</h2>
+                {nextChapterText}
+                <div className="mt-4 flex flex-col items-center">
+                  <button
+                    onClick={handleSaveChapter}
+                    disabled={saveChapterLoading}
+                    className="px-6 py-2 rounded-full bg-green-600/80 text-white font-bold shadow hover:bg-green-700 transition-all border border-green-500"
+                  >
+                    {saveChapterLoading ? 'Saving...' : 'Save Chapter'}
+                  </button>
+                  {saveChapterSuccess && <div className="text-green-400 mt-2">{saveChapterSuccess}</div>}
+                  {saveChapterError && <div className="text-red-400 mt-2">{saveChapterError}</div>}
+                </div>
+              </div>
+            )}
+            {nextChapterError && <div className="text-red-400 mt-2">{nextChapterError}</div>}
             <div className="text-xs text-white/40 mt-2 text-center">Saved on {new Date(selectedStory.created_at).toLocaleString()}</div>
           </div>
         </div>

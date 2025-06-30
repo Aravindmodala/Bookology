@@ -1,4 +1,4 @@
-from langchain_community.llms import OpenAI  # Or switch to `langchain_openai` if needed
+from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from dotenv import load_dotenv
@@ -23,32 +23,34 @@ Take the following idea and expand it into a **full-length novel blueprint** in 
 ---
 
 Your output should be grounded in:
+- 
 - **Cultural context** (Telugu culture, language, cinema tone)
 - **Casting** (Include actors from the input in character roles)
 - **Genre accuracy** (Massy action, revenge drama, emotion, powerful dialogue)
 - **Setting** (South Indian towns, cities, rural-urban contrast)
 
 📚 OUTPUT FORMAT:
-
-STEP 1: Genre & Emotional Intent  
-STEP 2: Setting & World-Building  
-STEP 3: Character Design (Hero, Villain, Heroine, Supporting Cast)  
-STEP 4: Chapter-by-Chapter Breakdown (15–20 chapters)  
-STEP 5: Style & Language (Tone, perspective, voice)  
-STEP 6: Symbols, Motifs, Recurring Visuals
+1. A good title that captures the essence of the story
+2.Total number of chapters (15–20 chapters)
+3: Genre & Emotional Intent  
+4: Setting & World-Building  
+5: Character Design (Hero, Villain, Heroine, Supporting Cast)  
+6: Chapter-by-Chapter Breakdown (15–20 chapters)  
+7: Style & Language (Tone, perspective, voice)  
+8: Symbols, Motifs, Recurring Visuals
 
 🧨 Final Note: Write like you're pitching a high-budget Telugu movie with a gripping story, unforgettable characters, and whistle-worthy scenes.
 """
 )
 
 # Build the chain
-outline_chain = LLMChain(llm=llm, prompt=prompt)
+chain = prompt | llm
 
 # Format and display the output nicely
 def generate_book_outline(idea: str):
     try:
-        result = outline_chain.invoke({"idea": idea})
-        return result["text"].strip()
+        result = chain.invoke({"idea": idea})
+        return result.strip()
     except Exception as e:
         return f"❌ Error generating book outline: {str(e)}"
 

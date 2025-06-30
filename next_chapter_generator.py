@@ -1,67 +1,78 @@
-"""
-next_chapter_generator.py - Bookology Backend Utility
-
-This file provides functions to generate the next chapter of a story using:
-- The full outline for the story
-- Relevant context from previous chapters (retrieved via vector search)
-- OpenAI LLM for text generation
-
-It is called from the FastAPI backend when a user wants to continue a saved story.
-"""
-
 from supabase import create_client
 from dotenv import load_dotenv
 import os
-
-# Import your embedding/vector search and LLM utilities
-# from chapter_embeddings import split_into_chunks  # if needed
-# from your_llm_module import call_llm  # Replace with your actual LLM call
+from Generate_summary import generate_summary  # <-- Import the summary function
+from openai import OpenAI
 
 load_dotenv()
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
+openai_api_key = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=openai_api_key)
 
-def retrieve_relevant_chunks(story_id, previous_chapter_number, query_text, top_k=3):
+def call_llm(prompt):
     """
-    Retrieves the most relevant chunks from the previous chapter using vector similarity.
+    Calls the OpenAI LLM to generate the next chapter.
     """
-    # TODO: Query chapter_chunks where chapter_id = previous_chapter_id, order by similarity to query_text
-    pass
+    print("[DEBUG] Calling LLM to generate next chapter...")
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a helpful and creative book-writing assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=2048,
+        temperature=0.8
+    )
+    print("[DEBUG] LLM response received.")
+    return response.choices[0].message.content.strip()
 
-# New: Always send the full outline to the LLM, and specify which chapter to generate
+def save_chapter(story_id, chapter_number, chapter_text):
+    """
+    Saves the chapter and its summary to the database.
+    """
+    print(f"[DEBUG] Generating summary for chapter {chapter_number}...")
+    summary = generate_summary(chapter_text)
+    print(f"[DEBUG] Summary generated. Saving chapter {chapter_number} to database...")
+    supabase.table("Chapters").insert({
+        "story_id": story_id,
+        "chapter_number": chapter_number,
+        "content": chapter_text,
+        "summary": summary
+    }).execute()
+    print(f"[DEBUG] Chapter {chapter_number} and summary saved.")
 
-def build_next_chapter_prompt(full_outline, chapter_number, relevant_chunks):
-    """
-    Builds the prompt for the LLM to generate the next chapter.
-    - full_outline: The entire story outline as a string.
-    - chapter_number: The chapter to generate (e.g., 2).
-    - relevant_chunks: List of strings from previous chapters.
-    """
+def get_previous_summaries(story_id, upto_chapter_number):
+    resp = supabase.table("Chapters") \
+        .select("chapter_number,summary") \
+        .eq("story_id", story_id) \
+        .lt("chapter_number", upto_chapter_number) \
+        .order("chapter_number") \
+        .execute()
+    return [row["summary"] for row in resp.data if row["summary"]]
+
+def get_story_outline(story_id):
+    resp = supabase.table("Stories").select("story_outline").eq("id", story_id).single().execute()
+    return resp.data["story_outline"] if resp.data else ""
+
+def build_next_chapter_prompt_with_summaries(story_id, chapter_number):
+    outline = get_story_outline(story_id)
+    summaries = get_previous_summaries(story_id, chapter_number)
     prompt = f"""
 Story Outline:
-{full_outline}
+{outline}
 
-Relevant content from previous chapters:
-{chr(10).join(relevant_chunks)}
+Summaries of Previous Chapters:
+{chr(10).join(summaries)}
 
 Instruction:
-Write Chapter {chapter_number} of the story, following the outline above and using the relevant context. Continue the story naturally from the previous chapters.
+Write Chapter {chapter_number} of the story, following the outline and using the summaries above for context. Continue the story naturally and end with a cliffhanger.
 """
+    print("[DEBUG] Prompt built with outline and summaries.")
     return prompt
 
-
-def generate_next_chapter(story_id, chapter_number, story_outline):
-    """
-    Main function to generate the next chapter.
-    - Uses the full outline for context
-    - Retrieves relevant context from previous chapter
-    - Builds the prompt and calls the LLM
-    - Returns the generated chapter text
-    """
-    # 1. Retrieve relevant chunks from previous chapter
-    relevant_chunks = retrieve_relevant_chunks(story_id, chapter_number - 1, story_outline)
-    # 2. Build prompt
-    prompt = build_next_chapter_prompt(story_outline, chapter_number, relevant_chunks)
-    # 3. Call LLM (pseudo-code)
-    # next_chapter = call_llm(prompt)
-    # return next_chapter
-    pass
+def generate_next_chapter(story_id, chapter_number):
+    print(f"[DEBUG] Generating next chapter {chapter_number} for story_id={story_id}")
+    prompt = build_next_chapter_prompt_with_summaries(story_id, chapter_number)
+    next_chapter = call_llm(prompt)
+    print(f"[DEBUG] Next chapter {chapter_number} generated.")
+    return next_chapter

@@ -3,7 +3,7 @@ chapter_embeddings.py - Bookology Backend Utility
 
 This file provides utility functions for chunking chapter text and generating/storing embeddings using OpenAI. It is called from main.py after a chapter is saved, either directly or as a FastAPI background task. All chunked data and embeddings are stored in the chapter_chunks table in Supabase for vector search and retrieval.
 """
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from supabase import create_client
 from dotenv import load_dotenv
 import os

@@ -29,6 +29,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials  # For tok
 from dotenv import load_dotenv  # For loading .env config
 from supabase import create_client, Client  # Supabase client for database access
 from chapter_embeddings import embed_and_store_chunks  # Function to chunk, embed, and store chapter content
+from next_chapter_generator import generate_next_chapter
+from Generate_summary import generate_summary
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -78,6 +81,12 @@ auth_scheme = HTTPBearer()  # HTTP Bearer token authentication for protected end
 
 print("main.py loaded and running")
 
+def extract_total_chapters(outline_text):
+    match = re.search(r'Total number of chapters:\s*(\d+)', outline_text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
     """
@@ -117,10 +126,14 @@ def lc_generate_outline(data: dict = Body(...)):
     Generates a book outline using LangChain's LLM chain.
     """
     idea = data.get("idea")
+    story_id = data.get("story_id")  # Make sure frontend sends this!
     if not idea:
         return {"error": "Missing idea"}
     result = generate_book_outline(idea)
-    return {"expanded_prompt": result}
+    total_chapters = extract_total_chapters(result)
+    if story_id and total_chapters:
+        supabase.table("Stories").update({"total_chapters": total_chapters}).eq("id", story_id).execute()
+    return {"expanded_prompt": result, "total_chapters": total_chapters}
 
 @app.post("/lc_generate_chapter")
 def lc_generate_chapter(data: dict = Body(...)):
@@ -161,11 +174,17 @@ def save_story(story_data: StorySaveInput, token: HTTPAuthorizationCredentials =
         response = supabase.table('Stories').insert(data_to_insert).execute()
         story_id = response.data[0]["id"]
 
-        # Insert chapter 1 into Chapters table
+        # --- NEW: Generate summary for chapter 1 ---
+        print("[DEBUG] Generating summary for chapter 1...")
+        summary = generate_summary(story_data.chapter_1_content)
+        print("[DEBUG] Summary generated.")
+
+        # Insert chapter 1 into Chapters table WITH summary
         chapter_data = {
             "story_id": story_id,
             "chapter_number": 1,
-            "content": story_data.chapter_1_content
+            "content": story_data.chapter_1_content,
+            "summary": summary
         }
         chapter_result = supabase.table("Chapters").insert(chapter_data).execute()
         if not chapter_result.data or "id" not in chapter_result.data[0]:
@@ -207,3 +226,48 @@ def save_chapter(chapter: ChapterInput):
     # Chunk, embed, and store chapter content for vector search
     embed_and_store_chunks(chapter_id, chapter.content)
     return {"message": "Chapter saved and embedding stored!", "chapter_id": chapter_id}
+
+@app.post("/generate_next_chapter")
+async def generate_next_chapter_endpoint(request: Request):
+    """
+    Expects JSON:
+    {
+        "story_id": int,
+        "chapter_number": int
+    }
+    """
+    data = await request.json()
+    story_id = data["story_id"]
+    chapter_number = data["chapter_number"]
+
+    next_chapter = generate_next_chapter(story_id, chapter_number)
+    return {"chapter": next_chapter}
+
+@app.post("/save_chapter_with_summary")
+async def save_chapter_with_summary(request: Request):
+    """
+    Saves a chapter to the Chapters table with an auto-generated summary.
+    Expects JSON:
+    {
+        "story_id": int,
+        "chapter_number": int,
+        "content": str
+    }
+    """
+    data = await request.json()
+    story_id = data["story_id"]
+    chapter_number = data["chapter_number"]
+    chapter_text = data["content"]
+
+    # Generate summary
+    summary = generate_summary(chapter_text)
+
+    # Save chapter and summary
+    supabase.table("Chapters").insert({
+        "story_id": story_id,
+        "chapter_number": chapter_number,
+        "content": chapter_text,
+        "summary": summary
+    }).execute()
+
+    return {"status": "success"}
