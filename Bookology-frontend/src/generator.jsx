@@ -13,6 +13,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { useAuth } from './AuthContext';
+import StoryChatbot from './StoryChatbot';
 
 export default function Generator() {
   const { user } = useAuth();
@@ -43,6 +44,7 @@ export default function Generator() {
   const [saveChapterError, setSaveChapterError] = useState('');
   const [allChapters, setAllChapters] = useState([]);
   const [fetchingChapters, setFetchingChapters] = useState(false);
+  const [showChatbot, setShowChatbot] = useState(false);
 
   // Fetch saved stories and their first chapter from Supabase when switching to 'saved' tab
   useEffect(() => {
@@ -214,7 +216,7 @@ export default function Generator() {
     const token = session?.access_token;
 
     try {
-      const response = await fetch('http://localhost:8000/stories/save', {
+      const response = await fetch('http://127.0.0.1:8000/stories/save', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -263,7 +265,7 @@ export default function Generator() {
     setSaveError('');
     try {
       // Call backend to generate the next chapter using the story's outline
-      const response = await fetch('http://localhost:8000/lc_generate_chapter', {
+      const response = await fetch('http://127.0.0.1:8000/lc_generate_chapter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -289,7 +291,10 @@ export default function Generator() {
   };
 
   // Modal close handler
-  const closeModal = () => setSelectedStory(null);
+  const closeModal = () => {
+    setSelectedStory(null);
+    setShowChatbot(false);
+  };
 
   // Helper to count chapters in outline
   function getTotalChaptersFromOutline(outline) {
@@ -305,7 +310,7 @@ export default function Generator() {
     setNextChapterLoading(true);
     setNextChapterError('');
     try {
-      const response = await fetch('http://localhost:8000/generate_next_chapter', {
+      const response = await fetch('http://127.0.0.1:8000/generate_next_chapter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -333,7 +338,7 @@ export default function Generator() {
     setSaveChapterSuccess('');
     setSaveChapterError('');
     try {
-      const response = await fetch('http://localhost:8000/save_chapter/', {
+      const response = await fetch('http://127.0.0.1:8000/save_chapter_with_summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -362,14 +367,25 @@ export default function Generator() {
       {/* Modal for viewing full story - render at root level for proper overlay */}
       {selectedStory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#18181b] rounded-3xl shadow-2xl p-8 max-w-2xl w-full border border-white/20 relative flex flex-col max-h-[90vh] overflow-y-auto">
-            <button
-              className="absolute top-4 right-4 text-white text-3xl font-bold hover:text-red-400 bg-black/40 rounded-full w-10 h-10 flex items-center justify-center transition"
-              onClick={closeModal}
-              aria-label="Close"
-            >
-              &times;
-            </button>
+          <div className={`bg-[#18181b] rounded-3xl shadow-2xl p-8 ${showChatbot ? 'max-w-6xl' : 'max-w-2xl'} w-full border border-white/20 relative flex ${showChatbot ? 'flex-row' : 'flex-col'} max-h-[90vh] overflow-hidden`}>
+            {/* Main Story Content */}
+            <div className={`${showChatbot ? 'w-1/2 pr-4' : 'w-full'} flex flex-col overflow-y-auto`}>
+              <button
+                className="absolute top-4 right-4 text-white text-3xl font-bold hover:text-red-400 bg-black/40 rounded-full w-10 h-10 flex items-center justify-center transition"
+                onClick={closeModal}
+                aria-label="Close"
+              >
+                &times;
+              </button>
+              {/* Chat Toggle Button */}
+              <button
+                className="absolute top-4 right-16 text-white text-2xl font-bold hover:text-blue-400 bg-black/40 rounded-full w-10 h-10 flex items-center justify-center transition"
+                onClick={() => setShowChatbot(!showChatbot)}
+                aria-label="Toggle Chat"
+                title="Chat with your story"
+              >
+                💬
+              </button>
             <h2 className="text-3xl font-bold text-white mb-4 text-center break-words">{selectedStory.story_title}</h2>
             <div className="mb-6">
               <div className="text-white/70 mb-2 font-semibold">Outline:</div>
@@ -422,8 +438,18 @@ export default function Generator() {
                 </div>
               </div>
             )}
-            {nextChapterError && <div className="text-red-400 mt-2">{nextChapterError}</div>}
-            <div className="text-xs text-white/40 mt-2 text-center">Saved on {new Date(selectedStory.created_at).toLocaleString()}</div>
+              {nextChapterError && <div className="text-red-400 mt-2">{nextChapterError}</div>}
+              <div className="text-xs text-white/40 mt-2 text-center">Saved on {new Date(selectedStory.created_at).toLocaleString()}</div>
+            </div>
+            {/* Chatbot Section */}
+            {showChatbot && (
+              <div className="w-1/2 pl-4 border-l border-white/20">
+                <StoryChatbot 
+                  storyId={selectedStory.id} 
+                  storyTitle={selectedStory.story_title}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}

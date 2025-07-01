@@ -1,10 +1,19 @@
 from dotenv import load_dotenv
 import os
 from openai import OpenAI
+import psycopg2
 
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=openai_api_key)
+conn_str = os.getenv("SUPABASE_PG_DSN")
+print("Connection string:", repr(conn_str))
+
+try:
+    conn = psycopg2.connect(conn_str)
+    print("Connection successful!")
+except Exception as e:
+    print("Connection failed:", e)
 
 def generate_summary(chapter_text):
     prompt = (

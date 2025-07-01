@@ -29,9 +29,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials  # For tok
 from dotenv import load_dotenv  # For loading .env config
 from supabase import create_client, Client  # Supabase client for database access
 from chapter_embeddings import embed_and_store_chunks  # Function to chunk, embed, and store chapter content
-from next_chapter_generator import generate_next_chapter
+from next_chapter_generator import generate_next_chapter, save_chapter
 from Generate_summary import generate_summary
 import re
+from story_chatbot import story_chatbot
 
 # Load environment variables from .env file
 load_dotenv()
@@ -73,6 +74,10 @@ class ChapterInput(BaseModel):
     story_id: int  # Foreign key to the story
     chapter_number: int  # Chapter number in the story
     content: str  # The actual chapter text
+
+class StoryChatRequest(BaseModel):
+    story_id: int
+    message: str
 
 # --- Authentication Scheme ---
 auth_scheme = HTTPBearer()  # HTTP Bearer token authentication for protected endpoints
@@ -206,26 +211,41 @@ def save_story(story_data: StorySaveInput, token: HTTPAuthorizationCredentials =
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/save_chapter/")
-def save_chapter(chapter: ChapterInput):
+def save_chapter_endpoint(chapter: ChapterInput):
     """
-    Saves a chapter to the Chapters table and then splits the chapter into chunks,
-    generates embeddings for each chunk, and stores them in the chapter_chunks table.
+    Saves a chapter to the Chapters table with auto-generated summary and embeddings.
     This enables vector search and smart retrieval for long chapters.
+    NOTE: This endpoint is deprecated. Use /save_chapter_with_summary instead.
     """
-    # Insert chapter (without embedding)
-    data = {
-        "story_id": chapter.story_id,
-        "chapter_number": chapter.chapter_number,
-        "content": chapter.content
-    }
-    result = supabase.table("Chapters").insert(data).execute()
-    if not result.data or "id" not in result.data[0]:
-        raise HTTPException(status_code=500, detail="Failed to save chapter")
-    chapter_id = result.data[0]["id"]
+    try:
+        print(f"[DEBUG] Using deprecated /save_chapter/ endpoint. Generating summary and embeddings...")
+        
+        # Generate summary for the chapter
+        summary = generate_summary(chapter.content)
+        
+        # Insert chapter with summary
+        data = {
+            "story_id": chapter.story_id,
+            "chapter_number": chapter.chapter_number,
+            "content": chapter.content,
+            "summary": summary
+        }
+        result = supabase.table("Chapters").insert(data).execute()
+        if not result.data or "id" not in result.data[0]:
+            raise HTTPException(status_code=500, detail="Failed to save chapter")
+        chapter_id = result.data[0]["id"]
 
-    # Chunk, embed, and store chapter content for vector search
-    embed_and_store_chunks(chapter_id, chapter.content)
-    return {"message": "Chapter saved and embedding stored!", "chapter_id": chapter_id}
+        # Chunk, embed, and store chapter content for vector search
+        embed_and_store_chunks(chapter_id, chapter.content)
+        
+        return {
+            "message": f"Chapter {chapter.chapter_number} saved with summary and embeddings!", 
+            "chapter_id": chapter_id,
+            "note": "This endpoint is deprecated. Use /save_chapter_with_summary instead."
+        }
+    except Exception as e:
+        print(f"Error in save_chapter_endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate_next_chapter")
 async def generate_next_chapter_endpoint(request: Request):
@@ -246,7 +266,7 @@ async def generate_next_chapter_endpoint(request: Request):
 @app.post("/save_chapter_with_summary")
 async def save_chapter_with_summary(request: Request):
     """
-    Saves a chapter to the Chapters table with an auto-generated summary.
+    Saves a chapter to the Chapters table with an auto-generated summary and embeddings.
     Expects JSON:
     {
         "story_id": int,
@@ -254,20 +274,61 @@ async def save_chapter_with_summary(request: Request):
         "content": str
     }
     """
-    data = await request.json()
-    story_id = data["story_id"]
-    chapter_number = data["chapter_number"]
-    chapter_text = data["content"]
+    try:
+        data = await request.json()
+        story_id = data["story_id"]
+        chapter_number = data["chapter_number"]
+        chapter_text = data["content"]
 
-    # Generate summary
-    summary = generate_summary(chapter_text)
+        print(f"[DEBUG] Saving chapter {chapter_number} with summary and embeddings...")
+        chapter_id = save_chapter(story_id, chapter_number, chapter_text)
+        print(f"[DEBUG] Chapter {chapter_number} saved successfully with chapter_id: {chapter_id}")
+        
+        return {
+            "status": "success", 
+            "message": f"Chapter {chapter_number} saved with summary and embeddings!",
+            "chapter_id": chapter_id
+        }
+    except Exception as e:
+        print(f"Error saving chapter with summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # Save chapter and summary
-    supabase.table("Chapters").insert({
-        "story_id": story_id,
-        "chapter_number": chapter_number,
-        "content": chapter_text,
-        "summary": summary
-    }).execute()
-
-    return {"status": "success"}
+@app.post("/story_chat")
+async def story_chat_endpoint(
+    body: StoryChatRequest,
+    token: HTTPAuthorizationCredentials = Depends(auth_scheme)
+):
+    """
+    Chat with your story - ask questions, request modifications, or create multiverse connections.
+    Expects JSON:
+    {
+        "story_id": int,
+        "message": str
+    }
+    """
+    try:
+        print(f"[DEBUG] Story chat endpoint called with story_id: {body.story_id}, message: {body.message}")
+        
+        # Verify user authentication
+        print(f"[DEBUG] Verifying user authentication...")
+        user_response = supabase.auth.get_user(token.credentials)
+        user = user_response.user
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        
+        print(f"[DEBUG] User authenticated: {user.id}")
+        story_id = body.story_id
+        message = body.message
+        if not story_id or not message:
+            raise HTTPException(status_code=400, detail="Missing story_id or message")
+        
+        # Process the chat request
+        print(f"[DEBUG] Calling story_chatbot.chat...")
+        response = story_chatbot.chat(str(user.id), str(story_id), message)
+        print(f"[DEBUG] Chat response received: {response}")
+        return response
+    except Exception as e:
+        print(f"Story chat error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

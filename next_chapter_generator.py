@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import os
 from Generate_summary import generate_summary  # <-- Import the summary function
 from openai import OpenAI
+from chapter_embeddings import embed_and_store_chunks  # Import embedding function
 
 load_dotenv()
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
@@ -17,7 +18,7 @@ def call_llm(prompt):
     response = openai_client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are a helpful and creative book-writing assistant."},
+            {"role": "system", "content": "You are a helpful and creative book-writing assistant who wrote a lot of best selling books that turned out to be big hit movies too ."},
             {"role": "user", "content": prompt}
         ],
         max_tokens=2048,
@@ -29,17 +30,32 @@ def call_llm(prompt):
 def save_chapter(story_id, chapter_number, chapter_text):
     """
     Saves the chapter and its summary to the database.
+    Also generates embeddings for vector search.
     """
     print(f"[DEBUG] Generating summary for chapter {chapter_number}...")
     summary = generate_summary(chapter_text)
     print(f"[DEBUG] Summary generated. Saving chapter {chapter_number} to database...")
-    supabase.table("Chapters").insert({
+    
+    # Insert chapter with summary
+    result = supabase.table("Chapters").insert({
         "story_id": story_id,
         "chapter_number": chapter_number,
         "content": chapter_text,
         "summary": summary
     }).execute()
+    
+    if not result.data or "id" not in result.data[0]:
+        raise Exception(f"Failed to save chapter {chapter_number}")
+    
+    chapter_id = result.data[0]["id"]
     print(f"[DEBUG] Chapter {chapter_number} and summary saved.")
+    
+    # Generate embeddings for vector search
+    print(f"[DEBUG] Generating embeddings for chapter {chapter_number}...")
+    embed_and_store_chunks(chapter_id, chapter_text)
+    print(f"[DEBUG] Embeddings generated and stored for chapter {chapter_number}.")
+    
+    return chapter_id
 
 def get_previous_summaries(story_id, upto_chapter_number):
     resp = supabase.table("Chapters") \
@@ -56,17 +72,44 @@ def get_story_outline(story_id):
 
 def build_next_chapter_prompt_with_summaries(story_id, chapter_number):
     outline = get_story_outline(story_id)
+    print(f"[DEBUG] Story Outline for story_id={story_id}:\n{outline}\n---END OUTLINE---\n")
     summaries = get_previous_summaries(story_id, chapter_number)
+    print(f"[DEBUG] Previous Summaries for story_id={story_id}, upto_chapter_number={chapter_number}:")
+    for idx, summary in enumerate(summaries, 1):
+        print(f"  [Summary {idx}]:\n{summary}\n---END SUMMARY---\n")
+    
+    # Build a more detailed prompt for better continuity
     prompt = f"""
-Story Outline:
+🎬 You are a master storyteller creating Chapter {chapter_number} of a bestselling novel.
+
+📚 STORY OUTLINE:
 {outline}
 
-Summaries of Previous Chapters:
+📖 PREVIOUS CHAPTER SUMMARIES (for continuity):
 {chr(10).join(summaries)}
 
-Instruction:
-Write Chapter {chapter_number} of the story, following the outline and using the summaries above for context. Continue the story naturally and end with a cliffhanger.
+🎯 YOUR TASK:
+Write Chapter {chapter_number} that seamlessly continues the story. You MUST:
+
+1. **Follow the outline structure** - Check what Chapter {chapter_number} should cover according to the outline
+2. **Maintain character consistency** - Use the same character names, personalities, and relationships from previous chapters
+3. **Continue plot threads** - Pick up unresolved plot points from previous summaries
+4. **Maintain tone and style** - Keep the same writing style and emotional tone
+5. **Create smooth transitions** - Start where the previous chapter left off
+6. **End with a compelling cliffhanger** - Make readers desperate for the next chapter
+
+📝 WRITING REQUIREMENTS:
+- Write in novel format (not script format)
+- Use the same perspective as previous chapters
+- Include character dialogue and internal thoughts
+- Build emotional tension and drama
+- Make it feel like a natural continuation, not a disconnected chapter
+
+⚠️ CRITICAL: This chapter must feel like a direct continuation of the previous chapters. Reference events, characters, and situations from the summaries above to maintain perfect continuity.
+
+Start writing Chapter {chapter_number} now:
 """
+    print(f"[DEBUG] Final Prompt for LLM (story_id={story_id}, chapter_number={chapter_number}):\n{prompt}\n---END PROMPT---\n")
     print("[DEBUG] Prompt built with outline and summaries.")
     return prompt
 
