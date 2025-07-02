@@ -43,4 +43,23 @@ package-lock.json
 *.log
 
 # Coverage
-coverage/ 
+coverage/
+
+# Database
+*.db
+*.sqlite3
+
+# Backup files
+backup_*
+*_backup_*
+*.bak
+
+# Temporary files
+*.tmp
+*.temp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Server logs
+server.log 

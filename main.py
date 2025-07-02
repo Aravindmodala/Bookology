@@ -1,334 +1,422 @@
 """
-main.py - Bookology Backend API
-
-This file is the main entry point for the Bookology backend, built with FastAPI. It exposes API endpoints for generating, saving, and retrieving stories and chapters, and handles authentication, chunking, and embedding logic for vector search. It connects to a Supabase Postgres database and uses OpenAI for LLM and embeddings.
-
-Data Flow:
-- The frontend (React) calls these endpoints to generate outlines/chapters and to save stories.
-- When a story is saved, chapter 1 is also saved and chunked/embedded for vector search.
-- All chapter content and embeddings are stored in Supabase tables (Stories, Chapters, chapter_chunks).
-- The backend is responsible for orchestrating all business logic and data movement between frontend and database.
-
+Optimized main.py with service layer architecture and async operations.
 """
-# main.py
-# Bookology Backend API
-# This file implements the FastAPI backend for Bookology, handling story and chapter generation, saving, authentication, and vector embedding for smart retrieval.
-# The backend connects to Supabase for data storage and uses OpenAI for LLM and embedding services.
 
-from fastapi import FastAPI, Request, Body, Depends, HTTPException, BackgroundTasks  # FastAPI core imports
-from fastapi.responses import HTMLResponse  # For serving HTML pages
-from fastapi.staticfiles import StaticFiles  # For serving static files (not used here)
-from fastapi.templating import Jinja2Templates  # For rendering HTML templates
-from pydantic import BaseModel  # For request/response data validation
-from movie_script_generator import generate_movie_script  # Movie script generation logic
-from fastapi.middleware.cors import CORSMiddleware  # For handling CORS (frontend-backend communication)
-from lc_book_generator_prompt import generate_book_outline  # Book outline generation (LangChain)
-from lc_book_generator import generate_chapter_from_outline  # Chapter generation from outline (LangChain)
-import os  # For environment variable access
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials  # For token-based authentication
-from dotenv import load_dotenv  # For loading .env config
-from supabase import create_client, Client  # Supabase client for database access
-from chapter_embeddings import embed_and_store_chunks  # Function to chunk, embed, and store chapter content
-from next_chapter_generator import generate_next_chapter, save_chapter
-from Generate_summary import generate_summary
-import re
-from story_chatbot import story_chatbot
+import asyncio
+from typing import Dict, Any, List
+from contextlib import asynccontextmanager
 
-# Load environment variables from .env file
-load_dotenv()
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.requests import Request
+from fastapi.security import HTTPBearer
+from pydantic import BaseModel, Field, field_validator
 
-# Initialize FastAPI app
-app = FastAPI()
+from config import settings
+from logger_config import setup_logger
+from exceptions import *
 
-# Enable CORS for all origins (for development; restrict in production)
+# Import optimized services
+from services import DatabaseService, StoryService, EmbeddingService, CacheService
+from services.database_service import db_service
+from services.story_service import story_service  
+from services.embedding_service import embedding_service
+from services.cache_service import cache_service
+
+# Import models
+from models.story_models import Story, Chapter
+from models.chat_models import ChatMessage, ChatResponse
+
+# Keep original imports for compatibility
+from story_chatbot import StoryChatbot
+from supabase import create_client, Client
+from typing import Optional
+
+logger = setup_logger(__name__)
+
+# Authentication
+auth_scheme = HTTPBearer()
+
+# Initialize services at startup
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan with service initialization."""
+    logger.info("Starting Bookology backend with optimized services...")
+    
+    try:
+        # Initialize async database pool
+        await db_service.initialize_async_pool(min_size=5, max_size=20)
+        
+        # Initialize cache service (Redis optional)
+        redis_url = settings.__dict__.get('REDIS_URL')
+        await cache_service.initialize_redis(redis_url)
+        
+        # Initialize embedding service
+        await embedding_service._ensure_initialized()
+        
+        # Initialize Supabase client
+        global supabase
+        supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+        logger.info("Supabase client initialized")
+        
+        logger.info("All services initialized successfully")
+        yield
+        
+    except Exception as e:
+        logger.error(f"Service initialization failed: {e}")
+        yield
+    finally:
+        # Cleanup
+        await db_service.close_async_pool()
+        logger.info("Application shutdown complete")
+
+# FastAPI app with lifespan
+app = FastAPI(
+    title="Bookology API - Optimized",
+    description="High-performance story generation and chat API with service layer architecture",
+    version="2.0.0",
+    lifespan=lifespan
+)
+
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins; change to your frontend URL in production
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Set up Jinja2 templates directory for HTML rendering
-templates = Jinja2Templates(directory="templates")
-
-# --- Supabase Client Initialization ---
-# Get Supabase credentials from environment variables
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
-# Create Supabase client for database operations
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# --- Pydantic Models for Request Validation ---
+# Keep original models for compatibility
 class StoryInput(BaseModel):
-    idea: str  # The user's story idea
-    format: str  # "book" or "movie"
-    generate_chapter: bool = False  # Whether to generate a chapter immediately
-
-class StorySaveInput(BaseModel):
-    story_outline: str  # The generated outline for the story
-    chapter_1_content: str  # The generated content for chapter 1
-    story_title: str  # The title of the story
+    idea: str = Field(..., min_length=10, max_length=500)
+    format: str = Field(..., pattern="^(book|movie)$")
+    
+    @field_validator('idea')
+    @classmethod
+    def validate_idea(cls, v):
+        if not v.strip():
+            raise ValueError("Story idea cannot be empty")
+        return v.strip()
 
 class ChapterInput(BaseModel):
-    story_id: int  # Foreign key to the story
-    chapter_number: int  # Chapter number in the story
-    content: str  # The actual chapter text
+    outline: str = Field(..., min_length=50)
+    chapter_number: int = Field(default=1, ge=1)
+
+class StorySaveInput(BaseModel):
+    story_outline: str = Field(..., min_length=50)
+    chapter_1_content: str = Field(..., min_length=100)
+    story_title: str = Field(..., min_length=1, max_length=200)
 
 class StoryChatRequest(BaseModel):
-    story_id: int
-    message: str
+    """Input model for story chat interactions."""
+    story_id: int = Field(..., gt=0, description="ID of the story to chat about")
+    message: str = Field(..., min_length=1, max_length=1000, description="User message")
 
-# --- Authentication Scheme ---
-auth_scheme = HTTPBearer()  # HTTP Bearer token authentication for protected endpoints
+# Initialize chatbot (keep for compatibility)
+story_chatbot = StoryChatbot()
 
-# --- API Endpoints ---
+# Initialize Supabase client globally
+supabase: Optional[Client] = None
 
-print("main.py loaded and running")
-
-def extract_total_chapters(outline_text):
-    match = re.search(r'Total number of chapters:\s*(\d+)', outline_text, re.IGNORECASE)
-    if match:
-        return int(match.group(1))
-    return None
-
-@app.get("/", response_class=HTMLResponse)
-def read_root(request: Request):
-    """
-    Serves the main HTML page for the Bookology app.
-    """
-    return templates.TemplateResponse("index.html", {"request": request})
-
-@app.post("/generate")
-def generate_story(data: StoryInput):
-    """
-    Generates a story outline (for books) or a movie script (for movies) based on the user's idea.
-    """
-    if data.format == "book":
-        # Generate a book outline using the prompt logic
-        result = book_prompt(data.idea)
-    elif data.format == "movie":
-        # Generate a movie script
-        result = generate_movie_script(data.idea)
-    else:
-        return {"error": "Invalid format"}
-    return {"expanded_prompt": result}
-
-@app.post("/generate_chapter")
-def generate_chapter(payload: dict = Body(...)):
-    """
-    Generates a book chapter from a given outline.
-    """
-    outline = payload.get("outline")
-    if not outline:
-        return {"error": "Missing outline"}
-    chapter = generate_book_from_outline(outline)
-    return {"chapter_1": chapter}
-
-@app.post("/lc_generate_outline")
-def lc_generate_outline(data: dict = Body(...)):
-    """
-    Generates a book outline using LangChain's LLM chain.
-    """
-    idea = data.get("idea")
-    story_id = data.get("story_id")  # Make sure frontend sends this!
-    if not idea:
-        return {"error": "Missing idea"}
-    result = generate_book_outline(idea)
-    total_chapters = extract_total_chapters(result)
-    if story_id and total_chapters:
-        supabase.table("Stories").update({"total_chapters": total_chapters}).eq("id", story_id).execute()
-    return {"expanded_prompt": result, "total_chapters": total_chapters}
-
-@app.post("/lc_generate_chapter")
-def lc_generate_chapter(data: dict = Body(...)):
-    """
-    Generates a chapter using LangChain's LLM chain from a given outline.
-    """
-    outline = data.get("outline")
-    if not outline:
-        return {"error": "Missing outline"}
-    result = generate_chapter_from_outline(outline)
-    return {"chapter_1": result}
-
-@app.post("/stories/save")
-def save_story(story_data: StorySaveInput, token: HTTPAuthorizationCredentials = Depends(auth_scheme), background_tasks: BackgroundTasks = None):
-    """
-    Saves a new story to the Stories table and also saves Chapter 1 to the Chapters table.
-    After saving Chapter 1, it splits the chapter into chunks, generates embeddings for each chunk,
-    and stores them in the chapter_chunks table for vector search and smart retrieval.
-    The chunking/embedding is run as a background task.
-    """
-    print("==== /stories/save endpoint called ====")  # Debug print
+# Authentication dependency (keep original for compatibility)
+async def get_authenticated_user(token = Depends(auth_scheme)):
+    """Get authenticated user - optimized version."""
     try:
-        # Verify the user's token to get their user data
+        # This would integrate with your existing auth system
+        # For now, keeping the original logic
+        from supabase import create_client
+        
+        supabase_url = settings.SUPABASE_URL
+        supabase_key = settings.SUPABASE_SERVICE_KEY
+        supabase = create_client(supabase_url, supabase_key)
+        
         user_response = supabase.auth.get_user(token.credentials)
         user = user_response.user
         
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid or expired token")
+            raise AuthorizationError("Invalid or expired token")
+        
+        return user
+        
+    except Exception as e:
+        logger.error(f"Authentication failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed"
+        )
 
-        # Prepare the data for insertion into Stories
-        data_to_insert = {
-            "user_id": user.id,
-            "story_outline": story_data.story_outline,
-            "story_title": story_data.story_title,
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Enhanced health check with service status."""
+    try:
+        # Check service health
+        story_stats = await story_service.get_service_stats()
+        embedding_stats = await embedding_service.get_service_stats()
+        cache_stats = cache_service.get_cache_stats()
+        
+        return {
+            "status": "healthy",
+            "version": "2.0.0",
+            "services": {
+                "database": {
+                    "async_pool": story_stats["database_pool_initialized"],
+                    "connection": "ok"
+                },
+                "cache": cache_stats,
+                "embeddings": {
+                    "initialized": embedding_stats["initialized"],
+                    "collection": embedding_stats["vectorstore_collection"]
+                },
+                "story_service": "ok"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "degraded", 
+            "error": str(e)
         }
 
-        # Insert the story into the 'Stories' table
-        response = supabase.table('Stories').insert(data_to_insert).execute()
-        story_id = response.data[0]["id"]
+# Optimized stories endpoint
+@app.get("/stories")
+async def get_user_stories_optimized(user = Depends(get_authenticated_user)):
+    """Get user stories with caching and async operations."""
+    logger.info(f"Fetching stories for user {user.id}")
+    
+    try:
+        stories = await story_service.get_user_stories(user.id)
+        
+        # Convert to API format
+        story_list = []
+        for story in stories:
+            story_list.append({
+                "id": story.id,
+                "title": story.title,
+                "outline": story.outline or "",
+                "created_at": story.created_at.isoformat(),
+                "source_table": story.source_table,
+                "chapter_count": story.current_chapter or 0
+            })
+        
+        return {"stories": story_list}
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch stories for user {user.id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch stories"
+        )
 
-        # --- NEW: Generate summary for chapter 1 ---
-        print("[DEBUG] Generating summary for chapter 1...")
-        summary = generate_summary(story_data.chapter_1_content)
-        print("[DEBUG] Summary generated.")
+# Optimized embedding endpoint
+@app.post("/stories/{story_id}/ensure_embeddings")
+async def ensure_story_embeddings_optimized(
+    story_id: int, 
+    user = Depends(get_authenticated_user)
+):
+    """Ensure embeddings exist with async operations and caching."""
+    logger.info(f"Ensuring embeddings for story {story_id}")
+    
+    try:
+        # Verify user has access to this story
+        story = await story_service.get_story(story_id, user.id)
+        if not story:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Story not found"
+            )
+        
+        # Ensure embeddings
+        result = await embedding_service.ensure_embeddings(story_id)
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to ensure embeddings for story {story_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to ensure embeddings"
+        )
 
-        # Insert chapter 1 into Chapters table WITH summary
-        chapter_data = {
+# Optimized chat endpoint
+@app.post("/story_chat")
+async def story_chat_optimized(body: StoryChatRequest, user = Depends(get_authenticated_user)):
+    """Process story chat with optimized embedding lookup."""
+    logger.info(f"Story chat request from user {user.id} for story {body.story_id}")
+    
+    try:
+        # Verify story access
+        story = await story_service.get_story(body.story_id, user.id)
+        if not story:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Story not found"
+            )
+        
+        # Ensure embeddings exist
+        await embedding_service.ensure_embeddings(body.story_id)
+        
+        # Process chat with proper type conversion
+        response = story_chatbot.chat(
+            str(user.id),
+            str(body.story_id),  # Convert int to str for chatbot
+            body.message
+        )
+        
+        logger.info("Story chat response generated successfully")
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Story chat failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Chat processing failed"
+        )
+
+# Original story generation endpoints for compatibility
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    """Root endpoint."""
+    return HTMLResponse(content="<h1>Bookology API - Optimized v2.0</h1><p>Visit /docs for API documentation</p>")
+
+@app.post("/lc_generate_outline")
+async def generate_outline_endpoint(story: StoryInput):
+    """Generate story outline."""
+    try:
+        from lc_book_generator import BookStoryGenerator
+        generator = BookStoryGenerator()
+        
+        if story.format == "book":
+            result = generator.generate_book_outline(story.idea)
+        else:
+            result = generator.generate_movie_outline(story.idea)
+            
+        return {"expanded_prompt": result}
+    except Exception as e:
+        logger.error(f"Outline generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/lc_generate_chapter")
+async def generate_chapter_endpoint(chapter: ChapterInput):
+    """Generate story chapter."""
+    try:
+        from lc_book_generator import BookStoryGenerator
+        generator = BookStoryGenerator()
+        
+        result = generator.generate_chapter(chapter.outline, chapter.chapter_number)
+        return {"chapter": result}
+    except Exception as e:
+        logger.error(f"Chapter generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/stories/save")
+async def save_story_endpoint(
+    story_data: StorySaveInput,
+    background_tasks: BackgroundTasks,
+    user = Depends(get_authenticated_user)
+):
+    """Save story with background embedding generation."""
+    logger.info(f"Saving story: {story_data.story_title}")
+    
+    try:
+        # Use Supabase client for saving
+        story_insert_data = {
+            "user_id": user.id,
+            "story_title": story_data.story_title,
+            "story_outline": story_data.story_outline,
+            "total_chapters": 1,
+            "current_chapter": 1,
+        }
+        
+        story_response = supabase.table("Stories").insert(story_insert_data).execute()
+        story_id = story_response.data[0]["id"]
+        
+        # Insert chapter 1
+        chapter_insert_data = {
             "story_id": story_id,
             "chapter_number": 1,
             "content": story_data.chapter_1_content,
-            "summary": summary
         }
-        chapter_result = supabase.table("Chapters").insert(chapter_data).execute()
-        if not chapter_result.data or "id" not in chapter_result.data[0]:
-            raise HTTPException(status_code=500, detail="Failed to save chapter 1")
-        chapter_id = chapter_result.data[0]["id"]
-
-        print(f"[Main thread] Scheduling embedding function for chapter_id: {chapter_id}")  # Debug print
-        if background_tasks is not None:
-            background_tasks.add_task(embed_and_store_chunks, chapter_id, story_data.chapter_1_content)
-            print("[Main thread] Embedding task added to background tasks queue.")
-        else:
-            print("[Main thread] BackgroundTasks not available, running synchronously.")
-            embed_and_store_chunks(chapter_id, story_data.chapter_1_content)
-
-        return {"message": "Story and Chapter 1 saved successfully! Embedding will be processed in the background.", "story_id": story_id, "chapter_id": chapter_id}
-
-    except Exception as e:
-        print("Save story error:", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/save_chapter/")
-def save_chapter_endpoint(chapter: ChapterInput):
-    """
-    Saves a chapter to the Chapters table with auto-generated summary and embeddings.
-    This enables vector search and smart retrieval for long chapters.
-    NOTE: This endpoint is deprecated. Use /save_chapter_with_summary instead.
-    """
-    try:
-        print(f"[DEBUG] Using deprecated /save_chapter/ endpoint. Generating summary and embeddings...")
         
-        # Generate summary for the chapter
-        summary = generate_summary(chapter.content)
+        chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
+        chapter_id = chapter_response.data[0]["id"]
         
-        # Insert chapter with summary
-        data = {
-            "story_id": chapter.story_id,
-            "chapter_number": chapter.chapter_number,
-            "content": chapter.content,
-            "summary": summary
-        }
-        result = supabase.table("Chapters").insert(data).execute()
-        if not result.data or "id" not in result.data[0]:
-            raise HTTPException(status_code=500, detail="Failed to save chapter")
-        chapter_id = result.data[0]["id"]
-
-        # Chunk, embed, and store chapter content for vector search
-        embed_and_store_chunks(chapter_id, chapter.content)
+        # Generate embeddings in background for optimization
+        background_tasks.add_task(
+            embedding_service.create_embeddings_async,
+            story_id,
+            False
+        )
+        
+        # Invalidate user cache
+        background_tasks.add_task(
+            story_service.invalidate_user_cache,
+            user.id
+        )
         
         return {
-            "message": f"Chapter {chapter.chapter_number} saved with summary and embeddings!", 
-            "chapter_id": chapter_id,
-            "note": "This endpoint is deprecated. Use /save_chapter_with_summary instead."
-        }
-    except Exception as e:
-        print(f"Error in save_chapter_endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/generate_next_chapter")
-async def generate_next_chapter_endpoint(request: Request):
-    """
-    Expects JSON:
-    {
-        "story_id": int,
-        "chapter_number": int
-    }
-    """
-    data = await request.json()
-    story_id = data["story_id"]
-    chapter_number = data["chapter_number"]
-
-    next_chapter = generate_next_chapter(story_id, chapter_number)
-    return {"chapter": next_chapter}
-
-@app.post("/save_chapter_with_summary")
-async def save_chapter_with_summary(request: Request):
-    """
-    Saves a chapter to the Chapters table with an auto-generated summary and embeddings.
-    Expects JSON:
-    {
-        "story_id": int,
-        "chapter_number": int,
-        "content": str
-    }
-    """
-    try:
-        data = await request.json()
-        story_id = data["story_id"]
-        chapter_number = data["chapter_number"]
-        chapter_text = data["content"]
-
-        print(f"[DEBUG] Saving chapter {chapter_number} with summary and embeddings...")
-        chapter_id = save_chapter(story_id, chapter_number, chapter_text)
-        print(f"[DEBUG] Chapter {chapter_number} saved successfully with chapter_id: {chapter_id}")
-        
-        return {
-            "status": "success", 
-            "message": f"Chapter {chapter_number} saved with summary and embeddings!",
+            "message": "Story saved successfully!",
+            "story_id": story_id,
             "chapter_id": chapter_id
         }
+        
     except Exception as e:
-        print(f"Error saving chapter with summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Story saving failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save story")
 
-@app.post("/story_chat")
-async def story_chat_endpoint(
-    body: StoryChatRequest,
-    token: HTTPAuthorizationCredentials = Depends(auth_scheme)
-):
-    """
-    Chat with your story - ask questions, request modifications, or create multiverse connections.
-    Expects JSON:
-    {
-        "story_id": int,
-        "message": str
-    }
-    """
+# Performance monitoring endpoint
+@app.get("/admin/performance")
+async def get_performance_stats(user = Depends(get_authenticated_user)):
+    """Get detailed performance statistics."""
     try:
-        print(f"[DEBUG] Story chat endpoint called with story_id: {body.story_id}, message: {body.message}")
+        story_stats = await story_service.get_service_stats()
+        embedding_stats = await embedding_service.get_service_stats()
         
-        # Verify user authentication
-        print(f"[DEBUG] Verifying user authentication...")
-        user_response = supabase.auth.get_user(token.credentials)
-        user = user_response.user
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid or expired token")
-        
-        print(f"[DEBUG] User authenticated: {user.id}")
-        story_id = body.story_id
-        message = body.message
-        if not story_id or not message:
-            raise HTTPException(status_code=400, detail="Missing story_id or message")
-        
-        # Process the chat request
-        print(f"[DEBUG] Calling story_chatbot.chat...")
-        response = story_chatbot.chat(str(user.id), str(story_id), message)
-        print(f"[DEBUG] Chat response received: {response}")
-        return response
+        return {
+            "story_service": story_stats,
+            "embedding_service": embedding_stats,
+            "timestamp": asyncio.get_event_loop().time()
+        }
     except Exception as e:
-        print(f"Story chat error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Performance stats failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get performance stats"
+        )
+
+# Cache management endpoint
+@app.post("/admin/cache/clear")
+async def clear_cache(pattern: str = "", user = Depends(get_authenticated_user)):
+    """Clear cache by pattern."""
+    try:
+        if pattern:
+            await cache_service.clear_pattern(pattern)
+            return {"message": f"Cleared cache pattern: {pattern}"}
+        else:
+            # Clear all memory cache
+            cache_service._memory_cache.clear()
+            return {"message": "Cleared memory cache"}
+    except Exception as e:
+        logger.error(f"Cache clear failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clear cache"
+        )
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    logger.info(f"Starting optimized server on {settings.HOST}:{settings.PORT}")
+    uvicorn.run(
+        "main_optimized:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.RELOAD,
+        log_level="debug" if settings.DEBUG else "info"
+    )

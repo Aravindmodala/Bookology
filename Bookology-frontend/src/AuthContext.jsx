@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseEnabled, mockAuth } from './supabaseClient';
 
 const AuthContext = createContext();
 
@@ -20,24 +20,45 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      try {
+        if (isSupabaseEnabled && supabase) {
+          const { data: { session } } = await supabase.auth.getSession();
+          setSession(session);
+          setUser(session?.user ?? null);
+        } else {
+          // Use mock auth when Supabase is not configured
+          console.warn('Supabase not configured, using mock auth for development');
+          setSession(null);
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+        setSession(null);
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
     };
 
     getSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
+    let authListener = null;
+    
+    if (isSupabaseEnabled && supabase) {
+      const { data } = supabase.auth.onAuthStateChange(
+        (event, session) => {
+          setSession(session);
+          setUser(session?.user ?? null);
+          setLoading(false);
+        }
+      );
+      authListener = data;
+    }
 
     return () => {
-      authListener.subscription.unsubscribe();
+      if (authListener) {
+        authListener.subscription.unsubscribe();
+      }
     };
   }, []);
 
@@ -45,7 +66,13 @@ export const AuthProvider = ({ children }) => {
     session,
     user,
     loading,
-    signOut: () => supabase.auth.signOut(),
+    isSupabaseEnabled,
+    signOut: () => {
+      if (isSupabaseEnabled && supabase) {
+        return supabase.auth.signOut();
+      }
+      return Promise.resolve();
+    },
   };
 
   return (

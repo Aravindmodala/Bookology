@@ -4,6 +4,7 @@ import Generator from './generator';
 import BookologyHome from './bookologyhome';
 import Auth from './Auth';
 import { AuthProvider } from './AuthContext';
+import ErrorBoundary from './ErrorBoundary';
 
 function HomeWrapper() {
   const navigate = useNavigate();
@@ -12,15 +13,17 @@ function HomeWrapper() {
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <Routes>
-          <Route path="/" element={<HomeWrapper />} />
-          <Route path="/generator" element={<Generator />} />
-          <Route path="/login" element={<Auth />} />
-        </Routes>
-      </Router>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <Router>
+          <Routes>
+            <Route path="/" element={<HomeWrapper />} />
+            <Route path="/generator" element={<Generator />} />
+            <Route path="/login" element={<Auth />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

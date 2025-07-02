@@ -8,7 +8,7 @@
 // - On success, updates AuthContext and redirects to the main app.
 //
 import React, { useState, useEffect } from 'react'
-import { supabase } from './supabaseClient'
+import { supabase, isSupabaseEnabled } from './supabaseClient'
 import { useAuth } from './AuthContext'
 import { useNavigate } from 'react-router-dom'
 
@@ -22,9 +22,11 @@ export default function Auth() {
 
   // Debug: Force sign out on mount to clear any stale session
   useEffect(() => {
-    supabase.auth.signOut().then(() => {
-      console.log('Forced sign out on mount (debug)');
-    });
+    if (isSupabaseEnabled && supabase) {
+      supabase.auth.signOut().then(() => {
+        console.log('Forced sign out on mount (debug)');
+      });
+    }
   }, []);
 
   const [isSignUp, setIsSignUp] = useState(false);
@@ -46,6 +48,13 @@ export default function Auth() {
     e.preventDefault();
     setError('');
     setFormLoading(true);
+    
+    if (!isSupabaseEnabled || !supabase) {
+      setError('Authentication is not configured. Please check your environment variables.');
+      setFormLoading(false);
+      return;
+    }
+    
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) setError(error.message);
     setFormLoading(false);
@@ -58,6 +67,13 @@ export default function Auth() {
       setError('Passwords do not match!');
       return;
     }
+    
+    if (!isSupabaseEnabled || !supabase) {
+      setError('Authentication is not configured. Please check your environment variables.');
+      setFormLoading(false);
+      return;
+    }
+    
     setFormLoading(true);
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) setError(error.message);
@@ -68,6 +84,13 @@ export default function Auth() {
   // Add social login handler
   const signInWithProvider = async (provider) => {
     setFormLoading(true);
+    
+    if (!isSupabaseEnabled || !supabase) {
+      setError('Authentication is not configured. Please check your environment variables.');
+      setFormLoading(false);
+      return;
+    }
+    
     const { error } = await supabase.auth.signInWithOAuth({ provider });
     if (error) setError(error.message);
     setFormLoading(false);
@@ -75,6 +98,12 @@ export default function Auth() {
 
   return (
     <div className="min-h-screen w-screen bg-black flex items-center justify-center">
+      {/* Development Notice */}
+      {!isSupabaseEnabled && (
+        <div className="absolute top-0 left-0 right-0 bg-yellow-600/20 border-b border-yellow-500/50 text-yellow-200 px-4 py-2 text-center text-sm">
+          ⚠️ Development Mode: Authentication not configured. Please set up Supabase environment variables.
+        </div>
+      )}
       <div className="bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl p-10 w-full max-w-md border border-white/20 flex flex-col items-center">
         <h1 className="text-4xl font-serif font-bold text-white mb-4">
           {isSignUp ? 'Sign Up' : 'Login'}
@@ -101,6 +130,24 @@ export default function Auth() {
         <p className="text-white/60 mb-6">
           {isSignUp ? 'Fill in the details to get started' : 'Sign in to continue'}
         </p>
+        
+        {/* Development Mode Bypass */}
+        {!isSupabaseEnabled && (
+          <div className="w-full mb-6">
+            <button
+              onClick={() => {
+                console.log('Development mode: bypassing authentication');
+                navigate('/');
+              }}
+              className="w-full py-3 rounded-full bg-green-600/80 text-white font-bold shadow hover:bg-green-700 transition-all border border-green-500"
+            >
+              🚀 Continue in Development Mode
+            </button>
+            <p className="text-xs text-white/50 text-center mt-2">
+              Skip authentication for development/testing
+            </p>
+          </div>
+        )}
         
         <div className="relative w-full my-4">
           <div className="absolute inset-0 flex items-center">

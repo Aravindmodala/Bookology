@@ -155,9 +155,17 @@ function Footer() {
 
 // Main Home Component
 export default function BookologyHome({ onStart }) {
+  const { isSupabaseEnabled } = useAuth();
+  
   return (
     <div className="min-h-screen w-screen bg-black text-white font-serif">
       <Navbar />
+      {/* Development Notice */}
+      {!isSupabaseEnabled && (
+        <div className="bg-yellow-600/20 border border-yellow-500/50 text-yellow-200 px-4 py-2 text-center text-sm">
+          ⚠️ Development Mode: Supabase not configured. Some features may be limited.
+        </div>
+      )}
       <div className="pt-24">
         <HeroSection onStart={onStart} />
         <HowItWorks />
