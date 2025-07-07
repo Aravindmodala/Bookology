@@ -147,18 +147,43 @@ export default function Generator() {
     setChapter('');
     setSaveSuccess('');
     setSaveError('');
+    
+    // Get the user's JWT token from AuthContext
+    const token = session?.access_token;
+    
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      
+      // Add auth header if user is logged in (for auto-save functionality)
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
       const response = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_OUTLINE), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           idea,
           story_id: storyId
         })
       });
       const data = await response.json();
+      
       if (data.expanded_prompt) {
         setResult(data.expanded_prompt);
+        
+        // Handle auto-save feedback
+        if (data.auto_saved) {
+          setSaveSuccess('✅ Outline auto-saved! You can continue generating chapters.');
+          if (data.story_id) {
+            setStoryId(data.story_id);
+          }
+        } else if (token) {
+          // User was authenticated but save failed
+          setSaveError('⚠️ Outline generated but auto-save failed. You can still save manually later.');
+        }
+        // If no token, user is anonymous - no save message needed
+        
       } else if (data.error) {
         setError(data.error);
       } else {
