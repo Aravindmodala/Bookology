@@ -94,12 +94,12 @@ class DatabaseService:
             try:
                 row = await conn.fetchrow(query, *params)
                 if row:
-                    return Story.from_stories_table(dict(row))
+                    return Story.from_Stories_table(dict(row))
             except Exception as e:
                 logger.warning(f"Could not query Stories table: {e}")
             
-            # Try stories table
-            query = 'SELECT * FROM stories WHERE id = $1'
+            # Try Stories table
+            query = 'SELECT * FROM Stories WHERE id = $1'
             params = [story_id]
             
             if user_id:
@@ -109,9 +109,9 @@ class DatabaseService:
             try:
                 row = await conn.fetchrow(query, *params)
                 if row:
-                    return Story.from_stories_lowercase(dict(row))
+                    return Story.from_Stories_lowercase(dict(row))
             except Exception as e:
-                logger.warning(f"Could not query stories table: {e}")
+                logger.warning(f"Could not query Stories table: {e}")
             
             return None
     
@@ -133,12 +133,12 @@ class DatabaseService:
                     if row:
                         columns = [desc[0] for desc in cur.description]
                         data = dict(zip(columns, row))
-                        return Story.from_stories_table(data)
+                        return Story.from_Stories_table(data)
                 except Exception as e:
                     logger.warning(f"Could not query Stories table: {e}")
                 
-                # Try stories table
-                query = 'SELECT * FROM stories WHERE id = %s'
+                # Try Stories table
+                query = 'SELECT * FROM Stories WHERE id = %s'
                 params = [story_id]
                 
                 if user_id:
@@ -151,15 +151,15 @@ class DatabaseService:
                     if row:
                         columns = [desc[0] for desc in cur.description]
                         data = dict(zip(columns, row))
-                        return Story.from_stories_lowercase(data)
+                        return Story.from_Stories_lowercase(data)
                 except Exception as e:
-                    logger.warning(f"Could not query stories table: {e}")
+                    logger.warning(f"Could not query Stories table: {e}")
                 
                 return None
     
-    async def get_chapters_async(self, story_id: int) -> List[Chapter]:
-        """Get all chapters for a story asynchronously."""
-        chapters = []
+    async def get_Chapters_async(self, story_id: int) -> List[Chapter]:
+        """Get all Chapters for a story asynchronously."""
+        Chapters = []
         
         async with self.get_async_connection() as conn:
             # Try Chapters table first
@@ -169,29 +169,29 @@ class DatabaseService:
                     story_id
                 )
                 for row in rows:
-                    chapters.append(Chapter.from_chapters_table(dict(row)))
+                    Chapters.append(Chapter.from_Chapters_table(dict(row)))
                 
-                if chapters:
-                    return chapters
+                if Chapters:
+                    return Chapters
             except Exception as e:
                 logger.warning(f"Could not query Chapters table: {e}")
             
-            # Try chapters table
+            # Try Chapters table
             try:
                 rows = await conn.fetch(
-                    'SELECT * FROM chapters WHERE story_id = $1 ORDER BY chapter_number',
+                    'SELECT * FROM Chapters WHERE story_id = $1 ORDER BY chapter_number',
                     story_id
                 )
                 for row in rows:
-                    chapters.append(Chapter.from_chapters_lowercase(dict(row)))
+                    Chapters.append(Chapter.from_Chapters_lowercase(dict(row)))
             except Exception as e:
-                logger.warning(f"Could not query chapters table: {e}")
+                logger.warning(f"Could not query Chapters table: {e}")
         
-        return chapters
+        return Chapters
     
-    def get_chapters_sync(self, story_id: int) -> List[Chapter]:
-        """Get all chapters for a story synchronously."""
-        chapters = []
+    def get_Chapters_sync(self, story_id: int) -> List[Chapter]:
+        """Get all Chapters for a story synchronously."""
+        Chapters = []
         
         with self.get_sync_connection() as conn:
             with conn.cursor() as cur:
@@ -206,17 +206,17 @@ class DatabaseService:
                     
                     for row in rows:
                         data = dict(zip(columns, row))
-                        chapters.append(Chapter.from_chapters_table(data))
+                        Chapters.append(Chapter.from_Chapters_table(data))
                     
-                    if chapters:
-                        return chapters
+                    if Chapters:
+                        return Chapters
                 except Exception as e:
                     logger.warning(f"Could not query Chapters table: {e}")
                 
-                # Try chapters table
+                # Try Chapters table
                 try:
                     cur.execute(
-                        'SELECT * FROM chapters WHERE story_id = %s ORDER BY chapter_number',
+                        'SELECT * FROM Chapters WHERE story_id = %s ORDER BY chapter_number',
                         [story_id]
                     )
                     rows = cur.fetchall()
@@ -224,15 +224,15 @@ class DatabaseService:
                     
                     for row in rows:
                         data = dict(zip(columns, row))
-                        chapters.append(Chapter.from_chapters_lowercase(data))
+                        Chapters.append(Chapter.from_Chapters_lowercase(data))
                 except Exception as e:
-                    logger.warning(f"Could not query chapters table: {e}")
+                    logger.warning(f"Could not query Chapters table: {e}")
         
-        return chapters
+        return Chapters
     
-    async def get_user_stories_async(self, user_id: uuid.UUID) -> List[Story]:
-        """Get all stories for a user asynchronously."""
-        stories = []
+    async def get_user_Stories_async(self, user_id: uuid.UUID) -> List[Story]:
+        """Get all Stories for a user asynchronously."""
+        Stories = []
         
         async with self.get_async_connection() as conn:
             # Get from Stories table
@@ -242,25 +242,25 @@ class DatabaseService:
                     user_id
                 )
                 for row in rows:
-                    stories.append(Story.from_stories_table(dict(row)))
+                    Stories.append(Story.from_Stories_table(dict(row)))
             except Exception as e:
                 logger.warning(f"Could not query Stories table: {e}")
             
-            # Get from stories table (avoid duplicates)
+            # Get from Stories table (avoid duplicates)
             try:
                 rows = await conn.fetch(
-                    'SELECT * FROM stories WHERE user_id = $1 ORDER BY created_at DESC',
+                    'SELECT * FROM Stories WHERE user_id = $1 ORDER BY created_at DESC',
                     user_id
                 )
-                existing_ids = {story.id for story in stories}
+                existing_ids = {story.id for story in Stories}
                 for row in rows:
-                    story = Story.from_stories_lowercase(dict(row))
+                    story = Story.from_Stories_lowercase(dict(row))
                     if story.id not in existing_ids:
-                        stories.append(story)
+                        Stories.append(story)
             except Exception as e:
-                logger.warning(f"Could not query stories table: {e}")
+                logger.warning(f"Could not query Stories table: {e}")
         
-        return stories
+        return Stories
 
 # Global database service instance
 db_service = DatabaseService()

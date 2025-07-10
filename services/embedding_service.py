@@ -144,24 +144,24 @@ class EmbeddingService:
                 logger.info(f"Embeddings already exist for story {story_id}")
                 return True
             
-            # Get story with chapters
-            story_with_chapters = await self.story_service.get_story_with_chapters(story_id)
-            if not story_with_chapters:
+            # Get story with Chapters
+            story_with_Chapters = await self.story_service.get_story_with_Chapters(story_id)
+            if not story_with_Chapters:
                 logger.error(f"Story {story_id} not found")
                 return False
             
-            if not story_with_chapters.chapters:
-                logger.warning(f"No chapters found for story {story_id}")
+            if not story_with_Chapters.Chapters:
+                logger.warning(f"No Chapters found for story {story_id}")
                 return False
             
             # Delete existing embeddings if recreating
             if force_recreate:
                 await self._delete_embeddings(story_id)
             
-            # Process chapters in batches for better performance
+            # Process Chapters in batches for better performance
             all_documents = []
             
-            for chapter in story_with_chapters.chapters:
+            for chapter in story_with_Chapters.Chapters:
                 logger.debug(f"Processing chapter {chapter.chapter_number} for story {story_id}")
                 
                 # Split chapter content into chunks
@@ -175,7 +175,7 @@ class EmbeddingService:
                             "chapter_id": str(chapter.id),
                             "chapter_number": str(chapter.chapter_number),
                             "chapter_title": chapter.title or f"Chapter {chapter.chapter_number}",
-                            "story_title": story_with_chapters.story.title,
+                            "story_title": story_with_Chapters.story.title,
                             "chunk_index": i,
                             "chunk_type": "chapter_content",
                             "source_table": chapter.source_table

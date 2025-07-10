@@ -94,11 +94,11 @@ python main.py
 
 ### Core Endpoints
 - `GET /health` - Health check with service status
-- `GET /stories` - Get user stories with caching
+- `GET /Stories` - Get user Stories with caching
 - `POST /story_chat` - AI-powered story interaction
 - `POST /lc_generate_outline` - Generate story outlines
-- `POST /lc_generate_chapter` - Generate story chapters
-- `POST /stories/save` - Save stories with background embedding generation
+- `POST /lc_generate_chapter` - Generate story Chapters
+- `POST /Stories/save` - Save Stories with background embedding generation
 
 ### Admin Endpoints
 - `GET /admin/performance` - Performance statistics

@@ -82,7 +82,7 @@ class StoryNotFoundError(BookologyBaseException):
     Raised when a requested story is not found.
     
     This exception is raised when operations are attempted on
-    stories that don't exist or are not accessible.
+    Stories that don't exist or are not accessible.
     """
     pass
 

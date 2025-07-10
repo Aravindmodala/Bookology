@@ -53,7 +53,7 @@ const StoryChatbot = ({ storyId, storyTitle }) => {
       {
         id: Date.now(),
         type: 'bot',
-        content: `Hi! I'm your story assistant for "${storyTitle}". You can ask me questions about your story, request modifications, or explore multiverse connections with your other stories. What would you like to know?`,
+        content: `Hi! I'm your story assistant for "${storyTitle}". You can ask me questions about your story, request modifications, or explore multiverse connections with your other Stories. What would you like to know?`,
         timestamp: new Date().toLocaleTimeString()
       }
     ]);
@@ -245,7 +245,7 @@ const StoryChatbot = ({ storyId, storyTitle }) => {
         
         {/* Helper Text */}
         <div className="mt-2 text-xs text-gray-400">
-          💡 Try: "What happens in chapter 2?" • "Change the main character's name to Alex" • "Connect this story with my other stories"
+          💡 Try: "What happens in chapter 2?" • "Change the main character's name to Alex" • "Connect this story with my other Stories"
         </div>
       </div>
     </div>

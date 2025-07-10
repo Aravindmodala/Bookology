@@ -1,5 +1,5 @@
-from langchain_openai import OpenAI
-from langchain.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain.chains import LLMChain
 from dotenv import load_dotenv
 import os
@@ -9,40 +9,67 @@ from typing import Dict, Any, List, Optional
 # Load environment variables from .env
 load_dotenv()
 
-# Initialize the LLM (OpenAI model)
-llm = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o-mini', temperature=0.7, max_tokens=3000)
+# Initialize the LLM (OpenAI Chat model - correct for GPT-4o-mini)
+llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o-mini', temperature=0.7, max_tokens=3000)
 
-# Create a prompt template
-prompt = PromptTemplate(
-    input_variables=["idea"],
-    template="""You are a professional book author, creative writing coach, and world-class storyteller who deeply understands user ideas and adapts to their emotional tone, genre, and desired atmosphere.
+# Create system message template (role and instructions)
+system_template = system_template = """
+You are a world-famous novelist, creative writing coach, and master storyteller with the following expertise:
 
-Your task is to analyze the user's idea carefully and **adapt your output to match its genre, emotion, pacing, and narrative needs**.
+🎭 ROLE & EXPERTISE:
+- Bestselling author with mastery across genres
+- You think like world-renowned authors relevant to the user's genre:
+    - Fantasy: J.R.R. Tolkien, Neil Gaiman, Madeline Miller
+    - Sci-Fi: Isaac Asimov, Philip K. Dick, Margaret Atwood
+    - Thriller: Stephen King, Gillian Flynn, Dan Brown
+    - Mystery: Agatha Christie, Arthur Conan Doyle
+    - Romance: Jane Austen, Nicholas Sparks
+    - Historical Fiction: Hilary Mantel, Ken Follett
+    - Literary Fiction: Kazuo Ishiguro, Haruki Murakami
+    - Horror: Stephen King, Shirley Jackson
+    - Young Adult: Suzanne Collins, Rick Riordan
+    - Children's Literature: Roald Dahl, C.S. Lewis
+- Expert in layered character development, world-building, and emotional resonance
 
-**GOALS:**
-✅ Think like a professional book author (or a famous author if specified).  
-✅ Deeply understand the **emotional DNA** of the user's idea.  
-✅ Match **tone, style, and genre** aligned with the user's intention.  
-✅ Build a compelling, structured book outline to guide seamless chapter generation.
+📊 ANALYSIS CAPABILITIES:
+- Automatically detect and classify genre from user input
+- Select matching authors to emulate narrative style, tone, and pacing
+- Generate genre-consistent story structures with compelling chapter progression
 
----
+🎯 YOUR TASK:
+Analyze the user’s story idea, determine its genre, and generate a comprehensive, structured book outline emulating the style, tone, and pacing of the world-famous authors associated with that genre.
 
-**INPUT (User Idea):**
+
+📋 OUTPUT REQUIREMENTS:
+- Return ONLY valid, parseable JSON
+- No markdown formatting, explanations, or commentary
+- Follow the exact JSON structure provided
+- Fill all fields meaningfully with engaging, professional detail
+
+🚫 DO NOT:
+- Add text outside the JSON structure
+- Include markdown code blocks
+- Provide commentary or placeholders
+
+Generate outlines with the narrative quality and emotional depth of bestselling novels aligned with the detected genre.
+"""
+
+# Create user message template (the actual request)
+user_template = """Please analyze this story idea and create a comprehensive, structured book outline:
+
+💡 STORY IDEA:
 {idea}
 
----
+📝 ANALYSIS STEPS:
+1. Automatically detect the core genre (Fantasy, Thriller, Romance, Sci-Fi, etc.) from the idea.
+2. Determine the emotional tone (Dark, hopeful, mysterious, playful, tense).
+3. Select an appropriate narrative style (Cinematic, fast-paced, poetic, minimalistic).
+4. Identify world-famous authors aligned with the detected genre and emulate their narrative style, tone, and pacing while creating the outline.
+5. Build compelling characters and layered conflicts.
+6. Structure a logical, professional chapter progression.
 
-**ANALYZE:**
-- What is the core genre? (Thriller, Fantasy, Romance, Sci-Fi, etc.)
-- What is the emotional tone? (Dark, hopeful, mysterious, playful, tense)
-- What narrative style suits the idea? (Cinematic, fast-paced, poetic, minimalistic)
 
----
-
-**OUTPUT:**
-Return **only valid, parseable JSON** for Bookology, without additional commentary.
-
-**JSON Structure:**
+📄 RETURN FORMAT (JSON ONLY):
 {{
   "book_title": "",
   "genre": "",
@@ -69,7 +96,7 @@ Return **only valid, parseable JSON** for Bookology, without additional commenta
   "conflict": "",
   "tone_keywords": [],
   "writing_guidelines": "",
-  "chapters": [
+  "Chapters": [
     {{
       "chapter_number": 1,
       "chapter_title": "",
@@ -79,9 +106,16 @@ Return **only valid, parseable JSON** for Bookology, without additional commenta
     }}
   ]
 }}
+"""
 
-IMPORTANT: Output ONLY the JSON, no markdown formatting, no extra text, no explanations."""
-)
+# Create the chat prompt template
+system_message_prompt = SystemMessagePromptTemplate.from_template(system_template)
+human_message_prompt = HumanMessagePromptTemplate.from_template(user_template)
+
+prompt = ChatPromptTemplate.from_messages([
+    system_message_prompt,
+    human_message_prompt
+])
 
 # Build the chain
 chain = prompt | llm
@@ -90,6 +124,8 @@ def parse_json_response(response_text: str) -> Optional[Dict[str, Any]]:
     """
     Parse JSON response from LLM, handling common formatting issues.
     """
+    import re
+    
     try:
         # Clean up the response
         cleaned_text = response_text.strip()
@@ -105,14 +141,49 @@ def parse_json_response(response_text: str) -> Optional[Dict[str, Any]]:
         # Remove any leading/trailing whitespace
         cleaned_text = cleaned_text.strip()
         
+        # CRITICAL FIX: Handle trailing commas and other JSON formatting issues
+        # Remove trailing commas before closing braces and brackets
+        cleaned_text = re.sub(r',(\s*[}\]])', r'\1', cleaned_text)
+        
+        # Remove any trailing commas at the end of objects or arrays
+        cleaned_text = re.sub(r',(\s*})', r'\1', cleaned_text)
+        cleaned_text = re.sub(r',(\s*])', r'\1', cleaned_text)
+        
         # Parse JSON
         parsed_json = json.loads(cleaned_text)
         return parsed_json
         
     except json.JSONDecodeError as e:
         print(f"JSON parsing error: {e}")
-        print(f"Raw response: {response_text}")
-        return None
+        print(f"Raw response: {response_text[:500]}...")
+        
+        # Try one more time with even more aggressive cleaning
+        try:
+            # More aggressive comma removal
+            cleaned_text = response_text.strip()
+            
+            # Remove markdown blocks
+            if cleaned_text.startswith("```json"):
+                cleaned_text = cleaned_text[7:]
+            if cleaned_text.startswith("```"):
+                cleaned_text = cleaned_text[3:]
+            if cleaned_text.endswith("```"):
+                cleaned_text = cleaned_text[:-3]
+            
+            cleaned_text = cleaned_text.strip()
+            
+            # Remove ALL trailing commas more aggressively
+            cleaned_text = re.sub(r',\s*([}\]])', r'\1', cleaned_text)
+            
+            # Try parsing again
+            parsed_json = json.loads(cleaned_text)
+            print(f"✅ JSON parsed successfully after aggressive cleaning")
+            return parsed_json
+            
+        except json.JSONDecodeError as e2:
+            print(f"❌ JSON parsing failed even after aggressive cleaning: {e2}")
+            return None
+        
     except Exception as e:
         print(f"Unexpected error parsing JSON: {e}")
         return None
@@ -149,13 +220,13 @@ def extract_metadata(outline_json: Dict[str, Any]) -> Dict[str, Any]:
         "writing_guidelines": outline_json.get("writing_guidelines", ""),
         
         # Chapter info
-        "chapters": outline_json.get("chapters", []),
-        "chapter_count": len(outline_json.get("chapters", [])),
+        "Chapters": outline_json.get("Chapters", []),
+        "chapter_count": len(outline_json.get("Chapters", [])),
         
         # Calculated metadata
         "total_estimated_words": sum(
             chapter.get("estimated_word_count", 0) 
-            for chapter in outline_json.get("chapters", [])
+            for chapter in outline_json.get("Chapters", [])
         ),
         "estimated_reading_time_hours": 0,  # Will calculate based on word count
     }
@@ -169,8 +240,8 @@ def extract_metadata(outline_json: Dict[str, Any]) -> Dict[str, Any]:
 
 def format_json_to_display_text(outline_json: Dict[str, Any]) -> str:
     """
-    Convert JSON outline to a nicely formatted text display for the frontend.
-    Uses static field labels with dynamic JSON data.
+    Convert JSON outline to a SIMPLE formatted text display for the frontend.
+    Only shows: Title, Genre, Characters, and Chapter summaries (no word counts or cliffhangers).
     """
     try:
         if not outline_json:
@@ -181,103 +252,41 @@ def format_json_to_display_text(outline_json: Dict[str, Any]) -> str:
         
         # Title Section
         title = outline_json.get("book_title", "Untitled Story")
-        formatted_text += f"📚 **TITLE:** {title}\n\n"
+        formatted_text += f"📚 **{title}**\n\n"
         
-        # Basic Info Section
+        # Basic Info Section (simplified)
         genre = outline_json.get("genre", "Unknown")
-        theme = outline_json.get("theme", "Not specified")
-        style = outline_json.get("style", "Not specified")
-        language = outline_json.get("language", "English")
+        formatted_text += f"🎭 **Genre:** {genre}\n\n"
         
-        formatted_text += f"🎭 **GENRE:** {genre}\n"
-        formatted_text += f"🎯 **THEME:** {theme}\n"
-        formatted_text += f"✍️ **STYLE:** {style}\n"
-        formatted_text += f"🌍 **LANGUAGE:** {language}\n\n"
-        
-        # Description
+        # Description (brief)
         description = outline_json.get("description", "")
         if description:
-            formatted_text += f"📖 **DESCRIPTION:**\n{description}\n\n"
+            formatted_text += f"📖 **Story:** {description}\n\n"
         
-        # Story Stats
-        estimated_chapters = outline_json.get("estimated_total_chapters", 0)
-        tags = outline_json.get("tags", [])
-        tone_keywords = outline_json.get("tone_keywords", [])
-        
-        formatted_text += f"📊 **STORY STATISTICS:**\n"
-        formatted_text += f"   • Total Chapters: {estimated_chapters}\n"
-        if tags:
-            formatted_text += f"   • Tags: {', '.join(tags)}\n"
-        if tone_keywords:
-            formatted_text += f"   • Tone: {', '.join(tone_keywords)}\n"
-        formatted_text += "\n"
-        
-        # Characters Section
+        # Characters Section (simple list)
         main_characters = outline_json.get("main_characters", [])
         if main_characters:
-            formatted_text += f"👥 **MAIN CHARACTERS:**\n"
+            formatted_text += f"👥 **Characters:**\n"
             for i, char in enumerate(main_characters, 1):
                 name = char.get("name", f"Character {i}")
-                role = char.get("role", "Unknown role")
-                description = char.get("description", "No description")
-                formatted_text += f"   {i}. **{name}** ({role})\n"
-                formatted_text += f"      {description}\n\n"
+                description = char.get("description", "")
+                formatted_text += f"• **{name}** - {description}\n"
+            formatted_text += "\n"
         
-        # Locations Section
-        key_locations = outline_json.get("key_locations", [])
-        if key_locations:
-            formatted_text += f"🗺️ **KEY LOCATIONS:**\n"
-            for i, location in enumerate(key_locations, 1):
-                name = location.get("name", f"Location {i}")
-                description = location.get("description", "No description")
-                formatted_text += f"   {i}. **{name}**\n"
-                formatted_text += f"      {description}\n\n"
-        
-        # Conflict/Plot
-        conflict = outline_json.get("conflict", "")
-        if conflict:
-            formatted_text += f"⚔️ **CENTRAL CONFLICT:**\n{conflict}\n\n"
-        
-        # Chapter Breakdown
-        chapters = outline_json.get("chapters", [])
-        if chapters:
-            formatted_text += f"📑 **CHAPTER BREAKDOWN:**\n\n"
-            total_words = 0
+        # Chapter Breakdown (simple - only titles and summaries)
+        Chapters = outline_json.get("Chapters", [])
+        if Chapters:
+            formatted_text += f"📑 **Chapters:**\n\n"
             
-            for chapter in chapters:
+            for chapter in Chapters:
                 chapter_num = chapter.get("chapter_number", "?")
                 chapter_title = chapter.get("chapter_title", "Untitled Chapter")
                 chapter_summary = chapter.get("chapter_summary", "No summary available")
-                estimated_words = chapter.get("estimated_word_count", 0)
-                cliffhanger = chapter.get("cliffhanger_cta", "")
                 
                 formatted_text += f"**Chapter {chapter_num}: {chapter_title}**\n"
-                formatted_text += f"📝 Summary: {chapter_summary}\n"
-                if estimated_words > 0:
-                    formatted_text += f"📊 Estimated Words: {estimated_words:,}\n"
-                    total_words += estimated_words
-                if cliffhanger:
-                    formatted_text += f"🎬 Cliffhanger: {cliffhanger}\n"
-                formatted_text += "\n"
-            
-            if total_words > 0:
-                reading_time = max(1, total_words // 250)  # 250 words per minute
-                formatted_text += f"📈 **TOTAL ESTIMATED WORDS:** {total_words:,}\n"
-                formatted_text += f"⏱️ **ESTIMATED READING TIME:** ~{reading_time} minutes\n\n"
+                formatted_text += f"{chapter_summary}\n\n"
         
-        # Writing Guidelines
-        writing_guidelines = outline_json.get("writing_guidelines", "")
-        if writing_guidelines:
-            formatted_text += f"📋 **WRITING GUIDELINES:**\n{writing_guidelines}\n\n"
-        
-        # Character Arcs Summary
-        character_arcs = outline_json.get("character_arcs_summary", "")
-        if character_arcs:
-            formatted_text += f"🎭 **CHARACTER DEVELOPMENT:**\n{character_arcs}\n\n"
-        
-        formatted_text += "✨ **Ready to begin writing your story!** ✨"
-        
-        return formatted_text
+        return formatted_text.strip()
         
     except Exception as e:
         return f"❌ Error formatting outline: {str(e)}"
@@ -298,7 +307,7 @@ def generate_book_outline_json(idea: str) -> Dict[str, Any]:
         
         # Generate the outline
         result = chain.invoke({"idea": idea})
-        raw_response = result.strip()
+        raw_response = result.content.strip()
         
         # Calculate output metrics
         output_word_count = len(raw_response.split())
@@ -359,7 +368,7 @@ def generate_book_outline_json(idea: str) -> Dict[str, Any]:
                 "estimated_total_tokens": estimated_total_tokens,
                 # Calculated story metrics
                 "story_estimated_words": metadata.get("total_estimated_words", 0),
-                "story_chapters_count": len(outline_json.get("chapters", [])),
+                "story_Chapters_count": len(outline_json.get("Chapters", [])),
                 "story_characters_count": len(outline_json.get("main_characters", [])),
                 "story_locations_count": len(outline_json.get("key_locations", []))
             }

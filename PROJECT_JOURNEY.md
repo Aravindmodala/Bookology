@@ -2,14 +2,14 @@
 
 ## 📖 Project Overview
 
-**Bookology** is an AI-powered story generation and interaction platform that allows users to create, explore, and interact with stories through advanced language models and vector-based semantic search.
+**Bookology** is an AI-powered story generation and interaction platform that allows users to create, explore, and interact with Stories through advanced language models and vector-based semantic search.
 
 ### Core Features
-- 📚 **AI Story Generation**: Book outlines and chapters using OpenAI GPT
+- 📚 **AI Story Generation**: Book outlines and Chapters using OpenAI GPT
 - 🎬 **Multi-format Support**: Books and movie scripts
 - 💬 **Intelligent Story Chat**: AI-powered conversation about story content
 - 🔍 **Semantic Search**: Vector-based content exploration
-- 👤 **User Management**: Supabase authentication and user stories
+- 👤 **User Management**: Supabase authentication and user Stories
 
 ## 🛣️ Development Timeline
 
@@ -46,7 +46,7 @@
 
 #### New Features Added
 - Story content embeddings for semantic search
-- AI chatbot that can answer questions about stories
+- AI chatbot that can answer questions about Stories
 - Chapter-by-chapter content analysis
 - Context-aware responses based on story content
 
@@ -222,14 +222,14 @@ async def story_chat_optimized(body: StoryChatRequest, ...):
 
 #### Source Counting Correction
 ```python
-# Fixed to show unique chapters instead of chunks
-unique_chapters = {}
+# Fixed to show unique Chapters instead of chunks
+unique_Chapters = {}
 for doc in raw_sources:
     chapter_id = metadata.get("chapter_id")
-    if chapter_id not in unique_chapters:
-        unique_chapters[chapter_id] = metadata
+    if chapter_id not in unique_Chapters:
+        unique_Chapters[chapter_id] = metadata
 
-sources = list(unique_chapters.values())  # Unique chapters only
+sources = list(unique_Chapters.values())  # Unique Chapters only
 ```
 
 ### Phase 8: Code Cleanup and Organization

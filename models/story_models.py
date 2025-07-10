@@ -18,13 +18,13 @@ class Story(BaseModel):
     updated_at: Optional[datetime] = None
     total_chapters: Optional[int] = None
     current_chapter: Optional[int] = None
-    source_table: str = "stories"  # Track which table this came from
+    source_table: str = "Stories"  # Track which table this came from
     
     class Config:
         from_attributes = True
         
     @classmethod
-    def from_stories_table(cls, data: Dict[str, Any]) -> "Story":
+    def from_Stories_table(cls, data: Dict[str, Any]) -> "Story":
         """Create Story from capitalized 'Stories' table."""
         return cls(
             id=data["id"],
@@ -39,8 +39,8 @@ class Story(BaseModel):
         )
     
     @classmethod
-    def from_stories_lowercase(cls, data: Dict[str, Any]) -> "Story":
-        """Create Story from lowercase 'stories' table."""
+    def from_Stories_lowercase(cls, data: Dict[str, Any]) -> "Story":
+        """Create Story from lowercase 'Stories' table."""
         return cls(
             id=data["id"],
             user_id=data["user_id"],
@@ -48,7 +48,7 @@ class Story(BaseModel):
             outline=data.get("outline"),
             created_at=data["created_at"],
             updated_at=data.get("updated_at"),
-            source_table="stories"
+            source_table="Stories"
         )
 
 class Chapter(BaseModel):
@@ -62,13 +62,13 @@ class Chapter(BaseModel):
     summary: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
-    source_table: str = "chapters"
+    source_table: str = "Chapters"
     
     class Config:
         from_attributes = True
         
     @classmethod
-    def from_chapters_table(cls, data: Dict[str, Any]) -> "Chapter":
+    def from_Chapters_table(cls, data: Dict[str, Any]) -> "Chapter":
         """Create Chapter from capitalized 'Chapters' table."""
         return cls(
             id=data["id"],
@@ -83,8 +83,8 @@ class Chapter(BaseModel):
         )
     
     @classmethod
-    def from_chapters_lowercase(cls, data: Dict[str, Any]) -> "Chapter":
-        """Create Chapter from lowercase 'chapters' table."""
+    def from_Chapters_lowercase(cls, data: Dict[str, Any]) -> "Chapter":
+        """Create Chapter from lowercase 'Chapters' table."""
         return cls(
             id=data["id"],
             story_id=data["story_id"],
@@ -94,24 +94,24 @@ class Chapter(BaseModel):
             summary=data.get("summary"),
             created_at=data["created_at"],
             updated_at=data.get("updated_at"),
-            source_table="chapters"
+            source_table="Chapters"
         )
 
 class StoryWithChapters(BaseModel):
-    """Story combined with its chapters."""
+    """Story combined with its Chapters."""
     
     story: Story
-    chapters: List[Chapter] = Field(default_factory=list)
+    Chapters: List[Chapter] = Field(default_factory=list)
     
     @property
     def total_content_length(self) -> int:
-        """Total character count across all chapters."""
-        return sum(len(chapter.content) for chapter in self.chapters)
+        """Total character count across all Chapters."""
+        return sum(len(chapter.content) for chapter in self.Chapters)
     
     @property
     def chapter_count(self) -> int:
-        """Number of chapters."""
-        return len(self.chapters)
+        """Number of Chapters."""
+        return len(self.Chapters)
 
 class EmbeddingChunk(BaseModel):
     """Represents an embedded text chunk."""

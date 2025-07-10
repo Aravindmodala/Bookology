@@ -94,16 +94,16 @@ for i in range(0, len(all_documents), batch_size):
 ```python
 # Schema Flexibility
 @classmethod
-def from_stories_table(cls, data: Dict[str, Any]) -> "Story":
+def from_Stories_table(cls, data: Dict[str, Any]) -> "Story":
     # Handle "Stories" table (capitalized)
 
 @classmethod  
-def from_stories_lowercase(cls, data: Dict[str, Any]) -> "Story":
-    # Handle "stories" table (lowercase)
+def from_Stories_lowercase(cls, data: Dict[str, Any]) -> "Story":
+    # Handle "Stories" table (lowercase)
 ```
 
 **Impact**:
-- ✅ Handles both "Stories" and "stories" table schemas
+- ✅ Handles both "Stories" and "Stories" table schemas
 - ✅ Consistent data validation across the application
 - ✅ Easy migration between database schemas
 
@@ -138,7 +138,7 @@ async def get_performance_stats():
 ### Response Time Improvements
 | Endpoint | Before (ms) | After (ms) | Improvement |
 |----------|-------------|------------|-------------|
-| `/stories` | 1,200-2,000 | 200-400 | **70-80%** |
+| `/Stories` | 1,200-2,000 | 200-400 | **70-80%** |
 | `/story_chat` | 3,000-5,000 | 800-1,500 | **60-70%** |
 | `/health` | 500-800 | 50-100 | **85-90%** |
 | Embedding ops | 10,000-15,000 | Background | **100%** non-blocking |

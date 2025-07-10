@@ -1,5 +1,5 @@
-from langchain_openai import OpenAI
-from langchain.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain.chains import LLMChain
 from dotenv import load_dotenv
 import os
@@ -14,65 +14,100 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize the LLM (OpenAI model)
-llm = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), temperature=0.7, max_tokens=2000)
+# Initialize the LLM (OpenAI Chat model - correct for GPT-4o)
+llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o', temperature=0.65, max_tokens=4000)
 
-# Create a prompt template for generating Chapter 1 from an outline
-prompt = PromptTemplate(
-    input_variables=["outline"],
-    template="""
-You are a globally renowned novelist, ghostwriter, and master storyteller.
+system_template = """You are a globally renowned, award-winning novelist, ghostwriter, and master storyteller known for creating bestselling novels that captivate readers deeply.
 
-Your task is to take the following fully expanded story outline and write **one emotionally immersive, professionally written Chapter 1** of a novel that feels like it belongs on a bestselling shelf.
+🎭 ROLE & EXPERTISE:
+- Expert in character development, plot pacing, layered backstory, and emotional storytelling
+- Master of immersive world-building and atmospheric prose
+- Specialist in powerful chapter hooks, rising tension, and cliffhangers
+- Skilled at writing deeply human, layered prose that feels alive
+- Expert at creating meaningful, contextual story choices that impact narrative direction
 
----
+✍️ WRITING STANDARDS:
+- Format: Novel-style prose (not script or bullet points)
+- Perspective: Third-person limited (or first-person if the outline requires)
+- Voice: Masterful, human author quality with vivid, emotionally expressive language
+- Characters: Complex, with contradictions, depth, and vulnerability
+- Continuity: Logical, immersive world consistency
+
+🎯 CHAPTER 1 REQUIREMENTS:
+- Start in the protagonist's **ordinary world**, showing their current daily life, environment, and small details that reveal their personality and emotions.
+- Reveal the protagonist's **inner conflicts, longings, and emotional stakes**.
+- Use **layered sensory details** (smells, sounds, sights, textures) and **micro-emotions** to create immersion.
+- Transition naturally into the **inciting incident** that will propel the protagonist into the journey.
+- End with a **compelling hook**, signaling the change about to come.
+
+🎯 CHOICE GENERATION REQUIREMENTS:
+- Generate 3-4 contextual choices that naturally emerge from the chapter's events
+- Each choice should represent a meaningful decision the protagonist could make
+- Choices should feel organic to the story and character motivations
+- Include a mix of action-oriented, emotional, and strategic choices
+- Each choice should have clear story implications and character development potential
+- Choices should be specific enough to guide the next chapter's direction
+
+💡 Follow the provided outline precisely while expanding it into immersive, cinematic, and emotionally resonant prose.
+
+📌 OUTPUT FORMAT:
+Return ONLY a valid JSON object in this exact structure:
+
+{{
+  "chapter": "The full chapter content here as immersive, novel-quality prose",
+  "choices": [
+    {{
+      "id": "choice_1",
+      "title": "Brief choice title (3-6 words)",
+      "description": "Detailed description of what this choice involves and its immediate implications",
+      "story_impact": "How this choice would affect the story direction and character development",
+      "choice_type": "action/emotional/strategic/dialogue"
+    }},
+    {{
+      "id": "choice_2", 
+      "title": "Brief choice title (3-6 words)",
+      "description": "Detailed description of what this choice involves and its immediate implications",
+      "story_impact": "How this choice would affect the story direction and character development",
+      "choice_type": "action/emotional/strategic/dialogue"
+    }},
+    {{
+      "id": "choice_3",
+      "title": "Brief choice title (3-6 words)", 
+      "description": "Detailed description of what this choice involves and its immediate implications",
+      "story_impact": "How this choice would affect the story direction and character development",
+      "choice_type": "action/emotional/strategic/dialogue"
+    }}
+  ]
+}}
+
+🚫 DO NOT:
+- Explain or summarize the outline
+- Use phrases like "As per the outline…"
+- Return summaries instead of chapter content
+- Break character with meta-commentary
+- Add any text outside the JSON structure
+- Include markdown formatting or code blocks
+
+Write so immersively that readers forget this was AI-generated and feel fully transported into the story. The choices should feel like natural decision points that emerge organically from the chapter's events."""
+
+
+# Create user message template (the actual request)
+user_template = """Please write **Chapter {chapter_number} of a novel** using the fully expanded story outline below:
 
 📘 STORY OUTLINE:
 {outline}
 
----
+Write Chapter {chapter_number} following all the guidelines provided. Focus on creating a deeply immersive, cinematic, emotionally powerful opening chapter that makes readers feel as if a world-class human author wrote it. The chapter should draw readers deeply into the protagonist’s world, making them care about the journey before it begins, and ending with a compelling hook."""
 
-🎯 OBJECTIVE:
-Write **Chapter 1** of this novel. Follow the chapter description and structure given in the outline. The chapter must:
 
-1. Begin with an emotionally gripping or atmospheric hook
-2. Introduce or re-establish the main characters with rich depth — not just facts, but emotions, inner flaws, secrets, or memories
-3. Build tension, emotion, or mystery through:
-   - Dialogue
-   - Internal monologue
-   - Descriptive world-building (sights, sounds, sensations)
-   - Character conflict or decisions
-4. Progress the story in a meaningful way (emotionally or plot-wise)
-5. End on a compelling cliffhanger that makes the reader **desperate for the next chapter** — like a reveal, betrayal, twist, or shocking action
+# Create the chat prompt template
+system_message_prompt = SystemMessagePromptTemplate.from_template(system_template)
+human_message_prompt = HumanMessagePromptTemplate.from_template(user_template)
 
----
-
-✍️ WRITING STYLE:
-- Format: **Novel-style prose**, not a script or bullet points
-- Voice: Write as if this was penned by a masterful human author
-- Perspective: Use third-person limited (or first-person if the outline suggests it)
-- Language: Vivid, dramatic, and emotionally expressive — avoid robotic tone
-- Make characters feel alive — full of contradictions, depth, and vulnerability
-- Build the **first few paragraphs of Chapter 1** to make readers feel *this is a real book*, not AI output
-
----
-
-📌 START FORMAT:
-**Chapter 1: [Use the Chapter Title from the outline]**
-
-(Then begin the chapter)
-
----
-
-DO NOT:
-- Explain the outline
-- Return summaries
-- Repeat any outline section
-- Say "As per the outline..."
-
-Just write the actual chapter content. Make it so immersive that the reader forgets it was written by a machine.
-"""
-)
+prompt = ChatPromptTemplate.from_messages([
+    system_message_prompt,
+    human_message_prompt
+])
 
 # Build the chain
 chain = prompt | llm
@@ -80,8 +115,16 @@ chain = prompt | llm
 def generate_chapter_from_outline(outline: str):
     """Legacy function for backward compatibility."""
     try:
-        result = chain.invoke({"outline": outline})
-        return result.strip()
+        generator = BookStoryGenerator()
+        result = generator.generate_chapter(outline, 1)
+        
+        # Handle new JSON response format for backward compatibility
+        if isinstance(result, dict) and result.get("success"):
+            return result.get("chapter_content", "")
+        elif isinstance(result, dict):
+            return result.get("chapter_content", f"❌ Error: {result.get('error', 'Unknown error')}")
+        else:
+            return str(result)
     except Exception as e:
         return f"❌ Error generating Chapter 1: {str(e)}"
 
@@ -110,10 +153,10 @@ def extract_chapter_info_from_json(json_data: Dict[str, Any], chapter_number: in
     }
     
     # Extract specific chapter information
-    chapters = json_data.get("chapters", [])
+    Chapters = json_data.get("Chapters", [])
     target_chapter = None
     
-    for chapter in chapters:
+    for chapter in Chapters:
         if chapter.get("chapter_number") == chapter_number:
             target_chapter = chapter
             break
@@ -201,7 +244,7 @@ class BookStoryGenerator:
         self.chain = chain
         logger.info("🚀 BookStoryGenerator initialized with JSON support")
     
-    def generate_chapter(self, outline: str, chapter_number: int = 1) -> str:
+    def generate_chapter(self, outline: str, chapter_number: int = 1) -> Dict[str, Any]:
         """Generate a chapter from either text outline or JSON outline."""
         logger.info(f"📖 Generating Chapter {chapter_number}...")
         
@@ -221,12 +264,13 @@ class BookStoryGenerator:
                 logger.info("-" * 50)
                 
                 # Generate chapter
-                result = self.chain.invoke({"outline": formatted_outline})
+                result = self.chain.invoke({"outline": formatted_outline, "chapter_number": chapter_number})
                 
                 logger.info(f"✅ Chapter {chapter_number} generated successfully!")
-                logger.info(f"📊 Generated content length: {len(result)} characters")
+                logger.info(f"📊 Generated content length: {len(result.content)} characters")
                 
-                return result.strip()
+                # Parse the JSON response from LLM
+                return self._parse_chapter_response(result.content.strip(), chapter_number)
                 
             except json.JSONDecodeError:
                 # If not JSON, treat as regular text outline
@@ -237,19 +281,113 @@ class BookStoryGenerator:
                 logger.info(outline[:500] + "..." if len(outline) > 500 else outline)
                 logger.info("-" * 50)
                 
-                result = self.chain.invoke({"outline": outline})
+                result = self.chain.invoke({"outline": outline, "chapter_number": chapter_number})
                 
                 logger.info(f"✅ Chapter {chapter_number} generated successfully!")
-                logger.info(f"📊 Generated content length: {len(result)} characters")
+                logger.info(f"📊 Generated content length: {len(result.content)} characters")
                 
-                return result.strip()
+                # Parse the JSON response from LLM
+                return self._parse_chapter_response(result.content.strip(), chapter_number)
                 
         except Exception as e:
             error_msg = f"❌ Error generating Chapter {chapter_number}: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            return {
+                "success": False,
+                "chapter_content": error_msg,
+                "choices": [],
+                "error": str(e)
+            }
     
-    def generate_chapter_from_json(self, json_outline: Dict[str, Any], chapter_number: int = 1) -> str:
+    def _parse_chapter_response(self, response_content: str, chapter_number: int) -> Dict[str, Any]:
+        """Parse the JSON response from LLM containing chapter and choices."""
+        import re
+        
+        try:
+            # Clean up the response
+            cleaned_text = response_content.strip()
+            
+            # Remove markdown code blocks if present
+            if cleaned_text.startswith("```json"):
+                cleaned_text = cleaned_text[7:]
+            if cleaned_text.startswith("```"):
+                cleaned_text = cleaned_text[3:]
+            if cleaned_text.endswith("```"):
+                cleaned_text = cleaned_text[:-3]
+            
+            # Remove any leading/trailing whitespace
+            cleaned_text = cleaned_text.strip()
+            
+            # CRITICAL FIX: Handle trailing commas and other JSON formatting issues
+            cleaned_text = re.sub(r',(\s*[}\]])', r'\1', cleaned_text)
+            cleaned_text = re.sub(r',(\s*})', r'\1', cleaned_text)
+            cleaned_text = re.sub(r',(\s*])', r'\1', cleaned_text)
+            
+            # Parse JSON
+            parsed_json = json.loads(cleaned_text)
+            
+            # Validate structure
+            if "chapter" not in parsed_json:
+                raise ValueError("Response missing 'chapter' field")
+            
+            if "choices" not in parsed_json:
+                raise ValueError("Response missing 'choices' field")
+            
+            logger.info(f"✅ Successfully parsed JSON response with {len(parsed_json.get('choices', []))} choices")
+            
+            return {
+                "success": True,
+                "chapter_content": parsed_json["chapter"],
+                "choices": parsed_json["choices"],
+                "chapter_number": chapter_number
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON parsing error: {e}")
+            logger.error(f"Raw response: {response_content[:500]}...")
+            
+            # Try one more time with aggressive cleaning
+            try:
+                cleaned_text = response_content.strip()
+                if cleaned_text.startswith("```json"):
+                    cleaned_text = cleaned_text[7:]
+                if cleaned_text.startswith("```"):
+                    cleaned_text = cleaned_text[3:]
+                if cleaned_text.endswith("```"):
+                    cleaned_text = cleaned_text[:-3]
+                cleaned_text = cleaned_text.strip()
+                
+                # More aggressive comma removal
+                cleaned_text = re.sub(r',\s*([}\]])', r'\1', cleaned_text)
+                parsed_json = json.loads(cleaned_text)
+                
+                logger.info(f"✅ JSON parsed successfully after aggressive cleaning")
+                return {
+                    "success": True,
+                    "chapter_content": parsed_json.get("chapter", ""),
+                    "choices": parsed_json.get("choices", []),
+                    "chapter_number": chapter_number
+                }
+            except:
+                pass
+            
+            # Fallback: treat entire response as chapter content
+            return {
+                "success": True,
+                "chapter_content": response_content,
+                "choices": [],
+                "error": f"Failed to parse JSON: {str(e)}"
+            }
+        except Exception as e:
+            logger.error(f"❌ Error parsing chapter response: {e}")
+            return {
+                "success": True,
+                "chapter_content": response_content,
+                "choices": [],
+                "error": f"Parsing error: {str(e)}"
+            }
+    
+    def generate_chapter_from_json(self, json_outline: Dict[str, Any], chapter_number: int = 1) -> Dict[str, Any]:
         """Generate a chapter specifically from JSON outline data."""
         logger.info(f"📖 Generating Chapter {chapter_number} from JSON data...")
         
@@ -263,15 +401,21 @@ class BookStoryGenerator:
             formatted_outline = extract_chapter_info_from_json(json_outline, chapter_number)
             
             # Generate chapter
-            result = self.chain.invoke({"outline": formatted_outline})
+            result = self.chain.invoke({"outline": formatted_outline, "chapter_number": chapter_number})
             
             logger.info(f"✅ Chapter {chapter_number} generated from JSON successfully!")
-            logger.info(f"📊 Generated content length: {len(result)} characters")
+            logger.info(f"📊 Generated content length: {len(result.content)} characters")
             
-            return result.strip()
+            # Parse the JSON response from LLM
+            return self._parse_chapter_response(result.content.strip(), chapter_number)
             
         except Exception as e:
             error_msg = f"❌ Error generating Chapter {chapter_number} from JSON: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            return {
+                "success": False,
+                "chapter_content": error_msg,
+                "choices": [],
+                "error": str(e)
+            }
 

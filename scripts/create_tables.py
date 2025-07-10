@@ -18,11 +18,11 @@ def create_tables():
         print("Connecting to database...")
         with psycopg.connect(connection_string) as conn:
             with conn.cursor() as cur:
-                print("Creating stories table...")
+                print("Creating Stories table...")
                 
-                # Create stories table
+                # Create Stories table
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS stories (
+                    CREATE TABLE IF NOT EXISTS Stories (
                         id SERIAL PRIMARY KEY,
                         user_id UUID NOT NULL,
                         title TEXT NOT NULL,
@@ -32,13 +32,13 @@ def create_tables():
                     );
                 """)
                 
-                print("Creating chapters table...")
+                print("Creating Chapters table...")
                 
-                # Create chapters table
+                # Create Chapters table
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS chapters (
+                    CREATE TABLE IF NOT EXISTS Chapters (
                         id SERIAL PRIMARY KEY,
-                        story_id INTEGER REFERENCES stories(id) ON DELETE CASCADE,
+                        story_id INTEGER REFERENCES Stories(id) ON DELETE CASCADE,
                         chapter_number INTEGER NOT NULL,
                         title TEXT,
                         content TEXT NOT NULL,
@@ -52,8 +52,8 @@ def create_tables():
                 print("Creating indexes...")
                 
                 # Create indexes for better performance
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_stories_user_id ON stories(user_id);")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_chapters_story_id ON chapters(story_id);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_Stories_user_id ON Stories(user_id);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_Chapters_story_id ON Chapters(story_id);")
                 
                 conn.commit()
                 

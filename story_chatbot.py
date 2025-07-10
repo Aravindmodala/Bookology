@@ -2,11 +2,11 @@
 Bookology Story Chatbot - AI-Powered Story Interaction System
 
 This module provides an intelligent chatbot system that enables users to interact
-with their stories through natural language. The chatbot supports:
+with their Stories through natural language. The chatbot supports:
 
 - Story content queries through Retrieval-Augmented Generation (RAG)
 - Story modification requests and assistance
-- Multiverse features for connecting different stories
+- Multiverse features for connecting different Stories
 - Intent classification for routing different types of requests
 - Per-user, per-story conversational memory
 
@@ -63,7 +63,7 @@ class MemoryManager:
     """
     Manages conversational memory for user-story sessions.
     
-    This class maintains separate conversation histories for each
+    This class maintains separate conversation hiStories for each
     (user_id, story_id) combination, enabling context-aware responses
     across multiple interactions with the same story.
     """
@@ -146,7 +146,7 @@ Analyze the user's message and classify their intent into one of these categorie
 2. 'modify': User wants to change, rewrite, or modify story elements
    Examples: "Rewrite chapter 2", "Change the ending", "Make the character stronger"
 
-3. 'multiverse': User wants to connect this story with other stories or create crossovers
+3. 'multiverse': User wants to connect this story with other Stories or create crossovers
    Examples: "Connect this with my other story", "Bring characters from my fantasy story"
 
 4. 'other': Anything that doesn't fit the above categories
@@ -413,7 +413,7 @@ class StoryChatbot:
             
             # Extract unique chapter sources (not individual chunks)
             raw_sources = result.get("source_documents", [])
-            unique_chapters = {}
+            unique_Chapters = {}
             
             for doc in raw_sources:
                 metadata = doc.metadata
@@ -423,8 +423,8 @@ class StoryChatbot:
                 # Use chapter_id as unique key, or fallback to chapter_number
                 unique_key = chapter_id or f"chapter_{chapter_number}"
                 
-                if unique_key not in unique_chapters:
-                    unique_chapters[unique_key] = {
+                if unique_key not in unique_Chapters:
+                    unique_Chapters[unique_key] = {
                         "chapter_id": chapter_id,
                         "chapter_number": chapter_number,
                         "chapter_title": metadata.get("chapter_title"),
@@ -434,7 +434,7 @@ class StoryChatbot:
                     }
             
             # Convert to list of unique chapter sources
-            sources = list(unique_chapters.values())
+            sources = list(unique_Chapters.values())
             
             logger.info("Story query processed successfully")
             
@@ -476,7 +476,7 @@ class StoryChatbot:
         
         return ChatResponse(
             type="modification_request",
-            content="Story modification features are coming soon! I'll be able to help you rewrite chapters, change character traits, modify plot elements, and more.",
+            content="Story modification features are coming soon! I'll be able to help you rewrite Chapters, change character traits, modify plot elements, and more.",
             intent=IntentType.MODIFY.value,
             status="pending",
             metadata={"feature_status": "in_development"}
@@ -497,13 +497,13 @@ class StoryChatbot:
         logger.info(f"Handling multiverse request for user {user_id}, story {story_id}")
         
         try:
-            # Get user's other stories
-            user_stories = self.supabase.table("Stories").select(
+            # Get user's other Stories
+            user_Stories = self.supabase.table("Stories").select(
                 "id,story_title"
             ).eq("user_id", user_id).execute()
             
-            available_stories = [
-                story["story_title"] for story in user_stories.data
+            available_Stories = [
+                story["story_title"] for story in user_Stories.data
                 if str(story["id"]) != story_id
             ]
             
@@ -516,12 +516,12 @@ class StoryChatbot:
             
             return ChatResponse(
                 type="multiverse_request",
-                content=f"You have {len(available_stories)} other stories available for multiverse connections. Multiverse features are coming soon - I'll be able to help you create character crossovers, shared universes, and connecting storylines!",
+                content=f"You have {len(available_Stories)} other Stories available for multiverse connections. Multiverse features are coming soon - I'll be able to help you create character crossovers, shared universes, and connecting storylines!",
                 intent=IntentType.MULTIVERSE.value,
                 status="pending",
                 metadata={
-                    "available_stories": available_stories,
-                    "total_stories": len(user_stories.data),
+                    "available_Stories": available_Stories,
+                    "total_Stories": len(user_Stories.data),
                     "feature_status": "in_development"
                 }
             ).__dict__
@@ -530,7 +530,7 @@ class StoryChatbot:
             logger.error(f"Multiverse handling failed: {e}")
             return ChatResponse(
                 type="error",
-                content="I couldn't access your other stories right now. Please try again later.",
+                content="I couldn't access your other Stories right now. Please try again later.",
                 metadata={"error": str(e)}
             ).__dict__
     
@@ -549,10 +549,10 @@ class StoryChatbot:
         
         return ChatResponse(
             type="unknown",
-            content="I'm here to help you with your stories! You can:\n\n"
+            content="I'm here to help you with your Stories! You can:\n\n"
                    "• Ask questions about your story content\n"
-                   "• Request modifications to characters, plot, or chapters\n"
-                   "• Create connections between your different stories\n\n"
+                   "• Request modifications to characters, plot, or Chapters\n"
+                   "• Create connections between your different Stories\n\n"
                    "What would you like to do with your story?",
             intent=intent.value,
             metadata={"suggestions": ["query", "modify", "multiverse"]}

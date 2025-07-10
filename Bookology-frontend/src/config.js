@@ -11,12 +11,17 @@ export const createApiUrl = (endpoint) => {
 // Export common API endpoints
 export const API_ENDPOINTS = {
   GENERATE_OUTLINE: '/lc_generate_outline',
+  SAVE_OUTLINE: '/save_outline',  // New endpoint for saving edited outline
   GENERATE_CHAPTER: '/lc_generate_chapter',
-  SAVE_STORY: '/stories/save',
+  SAVE_STORY: '/Stories/save',
   GENERATE_NEXT_CHAPTER: '/generate_next_chapter',
   SAVE_CHAPTER: '/save_chapter_with_summary',
   STORY_CHAT: '/story_chat',
   HEALTH: '/health',
-  GET_STORIES: '/stories',
-  ENSURE_EMBEDDINGS: '/stories/{story_id}/ensure_embeddings'
+  GET_Stories: '/Stories',
+  ENSURE_EMBEDDINGS: '/Stories/{story_id}/ensure_embeddings',
+  // New branching choices endpoints
+  GENERATE_CHOICES: '/generate_choices',
+  GENERATE_CHAPTER_WITH_CHOICE: '/generate_chapter_with_choice',
+  CHOICE_HISTORY: '/story/{story_id}/choice_history'
 };

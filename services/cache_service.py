@@ -15,7 +15,7 @@ logger = setup_logger(__name__)
 class CacheService:
     """
     Multi-tier caching service with memory and optional Redis backend.
-    Provides smart caching for embeddings, stories, and database queries.
+    Provides smart caching for embeddings, Stories, and database queries.
     """
     
     def __init__(self, max_memory_items: int = 1000):
