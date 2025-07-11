@@ -97,6 +97,7 @@ class StoryInput(BaseModel):
 class ChapterInput(BaseModel):
     outline: str = Field(..., min_length=50)
     chapter_number: int = Field(default=1, ge=1)
+    story_id: Optional[int] = Field(default=None, description="Story ID for saving generated chapter")
 
 class StorySaveInput(BaseModel):
     story_outline: str = Field(..., min_length=50)
@@ -477,45 +478,9 @@ async def save_outline_endpoint(
             story_id = story_response.data[0]["id"]
             logger.info(f"✅ Outline saved successfully with story_id: {story_id}")
 
-            # --- IMMEDIATELY GENERATE AND SAVE CHAPTER 1 AND CHOICES ---
-            try:
-                logger.info(f"🚀 Generating Chapter 1 for story_id: {story_id} after outline save...")
-                from lc_book_generator import BookStoryGenerator
-                generator = BookStoryGenerator()
-                chapter_1_result = generator.generate_chapter(formatted_text, 1)
-                if isinstance(chapter_1_result, dict) and chapter_1_result.get("success"):
-                    chapter_content = chapter_1_result.get("chapter_content", "")
-                    choices = chapter_1_result.get("choices", [])
-                    # Save Chapter 1
-                    chapter_insert_data = {
-                        "story_id": story_id,
-                        "chapter_number": 1,
-                        "title": "Chapter 1",
-                        "content": chapter_content,
-                        "word_count": len(chapter_content.split()),
-                    }
-                    supabase.table("Chapters").insert(chapter_insert_data).execute()
-                    logger.info(f"✅ Chapter 1 saved to Chapters table for story_id: {story_id}")
-                    # Save choices
-                    for idx, choice in enumerate(choices):
-                        logger.info(f"DEBUG: Saving choice dict: {choice}")
-                        choice_data = {
-                            "story_id": story_id,
-                            "chapter_number": 1,
-                            "choice_id": f"choice_{idx+1}",
-                            "title": choice.get("title"),
-                            "description": choice.get("description"),
-                            "story_impact": choice.get("impact") or choice.get("story_impact") or "medium",
-                            "choice_type": choice.get("type") or choice.get("choice_type") or "action",
-                            "user_id": user.id,
-                            "is_selected": False,
-                        }
-                        supabase.table("story_choices").insert(choice_data).execute()
-                        logger.info(f"✅ Choice saved: {choice_data}")
-                else:
-                    logger.error(f"❌ Failed to generate Chapter 1 after outline save for story_id: {story_id}")
-            except Exception as gen_error:
-                logger.error(f"❌ Error generating/saving Chapter 1 after outline save: {str(gen_error)}")
+            # --- OUTLINE SAVED SUCCESSFULLY, BUT DON'T AUTO-GENERATE CHAPTER 1 ---
+            # The user should explicitly click "Generate Chapter 1" to create chapters
+            logger.info(f"✅ Outline saved successfully. User can now generate Chapter 1 manually.")
             
             return {
                 "success": True,
@@ -790,23 +755,55 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput):
             chapter_id = chapter_response.data[0]["id"]
             logger.info(f"✅ Chapter saved with ID: {chapter_id}")
             # --- GENERATE AND SAVE CHAPTER SUMMARY ---
+            logger.info(f"🔍 SUMMARY DEBUG: Starting Chapter {next_chapter_number} summary generation process...")
+            logger.info(f"🔍 SUMMARY DEBUG: Chapter ID for summary: {chapter_id}")
+            logger.info(f"🔍 SUMMARY DEBUG: Chapter content length: {len(chapter_text)} chars")
+            
             try:
                 from chapter_summary import generate_chapter_summary
                 story_outline = story.get("story_outline", "") if 'story' in locals() else ""
+                
+                logger.info(f"🔍 SUMMARY DEBUG: Story outline length: {len(story_outline)} chars")
+                logger.info(f"🔍 SUMMARY DEBUG: Story outline preview: {story_outline[:200]}...")
+                
+                logger.info(f"🔍 SUMMARY DEBUG: Calling generate_chapter_summary function for chapter {next_chapter_number}...")
                 summary_result = generate_chapter_summary(
                     chapter_content=chapter_text,
                     chapter_number=next_chapter_number,
                     story_context=story_outline,
                     story_title=story.get("story_title", "Untitled Story") if 'story' in locals() else "Untitled Story"
                 )
+                
+                logger.info(f"🔍 SUMMARY DEBUG: Summary generation completed. Success: {summary_result.get('success', False)}")
+                logger.info(f"🔍 SUMMARY DEBUG: Summary result keys: {list(summary_result.keys())}")
+                
                 if summary_result["success"]:
                     summary_text = summary_result["summary"]
-                    supabase.table("Chapters").update({"summary": summary_text}).eq("id", chapter_id).execute()
-                    logger.info(f"✅ Chapter summary saved for chapter {next_chapter_number}")
+                    logger.info(f"🔍 SUMMARY DEBUG: Generated summary length: {len(summary_text)} chars")
+                    logger.info(f"🔍 SUMMARY DEBUG: Summary preview: {summary_text[:150]}...")
+                    
+                    logger.info(f"🔍 SUMMARY DEBUG: Updating database with summary for chapter ID {chapter_id}...")
+                    update_response = supabase.table("Chapters").update({"summary": summary_text}).eq("id", chapter_id).execute()
+                    logger.info(f"🔍 SUMMARY DEBUG: Database update response: {update_response}")
+                    
+                    # Verify the update worked
+                    verify_response = supabase.table("Chapters").select("summary").eq("id", chapter_id).execute()
+                    if verify_response.data and verify_response.data[0].get("summary"):
+                        logger.info(f"✅ SUMMARY DEBUG: Chapter {next_chapter_number} summary saved and verified in database")
+                        logger.info(f"🔍 SUMMARY DEBUG: Verified summary: {verify_response.data[0]['summary'][:100]}...")
+                    else:
+                        logger.error(f"❌ SUMMARY DEBUG: Chapter {next_chapter_number} summary update may have failed - verification shows no summary")
+                        logger.error(f"🔍 SUMMARY DEBUG: Verification response: {verify_response}")
                 else:
-                    logger.error(f"❌ Failed to generate summary for chapter {next_chapter_number}: {summary_result['error']}")
+                    logger.error(f"❌ SUMMARY DEBUG: Failed to generate summary for chapter {next_chapter_number}")
+                    logger.error(f"🔍 SUMMARY DEBUG: Error details: {summary_result.get('error', 'Unknown error')}")
+                    logger.error(f"🔍 SUMMARY DEBUG: Full result: {summary_result}")
             except Exception as summary_error:
-                logger.error(f"❌ Error generating/saving summary for chapter {next_chapter_number}: {str(summary_error)}")
+                logger.error(f"❌ SUMMARY DEBUG: EXCEPTION during summary generation/saving for chapter {next_chapter_number}")
+                logger.error(f"🔍 SUMMARY DEBUG: Exception type: {type(summary_error)}")
+                logger.error(f"🔍 SUMMARY DEBUG: Exception message: {str(summary_error)}")
+                import traceback
+                logger.error(f"🔍 SUMMARY DEBUG: Full traceback: {traceback.format_exc()}")
         except Exception as db_error:
             logger.error(f"❌ DATABASE INSERT FAILED: {str(db_error)}")
             raise HTTPException(status_code=500, detail=f"Database insert failed: {str(db_error)}")
@@ -938,7 +935,7 @@ async def get_choice_history_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to get choice history: {str(e)}")
 
 @app.post("/lc_generate_chapter")
-async def generate_chapter_endpoint(chapter: ChapterInput):
+async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_authenticated_user_optional)):
     """Generate story chapter from either text or JSON outline."""
     logger.info(f"📖 Starting Chapter {chapter.chapter_number} generation...")
     logger.info(f"Outline length: {len(chapter.outline)} characters")
@@ -974,11 +971,11 @@ async def generate_chapter_endpoint(chapter: ChapterInput):
 
             # --- SAVE CHAPTER 1 AND CHOICES TO DATABASE ---
             try:
-                # Only save if this is Chapter 1
-                if chapter.chapter_number == 1:
+                # Only save if this is Chapter 1 and we have a story_id
+                if chapter.chapter_number == 1 and chapter.story_id:
                     logger.info(f"💾 Saving Chapter 1 content to Chapters table...")
                     chapter_insert_data = {
-                        "story_id": getattr(chapter, 'story_id', None),  # If story_id is available
+                        "story_id": chapter.story_id,  # Use the story_id from the request
                         "chapter_number": 1,
                         "title": f"Chapter 1",
                         "content": chapter_content,
@@ -990,37 +987,68 @@ async def generate_chapter_endpoint(chapter: ChapterInput):
                     logger.info(f"✅ Chapter 1 insert response: {chapter_response}")
                     chapter_id = chapter_response.data[0]["id"]
                     # --- GENERATE AND SAVE CHAPTER 1 SUMMARY ---
+                    logger.info("🔍 SUMMARY DEBUG: Starting Chapter 1 summary generation process...")
+                    logger.info(f"🔍 SUMMARY DEBUG: Chapter ID for summary: {chapter_id}")
+                    logger.info(f"🔍 SUMMARY DEBUG: Chapter content length: {len(chapter_content)} chars")
+                    
                     try:
                         from chapter_summary import generate_chapter_summary
                         story_outline = result.get("story_outline", "") if isinstance(result, dict) else ""
+                        
+                        logger.info(f"🔍 SUMMARY DEBUG: Story outline length: {len(story_outline)} chars")
+                        logger.info(f"🔍 SUMMARY DEBUG: Story outline preview: {story_outline[:200]}...")
+                        
+                        logger.info("🔍 SUMMARY DEBUG: Calling generate_chapter_summary function...")
                         summary_result = generate_chapter_summary(
                             chapter_content=chapter_content,
                             chapter_number=1,
                             story_context=story_outline,
                             story_title=story.get("story_title", "Untitled Story") if 'story' in locals() else "Untitled Story"
                         )
+                        
+                        logger.info(f"🔍 SUMMARY DEBUG: Summary generation completed. Success: {summary_result.get('success', False)}")
+                        logger.info(f"🔍 SUMMARY DEBUG: Summary result keys: {list(summary_result.keys())}")
+                        
                         if summary_result["success"]:
                             summary_text = summary_result["summary"]
-                            supabase.table("Chapters").update({"summary": summary_text}).eq("id", chapter_id).execute()
-                            logger.info(f"✅ Chapter 1 summary saved")
+                            logger.info(f"🔍 SUMMARY DEBUG: Generated summary length: {len(summary_text)} chars")
+                            logger.info(f"🔍 SUMMARY DEBUG: Summary preview: {summary_text[:150]}...")
+                            
+                            logger.info(f"🔍 SUMMARY DEBUG: Updating database with summary for chapter ID {chapter_id}...")
+                            update_response = supabase.table("Chapters").update({"summary": summary_text}).eq("id", chapter_id).execute()
+                            logger.info(f"🔍 SUMMARY DEBUG: Database update response: {update_response}")
+                            
+                            # Verify the update worked
+                            verify_response = supabase.table("Chapters").select("summary").eq("id", chapter_id).execute()
+                            if verify_response.data and verify_response.data[0].get("summary"):
+                                logger.info(f"✅ SUMMARY DEBUG: Chapter 1 summary saved and verified in database")
+                                logger.info(f"🔍 SUMMARY DEBUG: Verified summary: {verify_response.data[0]['summary'][:100]}...")
+                            else:
+                                logger.error(f"❌ SUMMARY DEBUG: Chapter 1 summary update may have failed - verification shows no summary")
+                                logger.error(f"🔍 SUMMARY DEBUG: Verification response: {verify_response}")
                         else:
-                            logger.error(f"❌ Failed to generate summary for Chapter 1: {summary_result['error']}")
+                            logger.error(f"❌ SUMMARY DEBUG: Failed to generate summary for Chapter 1")
+                            logger.error(f"🔍 SUMMARY DEBUG: Error details: {summary_result.get('error', 'Unknown error')}")
+                            logger.error(f"🔍 SUMMARY DEBUG: Full result: {summary_result}")
                     except Exception as summary_error:
-                        logger.error(f"❌ Error generating/saving summary for Chapter 1: {str(summary_error)}")
+                        logger.error(f"❌ SUMMARY DEBUG: EXCEPTION during summary generation/saving for Chapter 1")
+                        logger.error(f"🔍 SUMMARY DEBUG: Exception type: {type(summary_error)}")
+                        logger.error(f"🔍 SUMMARY DEBUG: Exception message: {str(summary_error)}")
+                        import traceback
+                        logger.error(f"🔍 SUMMARY DEBUG: Full traceback: {traceback.format_exc()}")
                     # Save choices
                     logger.info(f"💾 Saving Chapter 1 choices to story_choices table...")
-                    user_id = getattr(chapter, 'user_id', None)  # If user_id is available
                     for idx, choice in enumerate(choices):
                         logger.info(f"DEBUG: Saving choice dict: {choice}")
                         choice_data = {
-                            "story_id": chapter_insert_data.get("story_id"),
+                            "story_id": chapter.story_id,
                             "chapter_number": 1,
                             "choice_id": f"choice_{idx+1}",
                             "title": choice.get("title"),
                             "description": choice.get("description"),
                             "story_impact": choice.get("impact") or choice.get("story_impact") or "medium",
                             "choice_type": choice.get("type") or choice.get("choice_type") or "action",
-                            "user_id": user_id,
+                            "user_id": user.id if user else None,
                             "is_selected": False,
                         }
                         # Remove None fields

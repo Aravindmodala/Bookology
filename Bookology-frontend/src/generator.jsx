@@ -314,8 +314,14 @@ export default function Generator() {
     try {
       const response = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_CHAPTER), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outline: result })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ 
+          outline: result,
+          story_id: storyId  // Pass the story_id that was set when saving the outline
+        })
       });
       const data = await response.json();
       if (data.chapter_1) {
@@ -405,46 +411,11 @@ export default function Generator() {
         if (data.updated_formatted_text) {
           setResult(data.updated_formatted_text);
         }
-        setSaveSuccess(`✅ Outline saved as "${data.story_title}"! Generating Chapter 1...`);
+        setSaveSuccess(`✅ Outline saved as "${data.story_title}"! Now you can generate Chapter 1.`);
         setSaveError(''); // Clear any previous errors
 
-        // Immediately fetch Chapter 1 and its choices
-        try {
-          const chapterRes = await fetch(createApiUrl(`/story/${data.story_id}/Chapters`), {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session.access_token}`
-            }
-          });
-          const chapterData = await chapterRes.json();
-          if (Array.isArray(chapterData) && chapterData.length > 0) {
-            const chapter1 = chapterData.find(c => c.chapter_number === 1);
-            if (chapter1) {
-              setChapter(chapter1.content);
-              setCurrentChapterNumber(1);
-              // Fetch choices for Chapter 1
-              const choicesRes = await fetch(createApiUrl(`/story/${data.story_id}/choice_history`), {
-                method: 'GET',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${session.access_token}`
-                }
-              });
-              const choicesData = await choicesRes.json();
-              if (choicesData && choicesData.choice_history && choicesData.choice_history.length > 0) {
-                const chapter1Choices = choicesData.choice_history.find(ch => ch.chapter_number === 1);
-                if (chapter1Choices && chapter1Choices.choices) {
-                  setAvailableChoices(chapter1Choices.choices);
-                  setShowChoices(true);
-                  setSelectedChoiceId(null);
-                }
-              }
-            }
-          }
-        } catch (fetchErr) {
-          setSaveError('Outline saved, but failed to fetch Chapter 1. Please refresh.');
-        }
+        // Don't try to fetch Chapter 1 - it doesn't exist yet
+        // The user needs to click "Generate Chapter 1" to create it
       } else {
         setSaveOutlineError(data.detail || 'Failed to save outline');
       }
