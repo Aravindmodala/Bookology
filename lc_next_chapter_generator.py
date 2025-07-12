@@ -71,7 +71,7 @@ USER'S CHOICE FOR THIS CHAPTER:
 Return ONLY a valid JSON object in this exact structure:
 
 {{
-  "chapter": "The full chapter content here as immersive, novel-quality prose that continues from the user's choice",
+  "chapter": "The full chapter content here as immersive, novel-quality prose that continues from the user's choice in 3000 words, strictly 3000 words",
   "choices": [
     {{
       "id": "choice_1",
@@ -245,12 +245,8 @@ class NextChapterGenerator:
             model_used = self.llm.model_name
             
             logger.info(f"✅ Chapter {chapter_number} generated successfully with hierarchical summarization!")
-            logger.info(f"📊 Generated content length: {len(chapter_content)} characters")
-            logger.info(f"📊 Generated word count: {output_word_count} words")
-            logger.info(f"📊 Generated choices: {len(choices)}")
-            logger.info(f"📊 TOKEN TRACKING: Output: {output_word_count} words (~{estimated_output_tokens} tokens)")
-            logger.info(f"📊 TOKEN TRACKING: Total: ~{estimated_total_tokens} tokens")
-            logger.info(f"📊 TOKEN TRACKING: Temperature: {temperature_used}, Model: {model_used}")
+            logger.info(f"📊 Generated: {len(chapter_content)} chars, {output_word_count} words, {len(choices)} choices")
+            logger.info(f"📊 TOKEN TRACKING: ~{estimated_total_tokens} total tokens ({model_used}, temp={temperature_used})")
             
             # Return both chapter content, choices, and token metrics
             return {
@@ -331,7 +327,7 @@ class NextChapterGenerator:
             
         except json.JSONDecodeError as e:
             logger.error(f"❌ JSON parsing error: {e}")
-            logger.error(f"Raw response: {response_content[:500]}...")
+            logger.error(f"Raw response length: {len(response_content)} chars")
             
             # Try one more time with aggressive cleaning
             try:

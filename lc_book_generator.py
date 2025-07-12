@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize the LLM (OpenAI Chat model - correct for GPT-4o)
-llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o', temperature=0.65, max_tokens=4000)
+llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o', temperature=0.8, max_tokens=6000)
 
 system_template = """You are a globally renowned, award-winning novelist, ghostwriter, and master storyteller known for creating bestselling novels that captivate readers deeply.
 
@@ -54,7 +54,7 @@ system_template = """You are a globally renowned, award-winning novelist, ghostw
 Return ONLY a valid JSON object in this exact structure:
 
 {{
-  "chapter": "The full chapter content here as immersive, novel-quality prose",
+ "chapter": "The full chapter content as immersive, novel-quality prose, exactly 3000 words. Structure the chapter in three acts: Act 1 (1000 words) establishes the protagonist’s ordinary world and inner conflict; Act 2 (1000 words) introduces the inciting incident with rising tension; Act 3 (1000 words) builds to a climactic hook with vivid sensory details and emotional stakes.",
   "choices": [
     {{
       "id": "choice_1",
@@ -131,12 +131,7 @@ def generate_chapter_from_outline(outline: str):
 def extract_chapter_info_from_json(json_data: Dict[str, Any], chapter_number: int = 1) -> str:
     """Extract relevant chapter and story information from JSON outline."""
     logger.info(f"🔍 Extracting Chapter {chapter_number} info from JSON outline...")
-    
-    # Log the full JSON for debugging
-    logger.info("📄 FULL JSON OUTLINE:")
-    logger.info("=" * 80)
-    logger.info(json.dumps(json_data, indent=2, ensure_ascii=False))
-    logger.info("=" * 80)
+
     
     # Extract story-level information
     story_info = {
@@ -259,15 +254,13 @@ class BookStoryGenerator:
                 
                 # Log what we're sending to LLM
                 logger.info("🤖 SENDING TO LLM:")
-                logger.info("-" * 50)
-                logger.info(formatted_outline[:500] + "..." if len(formatted_outline) > 500 else formatted_outline)
-                logger.info("-" * 50)
+                logger.info(f"   📝 Formatted outline length: {len(formatted_outline)} chars")
                 
                 # Generate chapter
                 result = self.chain.invoke({"outline": formatted_outline, "chapter_number": chapter_number})
                 
                 logger.info(f"✅ Chapter {chapter_number} generated successfully!")
-                logger.info(f"📊 Generated content length: {len(result.content)} characters")
+                logger.info(f"📊 Generated content: {len(result.content)} characters")
                 
                 # Parse the JSON response from LLM
                 return self._parse_chapter_response(result.content.strip(), chapter_number)
@@ -277,14 +270,12 @@ class BookStoryGenerator:
                 logger.info("📄 Input detected as text outline (not JSON)")
                 
                 logger.info("🤖 SENDING TO LLM:")
-                logger.info("-" * 50)
-                logger.info(outline[:500] + "..." if len(outline) > 500 else outline)
-                logger.info("-" * 50)
+                logger.info(f"   📝 Text outline length: {len(outline)} chars")
                 
                 result = self.chain.invoke({"outline": outline, "chapter_number": chapter_number})
                 
                 logger.info(f"✅ Chapter {chapter_number} generated successfully!")
-                logger.info(f"📊 Generated content length: {len(result.content)} characters")
+                logger.info(f"📊 Generated content: {len(result.content)} characters")
                 
                 # Parse the JSON response from LLM
                 return self._parse_chapter_response(result.content.strip(), chapter_number)
@@ -344,7 +335,7 @@ class BookStoryGenerator:
             
         except json.JSONDecodeError as e:
             logger.error(f"❌ JSON parsing error: {e}")
-            logger.error(f"Raw response: {response_content[:500]}...")
+            logger.error(f"Raw response length: {len(response_content)} chars")
             
             # Try one more time with aggressive cleaning
             try:
@@ -393,9 +384,8 @@ class BookStoryGenerator:
         
         # Log the JSON we received
         logger.info("📥 RECEIVED JSON OUTLINE:")
-        logger.info("=" * 80)
-        logger.info(json.dumps(json_outline, indent=2, ensure_ascii=False))
-        logger.info("=" * 80)
+        logger.info(f"   📊 Keys: {list(json_outline.keys())}")
+        logger.info(f"   📚 Chapters: {len(json_outline.get('Chapters', []))}")
         
         try:
             formatted_outline = extract_chapter_info_from_json(json_outline, chapter_number)
@@ -404,7 +394,7 @@ class BookStoryGenerator:
             result = self.chain.invoke({"outline": formatted_outline, "chapter_number": chapter_number})
             
             logger.info(f"✅ Chapter {chapter_number} generated from JSON successfully!")
-            logger.info(f"📊 Generated content length: {len(result.content)} characters")
+            logger.info(f"📊 Generated content: {len(result.content)} characters")
             
             # Parse the JSON response from LLM
             return self._parse_chapter_response(result.content.strip(), chapter_number)

@@ -68,6 +68,11 @@ export default function Generator() {
   const [choiceHistoryLoading, setChoiceHistoryLoading] = useState(false); // Loading choice history
   const [choiceHistoryError, setChoiceHistoryError] = useState(''); // Error loading choice history
 
+  // New state for interactive branching feature
+  const [showInteractiveTimeline, setShowInteractiveTimeline] = useState(false); // Show interactive chapter timeline
+  const [branchingFromChapter, setBranchingFromChapter] = useState(null); // Chapter user wants to branch from
+  const [branchingLoading, setBranchingLoading] = useState(false); // Loading state for branching operation
+
   // Fetch saved Stories and their first chapter from Supabase when switching to 'saved' tab
   useEffect(() => {
     const fetchStories = async () => {
@@ -1579,6 +1584,237 @@ export default function Generator() {
     );
   };
 
+  // Function to handle branching from a previous choice
+  const handleBranchFromChoice = async (chapterNumber, choiceId, choiceData) => {
+    if (!selectedStory || !session?.access_token) {
+      setChoicesError('Please log in and select a story.');
+      return;
+    }
+
+    console.log('🌿 BRANCH: Starting branch operation', {
+      storyId: selectedStory.id,
+      chapterNumber,
+      choiceId,
+      choiceTitle: choiceData?.title
+    });
+
+    setBranchingLoading(true);
+    setChoicesError('');
+
+    try {
+      const requestBody = {
+        story_id: selectedStory.id,
+        chapter_number: chapterNumber,
+        choice_id: choiceId,
+        choice_data: choiceData
+      };
+
+      console.log('📨 BRANCH: Request payload:', requestBody);
+
+      const response = await fetch(createApiUrl(API_ENDPOINTS.BRANCH_FROM_CHOICE), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      const data = await response.json();
+      console.log('📦 BRANCH: Response data:', data);
+
+      if (data.success) {
+        // Show success message
+        setSaveChaptersuccess(`🌿 Branched from Chapter ${chapterNumber}! New Chapter ${data.chapter_number} generated based on your choice: "${choiceData.title}"`);
+        
+        // Refresh the chapters list to show the new branched content
+        const { data: updatedChapters, error } = await supabase
+          .from('Chapters')
+          .select('*')
+          .eq('story_id', selectedStory.id)
+          .order('chapter_number', { ascending: true });
+        
+        if (!error && updatedChapters) {
+          setAllChapters(updatedChapters);
+        }
+
+        // Refresh choice history to show the updated choices
+        await fetchChoiceHistory(selectedStory.id);
+
+        // Hide interactive timeline and reset branching state
+        setShowInteractiveTimeline(false);
+        setBranchingFromChapter(null);
+
+        // Clear any current choice selection state
+        setShowChoices(false);
+        setSelectedChoiceId(null);
+        setAvailableChoices([]);
+
+      } else {
+        const errorMsg = data.detail || 'Failed to branch from choice';
+        console.error('❌ BRANCH: Failed:', errorMsg);
+        setChoicesError(errorMsg);
+      }
+    } catch (err) {
+      console.error('❌ BRANCH: Error:', err);
+      setChoicesError('Error connecting to server');
+    } finally {
+      setBranchingLoading(false);
+    }
+  };
+
+  // Interactive Timeline Component for Branching
+  const renderInteractiveTimeline = () => {
+    if (!allChapters || allChapters.length === 0 || !choiceHistory || choiceHistory.length === 0) {
+      return (
+        <div className="text-gray-400 text-center py-8">
+          <p>No chapters with choices available for branching yet.</p>
+          <p className="text-sm mt-2">Generate some chapters first, then you can explore different story paths!</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-6">
+          <h3 className="text-xl font-bold text-white mb-2">📍 Interactive Story Timeline</h3>
+          <p className="text-gray-300">Click on any choice from previous chapters to explore different story paths</p>
+        </div>
+
+        {allChapters.map((chapter, index) => {
+          const chapterChoices = choiceHistory.find(ch => ch.chapter_number === chapter.chapter_number);
+          const hasChoices = chapterChoices && chapterChoices.choices && chapterChoices.choices.length > 0;
+          
+          if (!hasChoices) return null; // Only show chapters that have choices
+
+          return (
+            <div key={chapter.id} className="relative">
+              {/* Chapter Header */}
+              <div className="flex items-center mb-4">
+                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold mr-4">
+                  {chapter.chapter_number}
+                </div>
+                <div>
+                  <h4 className="text-lg font-semibold text-white">
+                    {chapter.title || `Chapter ${chapter.chapter_number}`}
+                  </h4>
+                  <p className="text-gray-300 text-sm">
+                    {chapter.content?.substring(0, 100)}...
+                  </p>
+                </div>
+              </div>
+
+              {/* Chapter Choices */}
+              <div className="ml-14 space-y-3">
+                <h5 className="text-md font-medium text-gray-200 mb-3">
+                  Available Choices:
+                </h5>
+                
+                {chapterChoices.choices.map((choice) => {
+                  const isSelected = choice.is_selected;
+                  const isBranchingFromThisChapter = branchingFromChapter === chapter.chapter_number;
+                  
+                  return (
+                    <div
+                      key={choice.id}
+                      className={`p-4 rounded-lg border-2 transition-all duration-300 ${
+                        isSelected 
+                          ? 'border-green-500 bg-green-900/20 cursor-default' // Currently selected path
+                          : isBranchingFromThisChapter && branchingLoading
+                            ? 'border-gray-600 bg-gray-800/50 opacity-50 cursor-not-allowed' // Disabled during branching
+                            : 'border-gray-600 bg-gray-800/30 hover:border-blue-500 hover:bg-blue-900/20 cursor-pointer transform hover:scale-[1.02] hover:shadow-lg' // Available to select - enhanced hover
+                      }`}
+                      onClick={() => {
+                        if (branchingLoading) return; // Prevent clicks during loading
+                        
+                        if (isSelected) {
+                          // This is the current path - no action needed
+                          return;
+                        } else {
+                          // This is a different choice - allow branching
+                          handleBranchFromChoice(chapter.chapter_number, choice.id, choice);
+                        }
+                      }}
+                    >
+                      <div className="flex items-start">
+                        <div className={`w-6 h-6 rounded-full border-2 mr-3 mt-1 flex-shrink-0 ${
+                          isSelected
+                            ? 'border-green-500 bg-green-500' // Currently selected
+                            : 'border-gray-500 hover:border-blue-400' // Available
+                        }`}>
+                          {isSelected && (
+                            <div className="w-2 h-2 bg-white rounded-full m-auto mt-1"></div>
+                          )}
+                        </div>
+                        
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <h6 className={`font-semibold mb-1 ${
+                              isSelected ? 'text-green-300' : 'text-white'
+                            }`}>
+                              {choice.title}
+                              {isSelected && <span className="ml-2 text-xs bg-green-800 px-2 py-1 rounded">Current Path</span>}
+                            </h6>
+                            
+                            {!isSelected && (
+                              <div className="text-xs text-blue-400 font-medium pointer-events-none">
+                                {branchingLoading && isBranchingFromThisChapter ? '🔄 Branching...' : '🌿 Click to explore this path'}
+                              </div>
+                            )}
+                          </div>
+                          
+                          <p className="text-gray-300 text-sm leading-relaxed mb-2">
+                            {choice.description}
+                          </p>
+                          
+                          <div className="flex items-center space-x-2">
+                            <span className={`text-xs px-2 py-1 rounded ${
+                              choice.story_impact === 'high' ? 'bg-red-900/50 text-red-300' :
+                              choice.story_impact === 'medium' ? 'bg-yellow-900/50 text-yellow-300' :
+                              'bg-green-900/50 text-green-300'
+                            }`}>
+                              {choice.story_impact} impact
+                            </span>
+                            <span className="text-xs px-2 py-1 rounded bg-purple-900/50 text-purple-300">
+                              {choice.choice_type}
+                            </span>
+                          </div>
+                          
+                          {isSelected && choice.selected_at && (
+                            <p className="text-xs text-gray-400 mt-2">
+                              Selected on {new Date(choice.selected_at).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Connection line to next chapter (except for last) */}
+              {index < allChapters.length - 1 && (
+                <div className="flex justify-center py-6">
+                  <div className="w-0.5 h-8 bg-gray-600"></div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        
+        {/* Close Timeline Button */}
+        <div className="text-center pt-6">
+          <button
+            onClick={() => setShowInteractiveTimeline(false)}
+            className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg"
+          >
+            Close Timeline
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen w-screen bg-black flex items-center justify-center relative">
       {/* Modal for viewing full story - render at root level for proper overlay */}
@@ -1632,7 +1868,7 @@ export default function Generator() {
                       </div>
                     </div>
                   ) : (
-                    renderStoryProgression()
+                    showInteractiveTimeline ? renderInteractiveTimeline() : renderStoryProgression()
                   )}
 
                   {/* Action Buttons */}
@@ -1676,6 +1912,16 @@ export default function Generator() {
                         disabled={choicesLoading}
                       >
                         {choicesLoading ? 'Generating...' : '🔄 Try Different Choices'}
+                      </button>
+                    )}
+                    {/* Interactive Timeline Button - Show if story has chapters with choices */}
+                    {allChapters.length > 0 && choiceHistory.length > 0 && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setShowInteractiveTimeline(!showInteractiveTimeline)}
+                        disabled={branchingLoading}
+                      >
+                        {showInteractiveTimeline ? '📖 Show Story' : '🌿 Explore Paths'}
                       </button>
                     )}
                     <button

@@ -23,5 +23,6 @@ export const API_ENDPOINTS = {
   // New branching choices endpoints
   GENERATE_CHOICES: '/generate_choices',
   GENERATE_CHAPTER_WITH_CHOICE: '/generate_chapter_with_choice',
-  CHOICE_HISTORY: '/story/{story_id}/choice_history'
+  CHOICE_HISTORY: '/story/{story_id}/choice_history',
+  BRANCH_FROM_CHOICE: '/branch_from_choice'
 };

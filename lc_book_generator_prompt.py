@@ -67,8 +67,6 @@ user_template = """Please analyze this story idea and create a comprehensive, st
 4. Identify world-famous authors aligned with the detected genre and emulate their narrative style, tone, and pacing while creating the outline.
 5. Build compelling characters and layered conflicts.
 6. Structure a logical, professional chapter progression.
-
-
 📄 RETURN FORMAT (JSON ONLY):
 {{
   "book_title": "",
@@ -101,8 +99,6 @@ user_template = """Please analyze this story idea and create a comprehensive, st
       "chapter_number": 1,
       "chapter_title": "",
       "chapter_summary": "",
-      "estimated_word_count": 0,
-      "cliffhanger_cta": ""
     }}
   ]
 }}

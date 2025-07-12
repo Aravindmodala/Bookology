@@ -74,7 +74,6 @@ def generate_chapter_summary(
         logger.info(f"📊 SUMMARY LLM: Input parameters:")
         logger.info(f"   📝 Chapter content length: {len(chapter_content)} chars")
         logger.info(f"   📄 Story context length: {len(story_context)} chars")
-        logger.info(f"   📖 Story title: '{story_title}'")
         logger.info(f"   📑 Chapter number: {chapter_number}")
         
         # Capture LLM parameters for metrics
@@ -99,8 +98,7 @@ def generate_chapter_summary(
         
         # Log what we're sending to the LLM
         logger.info(f"🎯 SUMMARY LLM: Preparing LLM prompt...")
-        logger.info(f"📄 SUMMARY LLM: Story context preview: {story_context[:200]}...")
-        logger.info(f"📝 SUMMARY LLM: Chapter content preview: {chapter_content[:200]}...")
+        
         
         # Generate the summary
         logger.info(f"🚀 SUMMARY LLM: Calling LLM chain...")
@@ -147,7 +145,7 @@ def generate_chapter_summary(
         
         # Log the actual summary generated
         logger.info(f"✅ SUMMARY LLM: Summary generated successfully!")
-        logger.info(f"📝 SUMMARY LLM: Full summary preview: {summary_text[:200]}...")
+        logger.info(f"📝 SUMMARY LLM: Summary length: {len(summary_text)} characters")
         
         final_result = {
             "success": True,
