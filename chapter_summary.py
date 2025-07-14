@@ -17,7 +17,7 @@ load_dotenv()
 summary_llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"), 
     model_name='gpt-4o-mini', 
-    temperature=0.3,  # Lower temperature for more consistent summaries
+    temperature=0.25,  # Lower temperature for more consistent summaries
     max_tokens=500    # Summaries should be concise
 )
 
@@ -27,6 +27,8 @@ summary_prompt = PromptTemplate(
     template="""You are a professional story editor who creates concise, accurate chapter summaries for story continuity.
 
 Your task is to create a summary of Chapter {chapter_number} that will help maintain story continuity for future Chapters.
+
+❗️IMPORTANT: Do not invent new characters, events, or details not explicitly found in the chapter content. Only summarize what is present.
 
 STORY CONTEXT:
 {story_context}
@@ -71,37 +73,20 @@ def generate_chapter_summary(
         logger.info(f"🤖 SUMMARY LLM: Starting summary generation for Chapter {chapter_number} of '{story_title}'...")
         
         # Log input parameters
-        logger.info(f"📊 SUMMARY LLM: Input parameters:")
-        logger.info(f"   📝 Chapter content length: {len(chapter_content)} chars")
-        logger.info(f"   📄 Story context length: {len(story_context)} chars")
-        logger.info(f"   📑 Chapter number: {chapter_number}")
         
         # Capture LLM parameters for metrics
         llm_temperature = summary_llm.temperature
         llm_model = summary_llm.model_name
         llm_max_tokens = summary_llm.max_tokens
-        
-        logger.info(f"⚙️ SUMMARY LLM: Model configuration:")
-        logger.info(f"   🤖 Model: {llm_model}")
-        logger.info(f"   🌡️ Temperature: {llm_temperature}")
-        logger.info(f"   🎯 Max tokens: {llm_max_tokens}")
-        
+
         # Calculate input metrics
         input_word_count = len(chapter_content.split())
         context_word_count = len(story_context.split())
         total_input_words = input_word_count + context_word_count
-        
-        logger.info(f"📊 SUMMARY LLM: Input metrics:")
-        logger.info(f"   📝 Chapter words: {input_word_count}")
-        logger.info(f"   📄 Context words: {context_word_count}")
-        logger.info(f"   📋 Total input words: {total_input_words}")
-        
+
         # Log what we're sending to the LLM
-        logger.info(f"🎯 SUMMARY LLM: Preparing LLM prompt...")
-        
-        
+
         # Generate the summary
-        logger.info(f"🚀 SUMMARY LLM: Calling LLM chain...")
         
         try:
             result = summary_chain.invoke({
@@ -109,21 +94,14 @@ def generate_chapter_summary(
                 "chapter_number": chapter_number,
                 "story_context": story_context
             })
-            
-            logger.info(f"✅ SUMMARY LLM: LLM chain completed successfully")
-            logger.info(f"📊 SUMMARY LLM: Raw result type: {type(result)}")
-            logger.info(f"📝 SUMMARY LLM: Raw result length: {len(str(result))} chars")
-            
+
         except Exception as llm_error:
             logger.error(f"❌ SUMMARY LLM: LLM chain failed: {str(llm_error)}")
             logger.error(f"🔍 SUMMARY LLM: Error type: {type(llm_error)}")
             raise llm_error
         
         summary_text = result.content.strip()
-        
-        logger.info(f"🔧 SUMMARY LLM: Processing LLM response...")
-        logger.info(f"📝 SUMMARY LLM: Summary text after strip: {len(summary_text)} chars")
-        
+
         # Calculate output metrics
         output_word_count = len(summary_text.split())
         
@@ -131,21 +109,11 @@ def generate_chapter_summary(
         estimated_input_tokens = int(total_input_words * 1.33)
         estimated_output_tokens = int(output_word_count * 1.33)
         estimated_total_tokens = estimated_input_tokens + estimated_output_tokens
-        
-        logger.info(f"📊 SUMMARY LLM: Output metrics calculated:")
-        logger.info(f"   📝 Summary words: {output_word_count}")
-        logger.info(f"   📏 Summary length: {len(summary_text)} characters")
-        logger.info(f"   🎯 Estimated input tokens: {estimated_input_tokens}")
-        logger.info(f"   🎯 Estimated output tokens: {estimated_output_tokens}")
-        logger.info(f"   🎯 Estimated total tokens: {estimated_total_tokens}")
-        
+
         # Show compression ratio
         compression_ratio = round(output_word_count / max(input_word_count, 1), 3)
-        logger.info(f"📉 SUMMARY LLM: Compression ratio: {compression_ratio} ({output_word_count}/{input_word_count})")
         
         # Log the actual summary generated
-        logger.info(f"✅ SUMMARY LLM: Summary generated successfully!")
-        logger.info(f"📝 SUMMARY LLM: Summary length: {len(summary_text)} characters")
         
         final_result = {
             "success": True,
@@ -169,10 +137,7 @@ def generate_chapter_summary(
                 "estimated_total_tokens": estimated_total_tokens
             }
         }
-        
-        logger.info(f"🎉 SUMMARY LLM: Returning successful result")
-        logger.info(f"📋 SUMMARY LLM: Result keys: {list(final_result.keys())}")
-        
+
         return final_result
         
     except Exception as e:

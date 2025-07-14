@@ -213,7 +213,7 @@ class EmbeddingService:
             if "postgresql+psycopg://" in connection_string:
                 connection_string = connection_string.replace("postgresql+psycopg://", "postgresql://")
             
-            async def delete_from_db():
+            def delete_from_db():
                 with psycopg.connect(connection_string) as conn:
                     with conn.cursor() as cur:
                         cur.execute(

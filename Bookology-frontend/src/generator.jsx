@@ -14,6 +14,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { useAuth } from './AuthContext';
 import StoryChatbot from './StoryChatbot';
+import StoryTreeVisualization from './StoryTreeVisualization';
 import { createApiUrl, API_ENDPOINTS } from './config';
 
 export default function Generator() {
@@ -38,9 +39,7 @@ export default function Generator() {
   const [storyId, setStoryId] = useState(null);
   const [nextChapterLoading, setNextChapterLoading] = useState(false);
   const [nextChapterError, setNextChapterError] = useState('');
-  const [nextChapterText, setNextChapterText] = useState('');
   const [currentChapterNumber, setCurrentChapterNumber] = useState(2); // Assuming chapter 1 is already generated
-  const [saveChapterLoading, setSaveChapterLoading] = useState(false);
   const [saveChaptersuccess, setSaveChaptersuccess] = useState('');
   const [saveChapterError, setSaveChapterError] = useState('');
   const [allChapters, setAllChapters] = useState([]);
@@ -72,6 +71,19 @@ export default function Generator() {
   const [showInteractiveTimeline, setShowInteractiveTimeline] = useState(false); // Show interactive chapter timeline
   const [branchingFromChapter, setBranchingFromChapter] = useState(null); // Chapter user wants to branch from
   const [branchingLoading, setBranchingLoading] = useState(false); // Loading state for branching operation
+
+  // New state for draft comparison feature
+  const [draftComparison, setDraftComparison] = useState(null); // Holds both original and preview versions
+  const [showDraftModal, setShowDraftModal] = useState(false); // Show/hide draft comparison modal
+  const [previewLoading, setPreviewLoading] = useState(false); // Loading state for preview generation
+
+  // New state for tree visualization
+  const [showTreeVisualization, setShowTreeVisualization] = useState(false); // Show tree visualization modal
+  
+  // New state for chapter versioning
+  const [chapterVersions, setChapterVersions] = useState({}); // Store versions for each chapter {story_id_chapter_number: versions[]}
+  const [versionLoading, setVersionLoading] = useState({}); // Loading state for version fetching
+  const [activeVersions, setActiveVersions] = useState({}); // Track which version is active for each chapter
 
   // Fetch saved Stories and their first chapter from Supabase when switching to 'saved' tab
   useEffect(() => {
@@ -127,51 +139,51 @@ export default function Generator() {
   useEffect(() => {
     const fetchChapters = async () => {
       if (selectedStory) {
-        console.log('🔍 CHAPTER FETCH - Starting fetch for story:', selectedStory.id, selectedStory.story_title);
+        console.log('📖 Fetching chapters for story:', selectedStory.story_title);
         setFetchingChapters(true);
         
         try {
+          // Only fetch active chapters (is_active = true)
           const { data: Chapters, error } = await supabase
             .from('Chapters')
             .select('*')
             .eq('story_id', selectedStory.id)
+            .eq('is_active', true)  // Only get active versions
             .order('chapter_number', { ascending: true });
           
-          console.log('📊 CHAPTER FETCH - Query result:', { 
-            Chapters: Chapters?.length || 0, 
-            error: error?.message,
-            storyId: selectedStory.id 
-          });
-          
           if (error) {
-            console.error('❌ CHAPTER FETCH - Error:', error);
+            console.error('❌ Chapter fetch error:', error);
             setAllChapters([]);
-          } else {
-            console.log('✅ CHAPTER FETCH - Success:', Chapters?.length || 0, 'Chapters found');
-            if (Chapters && Chapters.length > 0) {
-              console.log('📖 CHAPTER FETCH - Chapters:', Chapters.map(c => `Ch${c.chapter_number}: ${c.title || 'Untitled'}`));
-            }
-            setAllChapters(Chapters || []);
+                  } else {
+          console.log('✅ Found', Chapters?.length || 0, 'active chapters');
+          setAllChapters(Chapters || []);
+          
+          // Fetch versions for each chapter
+          for (const chapter of Chapters || []) {
+            await fetchChapterVersions(selectedStory.id, chapter.chapter_number);
           }
-        } catch (fetchError) {
-          console.error('❌ CHAPTER FETCH - Exception:', fetchError);
-          setAllChapters([]);
+          
+          // Fetch choice history using the freshly fetched chapters (not state)
+          if ((Chapters || []).length > 0) {
+            console.log('📋 Fetching choice history for', Chapters.length, 'chapters...');
+            await fetchChoiceHistoryWithChapters(selectedStory.id, Chapters);
+          }
         }
-        
-        setFetchingChapters(false);
-
-        // Also fetch choice history when opening a story
-        fetchChoiceHistory(selectedStory.id);
+      } catch (fetchError) {
+        console.error('❌ CHAPTER FETCH - Exception:', fetchError);
+        setAllChapters([]);
       }
-    };
-    fetchChapters();
+      
+      setFetchingChapters(false);
+    }
+  };
+  fetchChapters();
   }, [selectedStory]);
 
   // Reset state when switching Stories or Chapters
   useEffect(() => {
     if (selectedStory) {
       // CRITICAL: Reset ALL story-specific state when switching Stories
-      setNextChapterText('');
       setSaveChaptersuccess('');
       setSaveChapterError('');
       // Don't set currentChapterNumber here - wait for Chapters to load
@@ -193,6 +205,11 @@ export default function Generator() {
       // Clear chatbot state if needed
       setShowChatbot(false);
       
+      // Clear draft comparison state
+      setDraftComparison(null);
+      setShowDraftModal(false);
+      setPreviewLoading(false);
+      
       console.log('🧹 State reset for story switch:', selectedStory.id, selectedStory.story_title);
     }
   }, [selectedStory]); // Remove allChapters dependency to prevent loops
@@ -207,17 +224,31 @@ export default function Generator() {
   // After saving a chapter, refresh the chapter list
   useEffect(() => {
     if (selectedStory && saveChaptersuccess) {
-      // Re-fetch Chapters after a successful save
+      // Re-fetch active Chapters after a successful save
       (async () => {
         const { data: Chapters, error } = await supabase
           .from('Chapters')
           .select('*')
           .eq('story_id', selectedStory.id)
+          .eq('is_active', true)  // Only get active versions
           .order('chapter_number', { ascending: true });
         if (!error) setAllChapters(Chapters || []);
       })();
     }
   }, [saveChaptersuccess, selectedStory]);
+
+  // Fetch chapter versions when chapters are loaded
+  useEffect(() => {
+    if (selectedStory && allChapters.length > 0) {
+      // Fetch versions for each chapter that doesn't have versions loaded yet
+      allChapters.forEach(chapter => {
+        const key = `${selectedStory.id}_${chapter.chapter_number}`;
+        if (!chapterVersions[key] && !versionLoading[key]) {
+          fetchChapterVersions(selectedStory.id, chapter.chapter_number);
+        }
+      });
+    }
+  }, [selectedStory, allChapters]);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -241,7 +272,6 @@ export default function Generator() {
     setChoicesError('');
     setChoiceHistory([]);
     setChoiceHistoryError('');
-    setNextChapterText('');
     setCurrentChapterNumber(1);
     setStoryId(null);
     
@@ -314,7 +344,6 @@ export default function Generator() {
     setChoicesError('');
     setChoiceHistory([]);
     setChoiceHistoryError('');
-    setNextChapterText('');
     setCurrentChapterNumber(1);
     try {
       const response = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_CHAPTER), {
@@ -775,19 +804,41 @@ export default function Generator() {
     }
   };
 
-  // Delete story from Supabase (will cascade delete Chapters if FK is set to CASCADE)
+  // Delete story using backend endpoint (handles cascade deletion properly)
   const handleDeleteStory = async (storyId) => {
+    if (!session?.access_token) {
+      setDeleteError('Please log in to delete stories.');
+      return;
+    }
+
     setDeleteLoading(true);
     setDeleteError('');
-    const { error } = await supabase.from('Stories').delete().eq('id', storyId);
-    if (error) {
-      setDeleteError(error.message);
-    } else {
-      setSelectedStory(null);
-      // Refresh Stories list
-      setSavedStories((prev) => prev.filter((s) => s.id !== storyId));
+    
+    try {
+      const response = await fetch(createApiUrl(`/story/${storyId}`), {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setSelectedStory(null);
+        // Refresh Stories list
+        setSavedStories((prev) => prev.filter((s) => s.id !== storyId));
+        console.log('✅ Story deleted successfully:', data.message);
+      } else {
+        setDeleteError(data.detail || 'Failed to delete story');
+      }
+    } catch (error) {
+      console.error('❌ Delete story error:', error);
+      setDeleteError('Error connecting to server');
+    } finally {
+      setDeleteLoading(false);
     }
-    setDeleteLoading(false);
   };
 
   // Function to generate the next chapter for a saved story
@@ -837,7 +888,6 @@ export default function Generator() {
     setChoiceHistoryError('');
     // DON'T clear allChapters when closing modal - only when switching Stories
     // setAllChapters([]);  // REMOVED
-    setNextChapterText('');
     setNextChapterLoading(false);
     setNextChapterError('');
     setSaveChaptersuccess('');
@@ -861,7 +911,6 @@ export default function Generator() {
     setChoiceHistoryError('');
     // DON'T clear allChapters here - let fetchChapters handle it
     // setAllChapters([]); // REMOVED
-    setNextChapterText('');
     setNextChapterLoading(false);
     setNextChapterError('');
     setSaveChaptersuccess('');
@@ -974,18 +1023,8 @@ export default function Generator() {
     setChoicesError('');
 
     try {
-      console.log('🚀 SAVED STORY CHOICE - Generating chapter for story:', selectedStory.id, 'choice:', choiceId);
+      console.log('🎯 Generating chapter with choice:', selectedChoice.title);
       
-      // Log complete choice data
-      console.log('📊 CHOICE DATA BEING SENT:', {
-        choiceId,
-        selectedChoice,
-        choiceIdType: typeof choiceId,
-        selectedChoiceId: selectedChoice.id,
-        selectedChoiceIdType: typeof selectedChoice.id,
-        currentChapterNumber
-      });
-
       // Calculate the correct next chapter number for saved Stories
       const nextChapterNumber = (allChapters?.length || 0) + 1;
       
@@ -996,14 +1035,6 @@ export default function Generator() {
         next_chapter_num: nextChapterNumber,
         token: session.access_token
       };
-      
-      console.log('📊 SAVED STORY CHAPTER CALCULATION:', {
-        allChaptersLength: allChapters?.length || 0,
-        currentChapterNumber,
-        calculatedNextChapterNumber: nextChapterNumber
-      });
-
-      console.log('📨 COMPLETE REQUEST BODY:', requestBody);
 
       const response = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_CHAPTER_WITH_CHOICE), {
         method: 'POST',
@@ -1027,14 +1058,14 @@ export default function Generator() {
           return;
         }
 
-        // Set the new chapter content to display
-        setNextChapterText(data.chapter_content);
+        // Chapter content is automatically saved to database, no need to show preview
 
-        // Fetch the updated chapters list and update state
+        // Fetch the updated chapters list and update state (only active versions)
         const { data: Chapters, error } = await supabase
           .from('Chapters')
           .select('*')
           .eq('story_id', selectedStory.id)
+          .eq('is_active', true)  // Only get active versions
           .order('chapter_number', { ascending: true });
         if (!error) setAllChapters(Chapters || []);
 
@@ -1117,18 +1148,18 @@ export default function Generator() {
       if (response.ok) {
         console.log('✅ Chapter generated and saved successfully!');
         
-        // Clear the preview text since it's now saved
-        setNextChapterText('');
+        // Chapter is now saved automatically
         
-        // Refresh the Chapters list to show the new chapter
+        // Refresh the Chapters list to show the new chapter (only active versions)
         const { data: Chapters, error } = await supabase
           .from('Chapters')
           .select('*')
           .eq('story_id', selectedStory.id)
+          .eq('is_active', true)  // Only get active versions
           .order('chapter_number', { ascending: true });
         
         if (!error) {
-          console.log('✅ Refreshed Chapters list, found', Chapters?.length || 0, 'Chapters');
+          console.log('✅ Refreshed active Chapters list, found', Chapters?.length || 0, 'Chapters');
           setAllChapters(Chapters || []);
           setCurrentChapterNumber(prev => prev + 1);
           
@@ -1158,55 +1189,8 @@ export default function Generator() {
     }
   };
 
-  // Handler for saving a generated chapter (not chapter 1)
-  const handleSaveChapter = async () => {
-    setSaveChapterLoading(true);
-    setSaveChaptersuccess('');
-    setSaveChapterError('');
-    
-    // Get the user's JWT token from AuthContext
-    const token = session?.access_token;
-    
-    try {
-      const headers = { 'Content-Type': 'application/json' };
-      
-      // Add auth header for authenticated request
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      } else {
-        setSaveChapterError('You must be logged in to save Chapters.');
-        setSaveChapterLoading(false);
-        return;
-      }
-      
-      const response = await fetch(createApiUrl(API_ENDPOINTS.SAVE_CHAPTER), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          story_id: selectedStory.id,
-          chapter_number: currentChapterNumber,
-          content: nextChapterText,
-        }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setSaveChaptersuccess('Chapter saved successfully!');
-        setNextChapterText('');
-        setCurrentChapterNumber(prev => prev + 1);
-        
-        // Auto-generate choices for the next chapter after saving
-        setTimeout(() => {
-          handleGenerateChoices(nextChapterText, currentChapterNumber);
-        }, 1500);
-      } else {
-        setSaveChapterError(data.detail || 'Error saving chapter.');
-      }
-    } catch (err) {
-      setSaveChapterError('Error connecting to backend.');
-    } finally {
-      setSaveChapterLoading(false);
-    }
-  };
+  // Handler for saving a generated chapter (not chapter 1) - REMOVED
+  // Chapters are now automatically saved when generated with choices
 
   // Function to fetch choice history for a story
   const fetchChoiceHistory = async (storyId) => {
@@ -1225,7 +1209,151 @@ export default function Generator() {
     console.log('🔄 CHOICE SELECTION RESET for history fetch');
     
     try {
-      const response = await fetch(createApiUrl(`/story/${storyId}/choice_history`), {
+      // NEW APPROACH: Fetch choices for each active chapter using chapter_id
+      const choiceHistoryForActiveChapters = [];
+      
+      for (const chapter of allChapters) {
+        if (chapter.is_active !== false) { // Only fetch for active chapters
+          const choicesResponse = await fetch(createApiUrl(API_ENDPOINTS.GET_CHAPTER_CHOICES.replace('{chapter_id}', chapter.id)), {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          });
+          
+          if (choicesResponse.ok) {
+            const choicesData = await choicesResponse.json();
+            if (choicesData.success && choicesData.choices) {
+              choiceHistoryForActiveChapters.push({
+                chapter_number: chapter.chapter_number,
+                chapter_id: chapter.id,
+                choices: choicesData.choices.map(choice => ({
+                  ...choice,
+                  id: choice.id || choice.choice_id,
+                  choice_id: choice.choice_id || choice.id
+                })),
+                selected_choice: choicesData.choices.find(c => c.is_selected) || null
+              });
+            }
+          }
+        }
+      }
+      
+      // Sort by chapter number
+      choiceHistoryForActiveChapters.sort((a, b) => a.chapter_number - b.chapter_number);
+      
+      console.log('✅ Choice history fetched using chapter_id:', choiceHistoryForActiveChapters.length, 'Chapters');
+      console.log('🔧 Choice history data:', choiceHistoryForActiveChapters.map(ch => ({
+        chapter: ch.chapter_number,
+        chapter_id: ch.chapter_id,
+        choiceCount: ch.choices.length,
+        choiceIds: ch.choices.map(c => c.id)
+      })));
+      
+      setChoiceHistory(choiceHistoryForActiveChapters);
+      setChoiceHistoryError('');
+      
+    } catch (err) {
+      console.error('❌ Error fetching choice history:', err);
+      setChoiceHistoryError('Error connecting to server');
+      setChoiceHistory([]);
+    } finally {
+      setChoiceHistoryLoading(false);
+    }
+  };
+
+  // Function to fetch choices using provided chapters (avoids race condition with state)
+  const fetchChoiceHistoryWithChapters = async (storyId, chapters) => {
+    console.log('📋 CHOICE HISTORY WITH CHAPTERS - Fetching for story:', storyId, 'with', chapters.length, 'chapters');
+    setChoiceHistoryLoading(true);
+    setChoiceHistoryError('');
+    
+    if (!storyId || !session?.access_token || !chapters || chapters.length === 0) {
+      setChoiceHistoryError('Story ID, authentication, or chapters required');
+      setChoiceHistoryLoading(false);
+      return;
+    }
+    
+    // CRITICAL: Reset choice selection state when fetching new history
+    setSelectedChoiceId(null);
+    console.log('🔄 CHOICE SELECTION RESET for history fetch');
+    
+    try {
+      // Fetch choices for each active chapter using chapter_id
+      const choiceHistoryForActiveChapters = [];
+      
+      for (const chapter of chapters) {
+        if (chapter.is_active !== false) { // Only fetch for active chapters
+          console.log('🔍 Fetching choices for chapter:', chapter.chapter_number, 'ID:', chapter.id);
+          
+          const choicesResponse = await fetch(createApiUrl(API_ENDPOINTS.GET_CHAPTER_CHOICES.replace('{chapter_id}', chapter.id)), {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          });
+          
+          if (choicesResponse.ok) {
+            const choicesData = await choicesResponse.json();
+            console.log('📦 Choices response for chapter', chapter.chapter_number, ':', choicesData);
+            
+            if (choicesData.success && choicesData.choices) {
+              choiceHistoryForActiveChapters.push({
+                chapter_number: chapter.chapter_number,
+                chapter_id: chapter.id,
+                choices: choicesData.choices.map(choice => ({
+                  ...choice,
+                  id: choice.id || choice.choice_id,
+                  choice_id: choice.choice_id || choice.id
+                })),
+                selected_choice: choicesData.choices.find(c => c.is_selected) || null
+              });
+              console.log('✅ Added', choicesData.choices.length, 'choices for chapter', chapter.chapter_number);
+            } else {
+              console.log('ℹ️ No choices found for chapter', chapter.chapter_number);
+            }
+          } else {
+            console.error('❌ Failed to fetch choices for chapter', chapter.chapter_number, 'Status:', choicesResponse.status);
+          }
+        }
+      }
+      
+      // Sort by chapter number
+      choiceHistoryForActiveChapters.sort((a, b) => a.chapter_number - b.chapter_number);
+      
+      console.log('✅ Choice history fetched using provided chapters:', choiceHistoryForActiveChapters.length, 'Chapters with choices');
+      console.log('🔧 Choice history data:', choiceHistoryForActiveChapters.map(ch => ({
+        chapter: ch.chapter_number,
+        chapter_id: ch.chapter_id,
+        choiceCount: ch.choices.length,
+        choiceIds: ch.choices.map(c => c.id)
+      })));
+      
+      setChoiceHistory(choiceHistoryForActiveChapters);
+      setChoiceHistoryError('');
+      
+    } catch (err) {
+      console.error('❌ Error fetching choice history with chapters:', err);
+      setChoiceHistoryError('Error connecting to server');
+      setChoiceHistory([]);
+    } finally {
+      setChoiceHistoryLoading(false);
+    }
+  };
+
+  // Helper function to fetch choices for a specific chapter by chapter_id
+  const fetchChoicesForChapter = async (chapterId) => {
+    console.log('🎯 Fetching choices for chapter ID:', chapterId);
+    
+    if (!chapterId || !session?.access_token) {
+      console.error('❌ Missing chapter ID or authentication');
+      return [];
+    }
+    
+    try {
+      const response = await fetch(createApiUrl(API_ENDPOINTS.GET_CHAPTER_CHOICES.replace('{chapter_id}', chapterId)), {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -1233,41 +1361,27 @@ export default function Generator() {
         }
       });
 
-      const data = await response.json();
+      if (!response.ok) {
+        console.error('❌ Failed to fetch choices for chapter:', response.status);
+        return [];
+      }
 
-      if (data.success) {
-        console.log('✅ Choice history fetched:', data.choice_history.length, 'Chapters');
-        
-        // CRITICAL FIX: Normalize choice IDs to ensure every choice has an 'id' field
-        const normalizedChoiceHistory = data.choice_history.map(chapterHistory => ({
-          ...chapterHistory,
-          choices: chapterHistory.choices ? chapterHistory.choices.map(choice => ({
-            ...choice,
-            id: choice.id || choice.choice_id, // Ensure id field exists
-            choice_id: choice.choice_id || choice.id // Maintain both for compatibility
-          })) : []
+      const data = await response.json();
+      
+      if (data.success && data.choices) {
+        console.log('✅ Choices fetched for chapter:', data.choices.length);
+        return data.choices.map(choice => ({
+          ...choice,
+          id: choice.id || choice.choice_id,
+          choice_id: choice.choice_id || choice.id
         }));
-        
-        console.log('🔧 Choice history normalized:', normalizedChoiceHistory.map(ch => ({
-          chapter: ch.chapter_number,
-          choiceCount: ch.choices.length,
-          choiceIds: ch.choices.map(c => c.id)
-        })));
-        
-        setChoiceHistory(normalizedChoiceHistory);
-        setChoiceHistoryError('');
       } else {
-        const errorMsg = data.detail || 'Failed to fetch choice history';
-        console.error('❌ Failed to fetch choice history:', errorMsg);
-        setChoiceHistoryError(errorMsg);
-        setChoiceHistory([]);
+        console.error('❌ No choices found for chapter:', chapterId);
+        return [];
       }
     } catch (err) {
-      console.error('❌ Error fetching choice history:', err);
-      setChoiceHistoryError('Error connecting to server');
-      setChoiceHistory([]);
-    } finally {
-      setChoiceHistoryLoading(false);
+      console.error('❌ Error fetching choices for chapter:', err);
+      return [];
     }
   };
 
@@ -1281,6 +1395,12 @@ export default function Generator() {
     // 2. selectedStory exists, it's current chapter, and this is the last chapter (user can try different paths)
     const allowChoiceSelection = showNewChoices || (selectedStory && isCurrentChapter);
     
+    // Get version data for this chapter
+    const key = selectedStory ? `${selectedStory.id}_${chapter.chapter_number}` : null;
+    const versions = key ? chapterVersions[key] || [] : [];
+    const activeVersionId = key ? activeVersions[key] : null;
+    const isLoadingVersions = key ? versionLoading[key] : false;
+    
     console.log('🎮 CHOICE INTERACTION - Chapter', chapter.chapter_number, {
       selectedStory: !!selectedStory,
       isCurrentChapter,
@@ -1291,23 +1411,94 @@ export default function Generator() {
       currentSelectedChoiceId: selectedChoiceId,
       choicesCount: chapterChoices?.choices?.length || 0,
       choiceIds: chapterChoices?.choices?.map(c => c.id) || [],
-      logicReason: showNewChoices ? 'showNewChoices=true' : (selectedStory && isCurrentChapter) ? 'saved story + current chapter' : 'no match'
+      logicReason: showNewChoices ? 'showNewChoices=true' : (selectedStory && isCurrentChapter) ? 'saved story + current chapter' : 'no match',
+      versionsCount: versions.length
     });
     
     return (
       <div className={`relative ${isCurrentChapter ? 'ring-2 ring-blue-500' : ''}`}>
         {/* Chapter Content Card */}
         <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-white">
-              📖 Chapter {chapter.chapter_number}
-            </h3>
-            {isCurrentChapter && (
-              <span className="text-xs px-3 py-1 bg-blue-900/50 text-blue-300 rounded-full">
-                Current
-              </span>
+          {/* Chapter Header with Version Dropdown */}
+          <div className="flex justify-between items-start mb-4">
+            <div className="flex-1">
+              <h3 className="text-xl font-bold text-white">
+                📖 Chapter {chapter.chapter_number}
+              </h3>
+              <div className="flex items-center gap-4 text-sm text-gray-400 mt-1">
+                <span>📝 {chapter.word_count || 0} words</span>
+                <span>📅 {new Date(chapter.created_at).toLocaleDateString()}</span>
+                {chapter.user_choice_title && (
+                  <span className="bg-blue-900/30 px-2 py-1 rounded text-blue-300">
+                    Choice: {chapter.user_choice_title}
+                  </span>
+                )}
+                {isCurrentChapter && (
+                  <span className="text-xs px-3 py-1 bg-blue-900/50 text-blue-300 rounded-full">
+                    Current
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            {/* Version Dropdown */}
+            {versions.length > 1 && (
+              <div className="relative min-w-[200px]">
+                <select
+                  className="bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={activeVersionId || ''}
+                  onChange={(e) => {
+                    const versionId = parseInt(e.target.value);
+                    if (versionId !== activeVersionId) {
+                      switchChapterVersion(selectedStory.id, chapter.chapter_number, versionId);
+                    }
+                  }}
+                  disabled={isLoadingVersions}
+                >
+                  {isLoadingVersions ? (
+                    <option>Loading versions...</option>
+                  ) : (
+                    versions.map(version => (
+                      <option key={version.id} value={version.id}>
+                        Version {version.version_number}
+                        {version.is_active ? ' (Active)' : ''}
+                        {version.user_choice_title ? ` - ${version.user_choice_title}` : ''}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <div className="text-xs text-gray-500 mt-1">
+                  {versions.length} version{versions.length !== 1 ? 's' : ''} available
+                </div>
+              </div>
             )}
           </div>
+
+          {/* Version History Info */}
+          {versions.length > 1 && (
+            <div className="mb-4 p-3 bg-gray-900/50 rounded border border-gray-700">
+              <h4 className="text-sm font-medium text-gray-300 mb-2">📚 Version History</h4>
+              <div className="space-y-2">
+                {versions.slice(0, 3).map(version => (
+                  <div key={version.id} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${version.is_active ? 'bg-green-500' : 'bg-gray-500'}`}></span>
+                      <span className="text-gray-400">Version {version.version_number}</span>
+                      {version.user_choice_title && (
+                        <span className="text-blue-400">→ {version.user_choice_title}</span>
+                      )}
+                    </div>
+                    <span className="text-gray-500">
+                      {new Date(version.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))}
+                {versions.length > 3 && (
+                  <div className="text-xs text-gray-500">... and {versions.length - 3} more versions</div>
+                )}
+              </div>
+            </div>
+          )}
           
           <div className="text-gray-200 whitespace-pre-wrap leading-relaxed mb-6">
             {chapter.content}
@@ -1478,20 +1669,13 @@ export default function Generator() {
 
   // Component to render the complete story progression
   const renderStoryProgression = () => {
-    console.log('🎭 RENDER PROGRESSION - allChapters:', allChapters?.length || 0, 'Chapters');
-    console.log('🎭 RENDER PROGRESSION - selectedStory:', selectedStory?.id);
-    
     if (!allChapters || allChapters.length === 0) {
-      console.log('⚠️ RENDER PROGRESSION - No Chapters available');
       return (
         <div className="text-gray-400 text-center py-8">
           No Chapters available yet.
         </div>
       );
     }
-
-    console.log('✅ RENDER PROGRESSION - Rendering', allChapters.length, 'Chapters');
-    console.log('📚 RENDER PROGRESSION - Chapter titles:', allChapters.map(c => `Ch${c.chapter_number}: ${c.title || 'Untitled'}`));
 
     return (
       <div className="space-y-0">
@@ -1512,32 +1696,7 @@ export default function Generator() {
           );
         })}
         
-        {/* Show generated next chapter if available */}
-        {nextChapterText && (
-          <div className="card">
-            <h3 className="text-xl font-bold text-white mb-4">
-              📖 Chapter {currentChapterNumber} (Preview)
-            </h3>
-            <div className="text-gray-200 whitespace-pre-wrap leading-relaxed mb-6">
-              {nextChapterText}
-            </div>
-            <div className="flex flex-col items-center gap-3">
-              <button
-                onClick={handleSaveChapter}
-                disabled={saveChapterLoading}
-                className="btn-primary"
-              >
-                {saveChapterLoading ? 'Saving...' : 'Save Chapter'}
-              </button>
-              {saveChaptersuccess && (
-                <div className="text-green-400 text-sm">{saveChaptersuccess}</div>
-              )}
-              {saveChapterError && (
-                <div className="text-red-400 text-sm">{saveChapterError}</div>
-              )}
-            </div>
-          </div>
-        )}
+
       </div>
     );
   };
@@ -1627,11 +1786,12 @@ export default function Generator() {
         // Show success message
         setSaveChaptersuccess(`🌿 Branched from Chapter ${chapterNumber}! New Chapter ${data.chapter_number} generated based on your choice: "${choiceData.title}"`);
         
-        // Refresh the chapters list to show the new branched content
+        // Refresh the chapters list to show the new branched content (only active versions)
         const { data: updatedChapters, error } = await supabase
           .from('Chapters')
           .select('*')
           .eq('story_id', selectedStory.id)
+          .eq('is_active', true)  // Only get active versions
           .order('chapter_number', { ascending: true });
         
         if (!error && updatedChapters) {
@@ -1654,12 +1814,273 @@ export default function Generator() {
         const errorMsg = data.detail || 'Failed to branch from choice';
         console.error('❌ BRANCH: Failed:', errorMsg);
         setChoicesError(errorMsg);
+        return false;
       }
     } catch (err) {
       console.error('❌ BRANCH: Error:', err);
       setChoicesError('Error connecting to server');
+      return false;
     } finally {
       setBranchingLoading(false);
+    }
+    
+    return true;
+  };
+
+  // Function to handle tree node clicks
+  const handleTreeNodeClick = (nodeData) => {
+    console.log('🌳 Tree node clicked:', nodeData);
+    
+    // Close the tree visualization
+    setShowTreeVisualization(false);
+    
+    // Show chapter details in a simple modal or navigate to that chapter
+    // For now, we'll show an alert with chapter info - this can be enhanced later
+    const chapterInfo = `Chapter ${nodeData.chapter_number}: ${nodeData.title}\n\nBranch: ${nodeData.branch_name}\nWord Count: ${nodeData.word_count}\n\nContent Preview:\n${nodeData.content.substring(0, 200)}...`;
+    
+    // You could replace this with a proper modal or navigation
+    if (window.confirm(`${chapterInfo}\n\nWould you like to view this chapter in the story timeline?`)) {
+      // Close tree and show interactive timeline focused on this chapter
+      setShowInteractiveTimeline(true);
+    }
+  };
+
+  // Function to handle tree edge (choice) clicks
+  const handleTreeEdgeClick = (edgeData) => {
+    console.log('🌳 Tree edge clicked:', edgeData);
+    
+    // Close the tree visualization
+    setShowTreeVisualization(false);
+    
+    // Show choice details and offer to branch/preview
+    const choiceInfo = `Choice: ${edgeData.choice_title}\n\nDescription: ${edgeData.choice_description}\nImpact: ${edgeData.story_impact}\nCurrently Selected: ${edgeData.is_selected ? 'Yes' : 'No'}`;
+    
+    if (!edgeData.is_selected) {
+      if (window.confirm(`${choiceInfo}\n\nWould you like to explore this choice path?`)) {
+        // Open interactive timeline and potentially trigger branching
+        setShowInteractiveTimeline(true);
+        // Could also trigger the branch preview functionality here
+      }
+    } else {
+      alert(`${choiceInfo}\n\nThis is the currently selected path in your story.`);
+    }
+  };
+
+  // Function to handle accepting a preview with proper versioning
+  const handleAcceptPreview = async (chapterNumber, choiceId, choiceData) => {
+    if (!selectedStory || !session?.access_token) {
+      setChoicesError('Please log in and select a story.');
+      return;
+    }
+
+    console.log('✅ ACCEPT-PREVIEW: Starting accept preview operation with versioning', {
+      storyId: selectedStory.id,
+      chapterNumber,
+      choiceId,
+      choiceTitle: choiceData?.title
+    });
+
+    setBranchingLoading(true);
+    setChoicesError('');
+
+    try {
+      const requestBody = {
+        story_id: selectedStory.id,
+        chapter_number: chapterNumber,
+        choice_id: choiceId,
+        choice_data: choiceData
+      };
+
+      // Use the new versioning endpoint
+      const response = await fetch(createApiUrl(API_ENDPOINTS.ACCEPT_PREVIEW_WITH_VERSIONING), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      const data = await response.json();
+      console.log('📦 ACCEPT-PREVIEW: Response data:', data);
+
+      if (data.success) {
+        // Show success message
+        setSaveChaptersuccess(data.message);
+        
+        // Refresh the chapters list (using the same logic as in useEffect)
+        try {
+          const { data: Chapters, error } = await supabase
+            .from('Chapters')
+            .select('*')
+            .eq('story_id', selectedStory.id)
+            .eq('is_active', true)  // Only get active versions
+            .order('chapter_number', { ascending: true });
+          
+          if (!error && Chapters) {
+            setAllChapters(Chapters);
+          }
+        } catch (fetchError) {
+          console.error('❌ Failed to refresh chapters:', fetchError);
+        }
+        
+        // Fetch versions for the new chapter
+        await fetchChapterVersions(selectedStory.id, data.chapter_number);
+        
+        // Refresh choice history
+        await fetchChoiceHistory(selectedStory.id);
+        
+        // Clear any current choice selection state
+        setShowChoices(false);
+        setSelectedChoiceId(null);
+        setAvailableChoices([]);
+        
+      } else {
+        throw new Error(data.detail || 'Failed to accept preview');
+      }
+
+    } catch (err) {
+      console.error('❌ ACCEPT-PREVIEW: Error:', err);
+      setChoicesError(`Error accepting preview: ${err.message}`);
+    } finally {
+      setBranchingLoading(false);
+    }
+  };
+
+  // Function to handle preview of branching from a previous choice (without saving to DB)
+  const handlePreviewBranchFromChoice = async (chapterNumber, choiceId, choiceData) => {
+    if (!selectedStory || !session?.access_token) {
+      setChoicesError('Please log in and select a story.');
+      return;
+    }
+
+    // Do NOT increment chapterNumber in the request payload
+    const previewedChapterNumber = chapterNumber + 1;
+
+    console.log('👀 PREVIEW: Starting preview operation', {
+      storyId: selectedStory.id,
+      currentChapterNumber: chapterNumber,
+      previewedChapterNumber,
+      choiceId,
+      choiceTitle: choiceData?.title
+    });
+
+    setPreviewLoading(true);
+    setChoicesError('');
+
+    try {
+      const requestBody = {
+        story_id: selectedStory.id,
+        chapter_number: chapterNumber, // Send the chapter where the choice was made
+        choice_id: choiceId,
+        choice_data: choiceData
+      };
+
+      console.log('📨 PREVIEW: Request payload:', requestBody);
+
+      const response = await fetch(createApiUrl(API_ENDPOINTS.BRANCH_PREVIEW), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      const data = await response.json();
+      console.log('📦 PREVIEW: Response data:', data);
+
+      if (data.success) {
+        // Find the original chapter that would be replaced
+        const originalChapter = allChapters.find(c => c.chapter_number === data.chapter_number);
+        
+        // Store both versions for comparison
+        setDraftComparison({
+          original: originalChapter,
+          preview: {
+            chapter_number: data.chapter_number,
+            content: data.chapter_content,
+            choices: data.choices,
+            title: `Chapter ${data.chapter_number} (Preview)`
+          },
+          commitParams: { chapterNumber: previewedChapterNumber, choiceId, choiceData }, // Store next chapter number for saving
+          selectedChoice: choiceData
+        });
+        
+        setShowDraftModal(true);
+        console.log('✅ PREVIEW: Comparison modal opened');
+        
+      } else {
+        const errorMsg = data.detail || 'Failed to generate preview';
+        console.error('❌ PREVIEW: Failed:', errorMsg);
+        setChoicesError(errorMsg);
+      }
+    } catch (err) {
+      console.error('❌ PREVIEW: Error:', err);
+      setChoicesError('Error connecting to server during preview');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // Function to fetch all versions of a specific chapter
+  const fetchChapterVersions = async (storyId, chapterNumber) => {
+    if (!session?.access_token) return;
+    
+    const key = `${storyId}_${chapterNumber}`;
+    setVersionLoading(prev => ({ ...prev, [key]: true }));
+    
+    try {
+      const response = await fetch(
+        createApiUrl(API_ENDPOINTS.GET_CHAPTER_VERSIONS.replace('{story_id}', storyId).replace('{chapter_number}', chapterNumber)),
+        {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setChapterVersions(prev => ({ ...prev, [key]: data.versions }));
+        setActiveVersions(prev => ({ ...prev, [key]: data.active_version?.id }));
+      }
+    } catch (error) {
+      console.error('Error fetching chapter versions:', error);
+    } finally {
+      setVersionLoading(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
+  // Function to switch chapter versions
+  const switchChapterVersion = async (storyId, chapterNumber, versionId) => {
+    if (!session?.access_token) return;
+    
+    try {
+      const response = await fetch(
+        createApiUrl(API_ENDPOINTS.SWITCH_CHAPTER_VERSION.replace('{story_id}', storyId).replace('{chapter_number}', chapterNumber)),
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ version_id: versionId })
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setSaveChaptersuccess(data.message);
+        
+        // Refresh chapters and versions
+        await fetchChapters();
+        await fetchChapterVersions(storyId, chapterNumber);
+      }
+    } catch (error) {
+      console.error('Error switching version:', error);
+      setSaveChapterError('Failed to switch version');
     }
   };
 
@@ -1678,7 +2099,7 @@ export default function Generator() {
       <div className="space-y-6">
         <div className="text-center mb-6">
           <h3 className="text-xl font-bold text-white mb-2">📍 Interactive Story Timeline</h3>
-          <p className="text-gray-300">Click on any choice from previous chapters to explore different story paths</p>
+          <p className="text-gray-300">Click on any choice from the previous chapter to preview alternatives, or click older chapter choices to branch permanently</p>
         </div>
 
         {allChapters.map((chapter, index) => {
@@ -1714,26 +2135,33 @@ export default function Generator() {
                   const isSelected = choice.is_selected;
                   const isBranchingFromThisChapter = branchingFromChapter === chapter.chapter_number;
                   
+                  // Determine if this is the previous chapter (only previous chapter choices should trigger preview)
+                  const currentChapterNumber = allChapters.length; // Current chapter number based on existing chapters
+                  const isPreviousChapter = chapter.chapter_number === currentChapterNumber - 1;
+                  
                   return (
                     <div
                       key={choice.id}
                       className={`p-4 rounded-lg border-2 transition-all duration-300 ${
                         isSelected 
-                          ? 'border-green-500 bg-green-900/20 cursor-default' // Currently selected path
-                          : isBranchingFromThisChapter && branchingLoading
-                            ? 'border-gray-600 bg-gray-800/50 opacity-50 cursor-not-allowed' // Disabled during branching
+                          ? isPreviousChapter 
+                            ? 'border-green-500 bg-green-900/20 cursor-pointer hover:border-green-400' // Selected in previous chapter - clickable for preview
+                            : 'border-green-500 bg-green-900/20 cursor-default' // Selected in older chapters - not clickable
+                          : (isBranchingFromThisChapter && branchingLoading) || previewLoading
+                            ? 'border-gray-600 bg-gray-800/50 opacity-50 cursor-not-allowed' // Disabled during branching/preview
                             : 'border-gray-600 bg-gray-800/30 hover:border-blue-500 hover:bg-blue-900/20 cursor-pointer transform hover:scale-[1.02] hover:shadow-lg' // Available to select - enhanced hover
                       }`}
                       onClick={() => {
-                        if (branchingLoading) return; // Prevent clicks during loading
+                        if (branchingLoading || previewLoading) return; // Prevent clicks during loading
                         
-                        if (isSelected) {
-                          // This is the current path - no action needed
-                          return;
-                        } else {
-                          // This is a different choice - allow branching
+                        if (isPreviousChapter) {
+                          // Previous chapter - any choice (selected or not) opens preview
+                          handlePreviewBranchFromChoice(chapter.chapter_number, choice.id, choice);
+                        } else if (!isSelected) {
+                          // Older chapters - only non-selected choices trigger full branch
                           handleBranchFromChoice(chapter.chapter_number, choice.id, choice);
                         }
+                        // If it's the selected choice in an older chapter, do nothing
                       }}
                     >
                       <div className="flex items-start">
@@ -1758,7 +2186,14 @@ export default function Generator() {
                             
                             {!isSelected && (
                               <div className="text-xs text-blue-400 font-medium pointer-events-none">
-                                {branchingLoading && isBranchingFromThisChapter ? '🔄 Branching...' : '🌿 Click to explore this path'}
+                                {branchingLoading && isBranchingFromThisChapter ? '🔄 Branching...' : 
+                                 previewLoading ? '👀 Generating preview...' :
+                                 isPreviousChapter ? '👀 Click to preview this path' : '🌿 Click to explore this path'}
+                              </div>
+                            )}
+                            {isSelected && isPreviousChapter && (
+                              <div className="text-xs text-green-400 font-medium pointer-events-none">
+                                {previewLoading ? '👀 Generating preview...' : '👀 Click to preview alternative'}
                               </div>
                             )}
                           </div>
@@ -1796,11 +2231,123 @@ export default function Generator() {
               {index < allChapters.length - 1 && (
                 <div className="flex justify-center py-6">
                   <div className="w-0.5 h-8 bg-gray-600"></div>
+                        </div>
+      )}
+
+      {/* Draft Comparison Modal */}
+      {showDraftModal && draftComparison && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-lg w-full max-w-6xl max-h-[90vh] shadow-xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-6 border-b border-gray-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-2xl font-bold text-white mb-2">
+                    📊 Compare Chapter Drafts
+                  </h3>
+                  <p className="text-gray-300">
+                    Comparing Chapter {draftComparison.preview.chapter_number} based on choice: 
+                    <span className="font-semibold text-blue-300 ml-2">"{draftComparison.selectedChoice?.title}"</span>
+                  </p>
                 </div>
-              )}
+                <button
+                  className="btn-icon"
+                  onClick={() => {
+                    setShowDraftModal(false);
+                    setDraftComparison(null);
+                  }}
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
-          );
-        })}
+
+            {/* Modal Content */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-6 max-h-[calc(90vh-200px)] overflow-y-auto">
+              {/* Current Version */}
+              <div className="border border-gray-700 rounded-lg overflow-hidden">
+                <div className="bg-green-900/20 border-b border-green-700/50 p-4">
+                  <h4 className="font-semibold text-green-300 flex items-center">
+                    <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+                    Current Version
+                  </h4>
+                  <p className="text-sm text-green-200 mt-1">
+                    {draftComparison.original ? 'The existing chapter in your story' : 'No existing chapter'}
+                  </p>
+                </div>
+                <div className="p-4 max-h-96 overflow-y-auto">
+                  <div className="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap">
+                    {draftComparison.original?.content || 'No existing chapter found. This would be a new chapter.'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Preview Version */}
+              <div className="border border-gray-700 rounded-lg overflow-hidden">
+                <div className="bg-blue-900/20 border-b border-blue-700/50 p-4">
+                  <h4 className="font-semibold text-blue-300 flex items-center">
+                    <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
+                    Preview Version
+                  </h4>
+                  <p className="text-sm text-blue-200 mt-1">
+                    How the chapter would look with your selected choice
+                  </p>
+                </div>
+                <div className="p-4 max-h-96 overflow-y-auto">
+                  <div className="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap">
+                    {draftComparison.preview.content}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="border-t border-gray-800 p-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="text-sm text-gray-400">
+                  <p>💡 <strong>Keep Original:</strong> No changes will be made to your story</p>
+                  <p>🌿 <strong>Accept Preview:</strong> This will replace the current chapter and affect all future chapters</p>
+                </div>
+                <div className="flex space-x-3">
+                  <button
+                    className="px-6 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 transition-colors"
+                    onClick={() => {
+                      setShowDraftModal(false);
+                      setDraftComparison(null);
+                    }}
+                  >
+                    Keep Original
+                  </button>
+                  <button
+                    className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                    onClick={async () => {
+                      // Save the previewed content, not regenerate
+                      const { chapterNumber, choiceId, choiceData } = draftComparison.commitParams;
+                      const previewContent = draftComparison.preview.content;
+                      const previewChoices = draftComparison.preview.choices;
+                      setShowDraftModal(false);
+                      setDraftComparison(null);
+                      await savePreviewedChapter({
+                        chapterNumber,
+                        choiceId,
+                        choiceData,
+                        content: previewContent,
+                        choices: previewChoices
+                      });
+                    }}
+                  >
+                    Accept Preview
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+})}
         
         {/* Close Timeline Button */}
         <div className="text-center pt-6">
@@ -1815,8 +2362,75 @@ export default function Generator() {
     );
   };
 
+  // Function to save the previewed chapter as a new version
+  const savePreviewedChapter = async ({ chapterNumber, choiceId, choiceData, content, choices }) => {
+    if (!selectedStory || !session?.access_token) return;
+    setBranchingLoading(true);
+    setChoicesError('');
+
+    try {
+      const requestBody = {
+        story_id: selectedStory.id,
+        chapter_number: chapterNumber,
+        choice_id: choiceId,
+        choice_data: choiceData,
+        content, // The previewed chapter content
+        choices // The previewed choices (if needed)
+      };
+
+      // Call the new backend endpoint to save the previewed chapter
+      const response = await fetch(createApiUrl(API_ENDPOINTS.SAVE_PREVIEWED_CHAPTER), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setSaveChaptersuccess(data.message);
+        // Refresh chapters and choices
+        try {
+          const { data: Chapters, error } = await supabase
+            .from('Chapters')
+            .select('*')
+            .eq('story_id', selectedStory.id)
+            .eq('is_active', true)
+            .order('chapter_number', { ascending: true });
+          if (!error && Chapters) setAllChapters(Chapters);
+        } catch (fetchError) {
+          console.error('❌ Failed to refresh chapters:', fetchError);
+        }
+        await fetchChapterVersions(selectedStory.id, chapterNumber);
+        await fetchChoiceHistory(selectedStory.id);
+        setShowChoices(false);
+        setSelectedChoiceId(null);
+        setAvailableChoices([]);
+      } else {
+        throw new Error(data.detail || 'Failed to save previewed chapter');
+      }
+    } catch (err) {
+      console.error('❌ SAVE-PREVIEWED-CHAPTER: Error:', err);
+      setChoicesError(`Error saving previewed chapter: ${err.message}`);
+    } finally {
+      setBranchingLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen w-screen bg-black flex items-center justify-center relative">
+      {/* Story Tree Visualization Modal */}
+      {showTreeVisualization && selectedStory && (
+        <StoryTreeVisualization
+          storyId={selectedStory.id}
+          onClose={() => setShowTreeVisualization(false)}
+          onNodeClick={handleTreeNodeClick}
+          onEdgeClick={handleTreeEdgeClick}
+        />
+      )}
+
       {/* Modal for viewing full story - render at root level for proper overlay */}
       {selectedStory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -1874,7 +2488,7 @@ export default function Generator() {
                   {/* Action Buttons */}
                   <div className="flex flex-col sm:flex-row gap-4 mt-8 pt-6 border-t border-gray-800">
                     {/* Only show Generate Choices button if the current chapter doesn't have choices already */}
-                    {!nextChapterText && !showChoices && !choicesLoading && allChapters.length > 0 && (() => {
+                    {!showChoices && !choicesLoading && allChapters.length > 0 && (() => {
                       const currentChapter = allChapters[allChapters.length - 1];
                       const currentChapterChoices = choiceHistory.find(ch => ch.chapter_number === currentChapter?.chapter_number);
                       const hasExistingChoices = currentChapterChoices && currentChapterChoices.choices && currentChapterChoices.choices.length > 0;
@@ -1898,22 +2512,7 @@ export default function Generator() {
                         {nextChapterLoading ? 'Generating & Saving...' : `📖 Generate Chapter 1`}
                       </button>
                     )}
-                    {/* Only show Try Different Choices if the current chapter has existing choices */}
-                    {allChapters.length > 0 && (() => {
-                      const currentChapter = allChapters[allChapters.length - 1];
-                      const currentChapterChoices = choiceHistory.find(ch => ch.chapter_number === currentChapter?.chapter_number);
-                      const hasExistingChoices = currentChapterChoices && currentChapterChoices.choices && currentChapterChoices.choices.length > 0;
-                      
-                      return hasExistingChoices;
-                    })() && (
-                      <button
-                        className="btn-secondary"
-                        onClick={handleGenerateChoicesForSavedStory}
-                        disabled={choicesLoading}
-                      >
-                        {choicesLoading ? 'Generating...' : '🔄 Try Different Choices'}
-                      </button>
-                    )}
+
                     {/* Interactive Timeline Button - Show if story has chapters with choices */}
                     {allChapters.length > 0 && choiceHistory.length > 0 && (
                       <button
@@ -1922,6 +2521,17 @@ export default function Generator() {
                         disabled={branchingLoading}
                       >
                         {showInteractiveTimeline ? '📖 Show Story' : '🌿 Explore Paths'}
+                      </button>
+                    )}
+                    
+                    {/* Story Tree Visualization Button - Show if story has chapters */}
+                    {allChapters.length > 0 && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setShowTreeVisualization(true)}
+                        disabled={branchingLoading}
+                      >
+                        🌳 View Story Tree
                       </button>
                     )}
                     <button

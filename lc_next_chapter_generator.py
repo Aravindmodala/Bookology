@@ -210,10 +210,10 @@ class NextChapterGenerator:
             # Calculate input tokens (rough estimate: 1 token ≈ 0.75 words)
             input_word_count = len(prompt_input.split())
             estimated_input_tokens = int(input_word_count * 1.33)
-            
-            logger.info(f"📊 TOKEN TRACKING: Input prompt: {input_word_count} words (~{estimated_input_tokens} tokens)")
-            
+
             # Generate the chapter using the smart context
+            logger.info(f"📝 LLM Input: Title='{story_title}', Previous={len(previous_chapter_summaries)} chapters, Choice='{user_choice or 'continue naturally'}'")
+            
             result = self.chain.invoke({
                 "story_title": story_title,
                 "story_outline": story_outline,
@@ -244,9 +244,8 @@ class NextChapterGenerator:
             temperature_used = self.llm.temperature
             model_used = self.llm.model_name
             
-            logger.info(f"✅ Chapter {chapter_number} generated successfully with hierarchical summarization!")
+            logger.info(f"✅ Chapter {chapter_number} generated successfully!")
             logger.info(f"📊 Generated: {len(chapter_content)} chars, {output_word_count} words, {len(choices)} choices")
-            logger.info(f"📊 TOKEN TRACKING: ~{estimated_total_tokens} total tokens ({model_used}, temp={temperature_used})")
             
             # Return both chapter content, choices, and token metrics
             return {

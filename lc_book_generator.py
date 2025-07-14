@@ -90,7 +90,6 @@ Return ONLY a valid JSON object in this exact structure:
 
 Write so immersively that readers forget this was AI-generated and feel fully transported into the story. The choices should feel like natural decision points that emerge organically from the chapter's events."""
 
-
 # Create user message template (the actual request)
 user_template = """Please write **Chapter {chapter_number} of a novel** using the fully expanded story outline below:
 
@@ -98,7 +97,6 @@ user_template = """Please write **Chapter {chapter_number} of a novel** using th
 {outline}
 
 Write Chapter {chapter_number} following all the guidelines provided. Focus on creating a deeply immersive, cinematic, emotionally powerful opening chapter that makes readers feel as if a world-class human author wrote it. The chapter should draw readers deeply into the protagonist’s world, making them care about the journey before it begins, and ending with a compelling hook."""
-
 
 # Create the chat prompt template
 system_message_prompt = SystemMessagePromptTemplate.from_template(system_template)
@@ -132,7 +130,6 @@ def extract_chapter_info_from_json(json_data: Dict[str, Any], chapter_number: in
     """Extract relevant chapter and story information from JSON outline."""
     logger.info(f"🔍 Extracting Chapter {chapter_number} info from JSON outline...")
 
-    
     # Extract story-level information
     story_info = {
         "title": json_data.get("book_title", "Untitled"),
