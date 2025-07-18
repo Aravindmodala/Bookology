@@ -1,0 +1,431 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { 
+  BookOpen, 
+  PenTool, 
+  Clock, 
+  ChevronRight,
+  Plus,
+  FileText,
+  Calendar,
+  User,
+  Search,
+  Filter,
+  MoreVertical,
+  Edit3,
+  Trash2,
+  Eye
+} from 'lucide-react';
+import { useAuth } from '../AuthContext';
+import { supabase, isSupabaseEnabled } from '../supabaseClient';
+import { createApiUrl, API_ENDPOINTS } from '../config';
+
+const StoryDashboard = ({ onStartNewStory }) => {
+  const [stories, setStories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('updated_at');
+  const { user, session } = useAuth();
+  const navigate = useNavigate();
+
+  // Navigation handlers
+  const handleContinueReading = (story) => {
+    // Navigate to story editor with story data
+    navigate('/editor', { state: { story } });
+  };
+
+  const handleViewStory = (story) => {
+    // Navigate to read-only view or editor
+    navigate('/editor', { state: { story, mode: 'view' } });
+  };
+
+  const handleEditStory = (story) => {
+    // Navigate to editor in edit mode
+    navigate('/editor', { state: { story, mode: 'edit' } });
+  };
+
+  const handleDeleteStory = (story) => {
+    // TODO: Add delete confirmation and functionality
+    console.log('Delete story:', story.title);
+    alert(`Delete functionality for "${story.title}" coming soon!`);
+  };
+
+  useEffect(() => {
+    if (user && session?.access_token) {
+      // Try backend API first (where real stories are stored)
+      fetchUserStoriesFromBackend();
+    } else if (isSupabaseEnabled && user) {
+      // Fallback to Supabase if available
+      fetchUserStories();
+    } else {
+      // Load mock data for development
+      loadMockStories();
+    }
+  }, [user, session]);
+
+  const fetchUserStoriesFromBackend = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Debug authentication
+      console.log('🔐 AUTH DEBUG:', {
+        hasUser: !!user,
+        hasSession: !!session,
+        hasAccessToken: !!session?.access_token,
+        userId: user?.id,
+        tokenLength: session?.access_token?.length
+      });
+      
+      if (!session?.access_token) {
+        console.log('❌ No access token available');
+        throw new Error('No authentication token available');
+      }
+      
+      const apiUrl = createApiUrl('/stories');
+      console.log('🌐 API DEBUG:', {
+        url: apiUrl,
+        method: 'GET',
+        hasAuthHeader: true
+      });
+      
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('📡 RESPONSE DEBUG:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('❌ ERROR RESPONSE:', errorText);
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.Stories && Array.isArray(data.Stories)) {
+        // Transform backend data to match our UI format
+        const transformedStories = data.Stories.map(story => ({
+          id: story.id,
+          title: story.title || 'Untitled Story',
+          description: story.outline ? story.outline.substring(0, 200) + '...' : 'No description available',
+          genre: story.genre || 'General Fiction',
+          chapter_count: story.chapter_count || 0,
+          created_at: story.created_at,
+          updated_at: story.created_at, // Use created_at if updated_at not available
+          status: story.chapter_count > 1 ? 'in_progress' : 'draft'
+        }));
+        
+        setStories(transformedStories);
+        console.log(`✅ Loaded ${transformedStories.length} real stories from backend`);
+      } else {
+        console.log('No stories found in backend response');
+        setStories([]);
+      }
+    } catch (err) {
+      console.error('Error fetching stories from backend:', err);
+      // Fallback to Supabase or mock data
+      if (isSupabaseEnabled && user) {
+        fetchUserStories();
+      } else {
+        loadMockStories();
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchUserStories = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('stories')
+        .select('*')
+        .eq('user_id', user.id)
+        .order(sortBy, { ascending: false });
+
+      if (error) throw error;
+      setStories(data || []);
+    } catch (err) {
+      console.error('Error fetching stories:', err);
+      // Silently fallback to mock data for development
+      loadMockStories();
+      // Don't show error since we have fallback data
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMockStories = () => {
+    console.log('📚 Loading mock stories for development/demo');
+    // Mock data for development
+    const mockStories = [
+      {
+        id: 1,
+        title: 'The Whispering Shadows',
+        description: 'A mysterious tale of a young detective unraveling secrets in a haunted Victorian mansion.',
+        genre: 'Mystery',
+        chapter_count: 5,
+        created_at: '2024-01-15T10:30:00Z',
+        updated_at: '2024-01-20T15:45:00Z',
+        status: 'in_progress'
+      },
+      {
+        id: 2,
+        title: 'Stellar Horizons',
+        description: 'An epic space adventure following a crew of explorers discovering new worlds.',
+        genre: 'Sci-Fi',
+        chapter_count: 12,
+        created_at: '2024-01-10T08:20:00Z',
+        updated_at: '2024-01-22T12:15:00Z',
+        status: 'completed'
+      },
+      {
+        id: 3,
+        title: 'Hearts in Bloom',
+        description: 'A tender romance set in a small coastal town during the spring season.',
+        genre: 'Romance',
+        chapter_count: 3,
+        created_at: '2024-01-22T14:10:00Z',
+        updated_at: '2024-01-22T14:10:00Z',
+        status: 'draft'
+      }
+    ];
+    
+    setStories(mockStories);
+    setLoading(false);
+  };
+
+  const filteredStories = stories.filter(story =>
+    story.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    story.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    story.genre?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed': return 'text-green-400 bg-green-400/20';
+      case 'in_progress': return 'text-blue-400 bg-blue-400/20';
+      case 'draft': return 'text-yellow-400 bg-yellow-400/20';
+      default: return 'text-gray-400 bg-gray-400/20';
+    }
+  };
+
+  const StoryCard = ({ story }) => (
+    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group">
+      <div className="flex justify-between items-start mb-4">
+        <div className="flex-1">
+          <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-blue-400 transition-colors">
+            {story.title}
+          </h3>
+          <p className="text-gray-400 text-sm line-clamp-2 mb-3">
+            {story.description}
+          </p>
+        </div>
+        <div className="flex items-center space-x-2 ml-4">
+          <button 
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all"
+            onClick={() => handleViewStory(story)}
+            title="View Story"
+          >
+            <Eye className="w-4 h-4" />
+          </button>
+          <button 
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all"
+            onClick={() => handleEditStory(story)}
+            title="Edit Story"
+          >
+            <Edit3 className="w-4 h-4" />
+          </button>
+          <button 
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all"
+            onClick={() => handleDeleteStory(story)}
+            title="More Options"
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-4 text-sm text-gray-400">
+          <span className="flex items-center">
+            <FileText className="w-4 h-4 mr-1" />
+            {story.chapter_count || 0} chapters
+          </span>
+          <span className="flex items-center">
+            <Calendar className="w-4 h-4 mr-1" />
+            {formatDate(story.updated_at)}
+          </span>
+        </div>
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(story.status)}`}>
+          {story.status?.replace('_', ' ') || 'draft'}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-blue-400 font-medium">
+          {story.genre || 'General Fiction'}
+        </span>
+        <button 
+          className="flex items-center text-sm text-gray-400 hover:text-white transition-colors group-hover:translate-x-1 transform duration-200"
+          onClick={() => handleContinueReading(story)}
+        >
+          Continue Reading
+          <ChevronRight className="w-4 h-4 ml-1" />
+        </button>
+      </div>
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <BookOpen className="w-8 h-8 text-white" />
+          </div>
+          <p className="text-gray-400">Loading your stories...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      {/* Development Notice */}
+      {!session?.access_token && (
+        <div className="bg-yellow-600/20 border-b border-yellow-500/50 text-yellow-200 px-4 py-2 text-center text-sm">
+          ⚠️ Please log in to see your generated stories from the backend. 
+          <a href="/login" className="underline ml-2 hover:text-yellow-100">Click here to login</a>
+        </div>
+      )}
+      <div className="p-8">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+        <div className="mb-8">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
+            <div>
+              <h1 className="text-4xl font-bold text-white mb-2">Your Stories</h1>
+              <p className="text-gray-400">
+                Welcome back! Continue your literary journey or start a new adventure.
+              </p>
+            </div>
+            
+            <button
+              onClick={onStartNewStory}
+              className="mt-4 lg:mt-0 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2 shadow-lg"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Start New Story</span>
+            </button>
+          </div>
+
+          {/* Search and Filter Bar */}
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search stories..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl pl-10 pr-4 py-3 text-white placeholder-gray-400 focus:border-blue-500 focus:outline-none transition-colors"
+              />
+            </div>
+            
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
+            >
+              <option value="updated_at">Last Updated</option>
+              <option value="created_at">Date Created</option>
+              <option value="title">Title</option>
+              <option value="chapter_count">Chapter Count</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Stories Grid */}
+        {filteredStories.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="w-24 h-24 bg-gray-800 rounded-3xl flex items-center justify-center mx-auto mb-6">
+              <BookOpen className="w-12 h-12 text-gray-400" />
+            </div>
+            <h3 className="text-2xl font-semibold text-white mb-2">
+              {searchTerm ? 'No stories found' : 'No stories yet'}
+            </h3>
+            <p className="text-gray-400 mb-6 max-w-md mx-auto">
+              {searchTerm 
+                ? 'Try adjusting your search terms or filters.'
+                : 'Your creative journey starts here. Create your first story and bring your imagination to life.'
+              }
+            </p>
+            {!searchTerm && (
+              <button
+                onClick={onStartNewStory}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2 mx-auto"
+              >
+                <PenTool className="w-5 h-5" />
+                <span>Create Your First Story</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {filteredStories.map((story) => (
+              <StoryCard key={story.id} story={story} />
+            ))}
+          </div>
+        )}
+
+        {/* Stats Footer */}
+        {filteredStories.length > 0 && (
+          <div className="mt-12 bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+              <div>
+                <div className="text-3xl font-bold text-blue-400 mb-1">
+                  {stories.length}
+                </div>
+                <div className="text-gray-400 text-sm">Total Stories</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-green-400 mb-1">
+                  {stories.reduce((sum, story) => sum + (story.chapter_count || 0), 0)}
+                </div>
+                <div className="text-gray-400 text-sm">Chapters Written</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-purple-400 mb-1">
+                  {stories.filter(story => story.status === 'completed').length}
+                </div>
+                <div className="text-gray-400 text-sm">Completed Stories</div>
+              </div>
+            </div>
+          </div>
+                 )}
+       </div>
+       </div>
+     </div>
+   );
+ };
+ 
+ export default StoryDashboard; 

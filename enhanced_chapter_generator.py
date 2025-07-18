@@ -14,10 +14,12 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize the LLM (OpenAI Chat model - correct for GPT-4o)
-llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o', temperature=0.8, max_tokens=6000)
+# Initialize the LLM (OpenAI Chat model - Updated with higher token limit)
+llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o-mini', temperature=0.8, max_tokens=15000)
 
-system_template = """You are a globally renowned, award-winning novelist, ghostwriter, and master storyteller known for creating bestselling novels that captivate readers deeply.
+system_template = """🚨 ABSOLUTE PRIORITY: Your primary task is to write a FULL 2,500-3,000 word chapter. Even if other sections (reasoning, choices, metrics) need to be shorter to accommodate this, the chapter content is what matters most. The chapter is what readers will see - make it substantial and immersive.
+
+You are a globally renowned, award-winning novelist, ghostwriter, and master storyteller known for creating bestselling novels that captivate readers deeply.
 
 🎭 ROLE & EXPERTISE:
 - Expert in character development, plot pacing, layered backstory, and emotional storytelling
@@ -102,7 +104,7 @@ Return ONLY a valid JSON object in this exact structure:
     "choice_analysis": "Your systematic analysis of the chapter's ending moment, character dilemmas, available options, and how each choice would impact story direction and character development",
     "quality_assessment": "Your evaluation of emotional resonance, narrative flow, and choice meaningfulness"
   }},
-  "chapter": "The full chapter content as immersive, novel-quality prose, exactly 3000 words. Structure the chapter in three acts: Act 1 (1000 words) establishes the protagonist's ordinary world and inner conflict; Act 2 (1000 words) introduces the inciting incident with rising tension; Act 3 (1000 words) builds to a climactic hook with vivid sensory details and emotional stakes.",
+  "chapter": "CRITICAL REQUIREMENT: Write a FULL novel chapter of AT LEAST 2,500 words, targeting 3,000 words. This is MANDATORY - do not write anything shorter. Include extensive character development, rich dialogue, detailed scene descriptions, and immersive atmosphere. Structure: Act 1 (900-1000 words): Deep exploration of ordinary world with extensive sensory details and character thoughts. Act 2 (900-1000 words): Detailed inciting incident with full scene development and character reactions. Act 3 (900-1000 words): Build tension to climactic hook with emotional depth and vivid descriptions. Write in full novel prose with detailed descriptions, meaningful dialogue, and rich character moments. Count your words and ensure you reach the 2,500-3,000 word target.",
   "choices": [
     {{
       "id": "choice_1",
@@ -125,14 +127,6 @@ Return ONLY a valid JSON object in this exact structure:
       "story_impact": "How this choice would affect the story direction and character development",
       "choice_type": "action/emotional/strategic/dialogue"
     }}
-  ],
-  "quality_metrics": {{
-    "emotional_resonance": "1-10 rating with explanation",
-    "character_authenticity": "1-10 rating with explanation", 
-    "narrative_flow": "1-10 rating with explanation",
-    "hook_strength": "1-10 rating with explanation"
-  }}
-}}
 
 🚫 DO NOT:
 - Explain or summarize the outline
@@ -307,7 +301,7 @@ class EnhancedChapterGenerator:
             chapter_content = parsed_json.get("chapter", "")
             choices = parsed_json.get("choices", [])
             
-            if len(chapter_content) < 1000:
+            if len(chapter_content) < 2000:
                 logger.warning(f"⚠️ Chapter content seems short: {len(chapter_content)} characters")
             
             if len(choices) < 2:
@@ -346,41 +340,21 @@ class EnhancedChapterGenerator:
             }
     
     def _calculate_quality_score(self, result: Dict[str, Any]) -> float:
-        """Calculate a quality score based on the LLM's self-assessment and content analysis."""
         try:
-            quality_metrics = result.get("quality_metrics", {})
-            
-            # Extract scores from quality metrics
-            scores = []
-            for metric_name, metric_value in quality_metrics.items():
-                if isinstance(metric_value, str) and "/" in metric_value:
-                    # Extract number from "8/10" format
-                    try:
-                        score = float(metric_value.split("/")[0])
-                        scores.append(score)
-                    except:
-                        pass
-                elif isinstance(metric_value, (int, float)):
-                    scores.append(float(metric_value))
-            
-            if scores:
-                average_score = sum(scores) / len(scores)
-            else:
-                # Fallback: basic content analysis
-                chapter_content = result.get("chapter_content", "")
-                choices = result.get("choices", [])
-                
-                # Basic quality indicators
-                content_score = min(10, len(chapter_content) / 300)  # Expect ~3000 words
-                choice_score = min(10, len(choices) * 2.5)  # Expect 3-4 choices
-                
-                average_score = (content_score + choice_score) / 2
-            
+            chapter_content = result.get("chapter_content", "")
+            choices = result.get("choices", [])
+        
+        # Simple scoring based on content length and choices
+            word_count = len(chapter_content.split())
+            content_score = min(10, word_count / 250)  # 2500 words = 10 points
+            choice_score = min(10, len(choices) * 3)   # 3+ choices = 9-10 points
+        
+            average_score = (content_score + choice_score) / 2
             return round(average_score, 1)
-            
+        
         except Exception as e:
             logger.error(f"❌ Error calculating quality score: {e}")
-            return 5.0  # Default neutral score
+            return 5.0
 
 # Legacy compatibility function
 def generate_chapter_from_outline(outline: str):
@@ -391,4 +365,3 @@ def generate_chapter_from_outline(outline: str):
         return "❌ Please use the new EnhancedChapterGenerator.generate_chapter_from_outline() method"
     except Exception as e:
         return f"❌ Error: {str(e)}"
-

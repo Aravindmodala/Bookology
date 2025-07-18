@@ -219,6 +219,4 @@ class StoryService:
         result = await loop.run_in_executor(None, generator.generate_next_chapter,
             story_title, story_outline, previous_summaries, next_chapter_number, user_choice)
         return result
-
-# Global story service instance
 story_service = StoryService()

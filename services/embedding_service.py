@@ -13,7 +13,9 @@ from langchain.schema import Document
 
 from config import settings
 from models.story_models import StoryWithChapters, EmbeddingChunk
-from .story_service import story_service
+# Use the DNA-based service instead
+from .story_service_with_dna import StoryService
+story_service = StoryService()
 from .cache_service import cache_service
 from logger_config import setup_logger
 

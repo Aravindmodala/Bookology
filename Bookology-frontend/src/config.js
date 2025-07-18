@@ -13,7 +13,7 @@ export const API_ENDPOINTS = {
   GENERATE_OUTLINE: '/lc_generate_outline',
   SAVE_OUTLINE: '/save_outline',  // New endpoint for saving edited outline
   GENERATE_CHAPTER: '/lc_generate_chapter',
-  SAVE_STORY: '/Stories/save',
+  SAVE_STORY: '/stories/save',
   GENERATE_NEXT_CHAPTER: '/generate_next_chapter',
   SAVE_CHAPTER: '/save_chapter_with_summary',
   STORY_CHAT: '/story_chat',

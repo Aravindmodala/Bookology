@@ -1,405 +1,599 @@
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from langchain.chains import LLMChain
-from dotenv import load_dotenv
+# Modernized for DSPy + CoT + Reflection, July 2024
+# Updated with Book Title Generation
+# If you don't have DSPy, install it with: pip install dspy
+
 import os
 import json
-from typing import Dict, Any, List, Optional
+import time
+from typing import Dict, Any
+import dspy
 
-# Load environment variables from .env
-load_dotenv()
+# Placeholder for loading examples (for future optimizer use)
+EXAMPLES_PATH = os.path.join(os.path.dirname(__file__), 'story_outline_examples.json')
 
-# Initialize the LLM (OpenAI Chat model - correct for GPT-4o-mini)
-llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o-mini', temperature=0.7, max_tokens=3000)
+# Set up your LLM (replace with your API key and model)
+lm = dspy.LM('openai/gpt-4o-mini', api_key=os.getenv("OPENAI_API_KEY"), temperature=0.7, max_tokens=3000)
+dspy.configure(lm=lm)
 
-# Create system message template (role and instructions)
-system_template = system_template = """
-You are a world-famous novelist, creative writing coach, and master storyteller with the following expertise:
+# Define signatures for DSPy
+class GenerateStory(dspy.Signature):
+    """You are a world-class novelist and story architect.
 
-🎭 ROLE & EXPERTISE:
-- Bestselling author with mastery across genres
-- You think like world-renowned authors relevant to the user's genre:
-    - Fantasy: J.R.R. Tolkien, Neil Gaiman, Madeline Miller
-    - Sci-Fi: Isaac Asimov, Philip K. Dick, Margaret Atwood
-    - Thriller: Stephen King, Gillian Flynn, Dan Brown
-    - Mystery: Agatha Christie, Arthur Conan Doyle
-    - Romance: Jane Austen, Nicholas Sparks
-    - Historical Fiction: Hilary Mantel, Ken Follett
-    - Literary Fiction: Kazuo Ishiguro, Haruki Murakami
-    - Horror: Stephen King, Shirley Jackson
-    - Young Adult: Suzanne Collins, Rick Riordan
-    - Children's Literature: Roald Dahl, C.S. Lewis
-- Expert in layered character development, world-building, and emotional resonance
+    Step 1: Analyze the user's story idea and identify the genre, tone, and main conflict.
+    Step 2: Brainstorm 2-3 possible story arcs or directions for this idea.
+    Step 3: Select the most engaging arc.
+    Step 4: Write a cinematic, emotionally engaging summary of the story (like a back-cover blurb or movie trailer), ending with a compelling hook or cliffhanger. Do NOT provide a chapter-by-chapter breakdown.
 
-📊 ANALYSIS CAPABILITIES:
-- Automatically detect and classify genre from user input
-- Select matching authors to emulate narrative style, tone, and pacing
-- Generate genre-consistent story structures with compelling chapter progression
-
-🎯 YOUR TASK:
-Analyze the user’s story idea, determine its genre, and generate a comprehensive, structured book outline emulating the style, tone, and pacing of the world-famous authors associated with that genre.
-
-
-📋 OUTPUT REQUIREMENTS:
-- Return ONLY valid, parseable JSON
-- No markdown formatting, explanations, or commentary
-- Follow the exact JSON structure provided
-- Fill all fields meaningfully with engaging, professional detail
-
-🚫 DO NOT:
-- Add text outside the JSON structure
-- Include markdown code blocks
-- Provide commentary or placeholders
-
-Generate outlines with the narrative quality and emotional depth of bestselling novels aligned with the detected genre.
-"""
-
-# Create user message template (the actual request)
-user_template = """Please analyze this story idea and create a comprehensive, structured book outline:
-
-💡 STORY IDEA:
-{idea}
-
-📝 ANALYSIS STEPS:
-1. Automatically detect the core genre (Fantasy, Thriller, Romance, Sci-Fi, etc.) from the idea.
-2. Determine the emotional tone (Dark, hopeful, mysterious, playful, tense).
-3. Select an appropriate narrative style (Cinematic, fast-paced, poetic, minimalistic).
-4. Identify world-famous authors aligned with the detected genre and emulate their narrative style, tone, and pacing while creating the outline.
-5. Build compelling characters and layered conflicts.
-6. Structure a logical, professional chapter progression.
-📄 RETURN FORMAT (JSON ONLY):
-{{
-  "book_title": "",
-  "genre": "",
-  "theme": "",
-  "style": "",
-  "description": "",
-  "language": "English",
-  "tags": [],
-  "estimated_total_chapters": 0,
-  "main_characters": [
-    {{
-      "name": "",
-      "role": "",
-      "description": ""
-    }}
-  ],
-  "character_arcs_summary": "",
-  "key_locations": [
-    {{
-      "name": "",
-      "description": ""
-    }}
-  ],
-  "conflict": "",
-  "tone_keywords": [],
-  "writing_guidelines": "",
-  "Chapters": [
-    {{
-      "chapter_number": 1,
-      "chapter_title": "",
-      "chapter_summary": "",
-    }}
-  ]
-}}
-"""
-
-# Create the chat prompt template
-system_message_prompt = SystemMessagePromptTemplate.from_template(system_template)
-human_message_prompt = HumanMessagePromptTemplate.from_template(user_template)
-
-prompt = ChatPromptTemplate.from_messages([
-    system_message_prompt,
-    human_message_prompt
-])
-
-# Build the chain
-chain = prompt | llm
-
-def parse_json_response(response_text: str) -> Optional[Dict[str, Any]]:
-    """
-    Parse JSON response from LLM, handling common formatting issues.
-    """
-    import re
+    Your output should be a single, engaging summary (3-5 sentences) that teases the story and ends with a hook."""
     
-    try:
-        # Clean up the response
-        cleaned_text = response_text.strip()
-        
-        # Remove markdown code blocks if present
-        if cleaned_text.startswith("```json"):
-            cleaned_text = cleaned_text[7:]
-        if cleaned_text.startswith("```"):
-            cleaned_text = cleaned_text[3:]
-        if cleaned_text.endswith("```"):
-            cleaned_text = cleaned_text[:-3]
-        
-        # Remove any leading/trailing whitespace
-        cleaned_text = cleaned_text.strip()
-        
-        # CRITICAL FIX: Handle trailing commas and other JSON formatting issues
-        # Remove trailing commas before closing braces and brackets
-        cleaned_text = re.sub(r',(\s*[}\]])', r'\1', cleaned_text)
-        
-        # Remove any trailing commas at the end of objects or arrays
-        cleaned_text = re.sub(r',(\s*})', r'\1', cleaned_text)
-        cleaned_text = re.sub(r',(\s*])', r'\1', cleaned_text)
-        
-        # Parse JSON
-        parsed_json = json.loads(cleaned_text)
-        return parsed_json
-        
-    except json.JSONDecodeError as e:
-        print(f"JSON parsing error: {e}")
-        print(f"Raw response: {response_text[:500]}...")
-        
-        # Try one more time with even more aggressive cleaning
-        try:
-            # More aggressive comma removal
-            cleaned_text = response_text.strip()
-            
-            # Remove markdown blocks
-            if cleaned_text.startswith("```json"):
-                cleaned_text = cleaned_text[7:]
-            if cleaned_text.startswith("```"):
-                cleaned_text = cleaned_text[3:]
-            if cleaned_text.endswith("```"):
-                cleaned_text = cleaned_text[:-3]
-            
-            cleaned_text = cleaned_text.strip()
-            
-            # Remove ALL trailing commas more aggressively
-            cleaned_text = re.sub(r',\s*([}\]])', r'\1', cleaned_text)
-            
-            # Try parsing again
-            parsed_json = json.loads(cleaned_text)
-            print(f"✅ JSON parsed successfully after aggressive cleaning")
-            return parsed_json
-            
-        except json.JSONDecodeError as e2:
-            print(f"❌ JSON parsing failed even after aggressive cleaning: {e2}")
-            return None
-        
-    except Exception as e:
-        print(f"Unexpected error parsing JSON: {e}")
-        return None
+    idea = dspy.InputField(desc="The user's story idea")
+    analysis = dspy.OutputField(desc="Step 1: Analysis of genre, tone, and main conflict")
+    story_arcs = dspy.OutputField(desc="Step 2: 2-3 possible story directions brainstormed")
+    selected_arc = dspy.OutputField(desc="Step 3: The most engaging arc chosen with reasoning")
+    summary = dspy.OutputField(desc="Step 4: Cinematic story summary with hook (3-5 sentences)")
 
-def extract_metadata(outline_json: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract metadata from the parsed JSON outline.
-    """
-    metadata = {
-        # Basic story info
-        "title": outline_json.get("book_title", ""),
-        "genre": outline_json.get("genre", ""),
-        "theme": outline_json.get("theme", ""),
-        "style": outline_json.get("style", ""),
-        "description": outline_json.get("description", ""),
-        "language": outline_json.get("language", "English"),
-        
-        # Structure info
-        "estimated_total_chapters": outline_json.get("estimated_total_chapters", 0),
-        "tags": outline_json.get("tags", []),
-        "tone_keywords": outline_json.get("tone_keywords", []),
-        
-        # Character info
-        "main_characters": outline_json.get("main_characters", []),
-        "character_count": len(outline_json.get("main_characters", [])),
-        "character_arcs_summary": outline_json.get("character_arcs_summary", ""),
-        
-        # Setting info
-        "key_locations": outline_json.get("key_locations", []),
-        "location_count": len(outline_json.get("key_locations", [])),
-        
-        # Plot info
-        "conflict": outline_json.get("conflict", ""),
-        "writing_guidelines": outline_json.get("writing_guidelines", ""),
-        
-        # Chapter info
-        "Chapters": outline_json.get("Chapters", []),
-        "chapter_count": len(outline_json.get("Chapters", [])),
-        
-        # Calculated metadata
-        "total_estimated_words": sum(
-            chapter.get("estimated_word_count", 0) 
-            for chapter in outline_json.get("Chapters", [])
-        ),
-        "estimated_reading_time_hours": 0,  # Will calculate based on word count
+class GenerateChapterBreakdown(dspy.Signature):
+    """You are a professional story structure expert creating detailed chapter breakdowns.
+    
+    Based on the story summary and genre, create a comprehensive chapter-by-chapter breakdown.
+    
+    Create 8-15 chapters depending on the story complexity. Each chapter should have:
+    1. A compelling chapter title
+    2. 3-5 key plot points or events
+    3. Character arcs and development
+    4. Setting and atmosphere details
+    5. Cliffhanger or transition to next chapter
+    
+    Format as a JSON array where each chapter is an object with the following structure:
+    {
+      "chapter_number": 1,
+      "title": "Chapter Title",
+      "key_events": ["Event 1", "Event 2", "Event 3"],
+      "character_development": "Description of character growth",
+      "setting": "Setting description and atmosphere",
+      "cliffhanger": "How the chapter ends with tension"
     }
     
-    # Calculate estimated reading time (250 words per minute)
-    if metadata["total_estimated_words"] > 0:
-        reading_time_minutes = metadata["total_estimated_words"] / 250
-        metadata["estimated_reading_time_hours"] = round(reading_time_minutes / 60, 2)
+    Return ONLY valid JSON array format, no additional text."""
     
-    return metadata
+    summary = dspy.InputField(desc="The story summary to break down")
+    genre = dspy.InputField(desc="The story genre")
+    tone = dspy.InputField(desc="The story tone")
+    chapter_breakdown = dspy.OutputField(desc="JSON array of structured chapter breakdowns")
 
-def format_json_to_display_text(outline_json: Dict[str, Any]) -> str:
-    """
-    Convert JSON outline to a SIMPLE formatted text display for the frontend.
-    Only shows: Title, Genre, Characters, and Chapter summaries (no word counts or cliffhangers).
-    """
+class ReflectOnStory(dspy.Signature):
+    """You are a professional story editor. Review the following story summary for:
+    - Logical flow and coherence
+    - Genre and tone match
+    - Presence of a strong hook or cliffhanger
+    - Overall engagement
+
+    If the summary is strong, reply: 'PASS'
+    If not, reply: 'REVISE' and briefly state what to improve."""
+    
+    summary = dspy.InputField(desc="The story summary to evaluate")
+    evaluation = dspy.OutputField(desc="Detailed assessment of flow, genre match, hook strength, engagement")
+    verdict = dspy.OutputField(desc="Either 'PASS' or 'REVISE' with brief reasoning")
+
+class ExtractMetadata(dspy.Signature):
+    """Extract genre, tone, and generate an engaging book title from story summary.
+    
+    The book title should be:
+    - Memorable and marketable 
+    - 2-6 words long
+    - Capture the story's essence
+    - Genre-appropriate
+    - Emotionally engaging
+    - Similar to successful books in the same genre"""
+    
+    summary = dspy.InputField(desc="The story summary")
+    genre = dspy.OutputField(desc="Primary genre of the story")
+    tone = dspy.OutputField(desc="Overall tone of the story")
+    book_title = dspy.OutputField(desc="Compelling, marketable book title (2-6 words)")
+
+# Global optimized generator cache
+_optimized_generator = None
+_last_optimization_time = None
+_optimization_examples_count = 0
+
+def get_optimized_generator(force_reoptimize=False):
+    """Get cached optimized generator or create new one if needed."""
+    global _optimized_generator, _last_optimization_time, _optimization_examples_count
+    
+    generator = OutlineGenerator()
+    current_examples_count = len(generator.examples)
+    
+    # Check if we need to (re)optimize
+    should_optimize = (
+        force_reoptimize or 
+        _optimized_generator is None or 
+        current_examples_count != _optimization_examples_count or
+        (_last_optimization_time and 
+         (time.time() - _last_optimization_time) > 3600)  # Re-optimize every hour
+    )
+    
+    if should_optimize and generator.examples:
+        print(f"🔧 Optimizing prompts using {current_examples_count} examples...")
+        try:
+            _optimized_generator = generator.optimize()
+            _last_optimization_time = time.time()
+            _optimization_examples_count = current_examples_count
+            print("✅ Optimization completed and cached!")
+        except Exception as e:
+            print(f"❌ Optimization failed: {e}")
+            _optimized_generator = generator
+    elif _optimized_generator is None:
+        _optimized_generator = generator
+        
+    return _optimized_generator
+
+def load_examples():
+    """Load training examples and convert to DSPy format."""
+    examples = []
     try:
-        if not outline_json:
-            return "❌ No outline data available"
-        
-        # Create formatted text output
-        formatted_text = ""
-        
-        # Title Section
-        title = outline_json.get("book_title", "Untitled Story")
-        formatted_text += f"📚 **{title}**\n\n"
-        
-        # Basic Info Section (simplified)
-        genre = outline_json.get("genre", "Unknown")
-        formatted_text += f"🎭 **Genre:** {genre}\n\n"
-        
-        # Description (brief)
-        description = outline_json.get("description", "")
-        if description:
-            formatted_text += f"📖 **Story:** {description}\n\n"
-        
-        # Characters Section (simple list)
-        main_characters = outline_json.get("main_characters", [])
-        if main_characters:
-            formatted_text += f"👥 **Characters:**\n"
-            for i, char in enumerate(main_characters, 1):
-                name = char.get("name", f"Character {i}")
-                description = char.get("description", "")
-                formatted_text += f"• **{name}** - {description}\n"
-            formatted_text += "\n"
-        
-        # Chapter Breakdown (simple - only titles and summaries)
-        Chapters = outline_json.get("Chapters", [])
-        if Chapters:
-            formatted_text += f"📑 **Chapters:**\n\n"
-            
-            for chapter in Chapters:
-                chapter_num = chapter.get("chapter_number", "?")
-                chapter_title = chapter.get("chapter_title", "Untitled Chapter")
-                chapter_summary = chapter.get("chapter_summary", "No summary available")
+        if os.path.exists(EXAMPLES_PATH):
+            with open(EXAMPLES_PATH, 'r', encoding='utf-8') as f:
+                raw_examples = json.load(f)
                 
-                formatted_text += f"**Chapter {chapter_num}: {chapter_title}**\n"
-                formatted_text += f"{chapter_summary}\n\n"
+            # Convert to DSPy Example format
+            for ex in raw_examples:
+                # Include book_title in training examples if available
+                example_data = {
+                    "idea": ex["idea"],
+                    "summary": ex["summary"],
+                    "genre": ex["genre"], 
+                    "tone": ex["tone"]
+                }
+                
+                # Add book_title if it exists in the example
+                if "title" in ex:
+                    example_data["book_title"] = ex["title"]
+                elif "book_title" in ex:
+                    example_data["book_title"] = ex["book_title"]
+                
+                dspy_example = dspy.Example(**example_data).with_inputs("idea")
+                examples.append(dspy_example)
+                
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Warning: Could not load examples from {EXAMPLES_PATH}: {e}")
+    return examples
+
+def save_new_example(idea: str, summary: str, genre: str, tone: str, book_title: str = None):
+    """Save a new example to the JSON file for future training."""
+    new_example = {
+        "idea": idea,
+        "summary": summary, 
+        "genre": genre,
+        "tone": tone,
+        "title": book_title or "Untitled Story"  # Include book_title in training data
+    }
+    
+    try:
+        # Load existing examples
+        existing_examples = []
+        if os.path.exists(EXAMPLES_PATH):
+            with open(EXAMPLES_PATH, 'r', encoding='utf-8') as f:
+                existing_examples = json.load(f)
         
-        return formatted_text.strip()
+        # Add new example
+        existing_examples.append(new_example)
+        
+        # Save back to file
+        with open(EXAMPLES_PATH, 'w', encoding='utf-8') as f:
+            json.dump(existing_examples, f, indent=2)
+            
+        print(f"Saved new example with title '{book_title}' to {EXAMPLES_PATH}")
         
     except Exception as e:
-        return f"❌ Error formatting outline: {str(e)}"
+        print(f"Error saving example: {e}")
 
-def generate_book_outline_json(idea: str) -> Dict[str, Any]:
+def metric_function(example, pred, trace=None):
+    """Custom metric to evaluate story generation quality."""
+    # Check if summary exists and is reasonable length
+    if not pred.summary or len(pred.summary.strip()) < 50:
+        return 0.0
+    
+    # Check if genre and tone match (if we have ground truth)
+    genre_match = 1.0 if hasattr(example, 'genre') and example.genre.lower() in pred.genre.lower() else 0.5
+    tone_match = 1.0 if hasattr(example, 'tone') and example.tone.lower() in pred.tone.lower() else 0.5
+    
+    # Check book title quality (if we have ground truth)
+    title_score = 0.8  # Default score
+    if hasattr(pred, 'book_title') and pred.book_title:
+        # Check if title is reasonable length (2-6 words)
+        title_words = len(pred.book_title.split())
+        if 2 <= title_words <= 6:
+            title_score = 1.0
+        # Check if title matches ground truth (if available)
+        if hasattr(example, 'book_title') and example.book_title:
+            # Simple similarity check
+            if pred.book_title.lower() in example.book_title.lower() or example.book_title.lower() in pred.book_title.lower():
+                title_score = 1.0
+    
+    # Check for hook/cliffhanger (simple heuristic)
+    hook_indicators = ['?', '!', '...', 'but', 'however', 'until', 'when', 'if', 'unless']
+    has_hook = any(indicator in pred.summary.lower() for indicator in hook_indicators)
+    hook_score = 1.0 if has_hook else 0.7
+    
+    # Check length (3-5 sentences roughly 100-400 chars)
+    length_score = 1.0 if 100 <= len(pred.summary) <= 400 else 0.8
+    
+    return (genre_match + tone_match + title_score + hook_score + length_score) / 5.0
+
+class OutlineGenerator(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.generate_story = dspy.ChainOfThought(GenerateStory)
+        self.generate_chapters = dspy.ChainOfThought(GenerateChapterBreakdown)
+        self.reflect_story = dspy.Predict(ReflectOnStory)
+        self.extract_metadata = dspy.Predict(ExtractMetadata)
+        self.examples = load_examples()
+        self.is_optimized = False
+
+    def forward(self, idea, include_chapters=True):
+        try:
+            # Step 1: Generate story with chain-of-thought
+            story_result = self.generate_story(idea=idea)
+            
+            # Step 2: Reflect on the generated summary
+            reflection_result = self.reflect_story(summary=story_result.summary)
+            
+            # Step 3: If reflection says REVISE, try again
+            final_summary = story_result.summary
+            if reflection_result.verdict.startswith("REVISE"):
+                print(f"Revising story: {reflection_result.verdict}")
+                # Generate again with feedback context
+                revised_result = self.generate_story(
+                    idea=f"{idea}\n\nPrevious attempt feedback: {reflection_result.evaluation}"
+                )
+                final_summary = revised_result.summary
+                story_result = revised_result
+            
+            # Step 4: Extract metadata including book_title
+            metadata_result = self.extract_metadata(summary=final_summary)
+            
+            # Ensure book_title exists (fallback)
+            book_title = getattr(metadata_result, 'book_title', 'Untitled Story')
+            
+            # Step 5: Generate chapter breakdown if requested
+            chapter_breakdown = []
+            if include_chapters:
+                try:
+                    chapter_result = self.generate_chapters(
+                        summary=final_summary,
+                        genre=metadata_result.genre,
+                        tone=metadata_result.tone
+                    )
+                    # Try to parse JSON, fallback to text if parsing fails
+                    try:
+                        chapter_breakdown = json.loads(chapter_result.chapter_breakdown)
+                    except json.JSONDecodeError:
+                        # If not valid JSON, convert text to structured format
+                        chapter_breakdown = self._parse_text_to_chapters(chapter_result.chapter_breakdown)
+                except Exception as e:
+                    print(f"Error generating chapters: {e}")
+                    chapter_breakdown = []
+            
+            return dspy.Prediction(
+                summary=final_summary,
+                genre=metadata_result.genre,
+                tone=metadata_result.tone,
+                book_title=book_title,  # Include book_title in response
+                reflection=reflection_result.evaluation,
+                analysis=story_result.analysis,
+                story_arcs=story_result.story_arcs,
+                selected_arc=story_result.selected_arc,
+                chapter_breakdown=chapter_breakdown
+            )
+            
+        except Exception as e:
+            print(f"Error generating outline: {e}")
+            return dspy.Prediction(
+                summary=f"Error generating story outline: {str(e)}",
+                genre="Unknown",
+                tone="Unknown",
+                book_title="Untitled Story",  # Include fallback book_title
+                reflection="Generation failed",
+                chapter_breakdown=[]
+            )
+
+    def _parse_text_to_chapters(self, text_breakdown):
+        """Convert unstructured text breakdown to structured format."""
+        import re
+        
+        chapters = []
+        # Split by chapter headings (### Chapter X:)
+        chapter_sections = re.split(r'###\s*Chapter\s*(\d+):', text_breakdown)
+        
+        for i in range(1, len(chapter_sections), 2):  # Skip first empty split
+            if i + 1 < len(chapter_sections):
+                chapter_num = int(chapter_sections[i])
+                chapter_content = chapter_sections[i + 1].strip()
+                
+                # Extract title (first line)
+                lines = chapter_content.split('\n')
+                title = lines[0].strip() if lines else f"Chapter {chapter_num}"
+                
+                # Extract key events, character development, setting, cliffhanger
+                key_events = []
+                character_development = ""
+                setting = ""
+                cliffhanger = ""
+                
+                for line in lines[1:]:
+                    line = line.strip()
+                    if '**Key Events**' in line or '- **Key Events**' in line:
+                        # Extract events from following text
+                        event_text = line.split('**Key Events**')[-1].strip(': -')
+                        if event_text:
+                            key_events.append(event_text)
+                    elif '**Character Development**' in line:
+                        character_development = line.split('**Character Development**')[-1].strip(': -')
+                    elif '**Setting**' in line:
+                        setting = line.split('**Setting**')[-1].strip(': -')
+                    elif '**Cliffhanger**' in line:
+                        cliffhanger = line.split('**Cliffhanger**')[-1].strip(': -')
+                    elif line.startswith('- ') and not any(keyword in line for keyword in ['**Key Events**', '**Character**', '**Setting**', '**Cliffhanger**']):
+                        # Additional events
+                        key_events.append(line[2:])
+                
+                chapters.append({
+                    "chapter_number": chapter_num,
+                    "title": title,
+                    "key_events": key_events if key_events else ["Plot development continues"],
+                    "character_development": character_development or "Character growth and development",
+                    "setting": setting or "Story setting continues",
+                    "cliffhanger": cliffhanger or "Chapter ends with anticipation"
+                })
+        
+        return chapters
+
+    def optimize(self, trainset=None, max_bootstrapped_demos=4, max_labeled_demos=16):
+        """Optimize the module using DSPy optimizers."""
+        if not trainset:
+            trainset = self.examples
+            
+        if not trainset:
+            print("No examples available for optimization")
+            return self
+            
+        # Use only a subset for training if we have many examples
+        if len(trainset) > 20:
+            trainset = trainset[:20]  # Limit to avoid overfitting
+            
+        print(f"🔧 Optimizing with {len(trainset)} training examples")
+        
+        # Use BootstrapFewShot optimizer (no valset parameter)
+        optimizer = dspy.BootstrapFewShot(
+            metric=metric_function,
+            max_bootstrapped_demos=max_bootstrapped_demos,
+            max_labeled_demos=max_labeled_demos
+        )
+        
+        try:
+            # Optimize the module - BootstrapFewShot only takes trainset
+            print("⏳ Running optimization...")
+            optimized_module = optimizer.compile(self, trainset=trainset)
+            optimized_module.is_optimized = True
+            print("✅ Module optimization completed!")
+            return optimized_module
+            
+        except Exception as e:
+            print(f"❌ Optimization failed: {e}")
+            print("Continuing with non-optimized version...")
+            return self
+
+def generate_book_outline_json(idea: str, use_optimized=True, save_result=False, include_chapters=True) -> Dict[str, Any]:
     """
-    Generate book outline and return both JSON and extracted metadata with LLM usage metrics.
+    Generate a cinematic story summary with a hook using CoT and DSPy.
+    
+    Args:
+        idea: The story idea to generate from
+        use_optimized: Whether to use the optimized version (if available)
+        save_result: Whether to save the result as a new training example
+        include_chapters: Whether to include chapter-by-chapter breakdown
+    
+    Returns:
+        Dict with 'summary', 'genre', 'tone', 'book_title', 'reflection', and 'chapter_breakdown'
     """
-    try:
-        # Capture LLM parameters for metrics (all dynamic from actual LLM object)
-        llm_temperature = llm.temperature
-        llm_model = llm.model_name  # Get actual model name directly
-        llm_max_tokens = llm.max_tokens
-        
-        # Calculate input metrics
-        input_text = prompt.format(idea=idea)
-        input_word_count = len(input_text.split())
-        
-        # Generate the outline
-        result = chain.invoke({"idea": idea})
-        raw_response = result.content.strip()
-        
-        # Calculate output metrics
-        output_word_count = len(raw_response.split())
-        total_word_count = input_word_count + output_word_count
-        
-        # Estimate token count (rough approximation: 1 token ≈ 0.75 words)
-        estimated_input_tokens = int(input_word_count * 1.33)
-        estimated_output_tokens = int(output_word_count * 1.33)
-        estimated_total_tokens = estimated_input_tokens + estimated_output_tokens
-        
-        # Parse JSON
-        outline_json = parse_json_response(raw_response)
-        
-        if not outline_json:
-            return {
-                "success": False,
-                "error": "Failed to parse JSON response",
-                "raw_response": raw_response,
-                "outline_json": None,
-                "metadata": {},
-                "formatted_text": "❌ Failed to generate outline",
-                # Include usage metrics even on failure
-                "usage_metrics": {
-                    "temperature_used": llm_temperature,
-                    "model_used": llm_model,
-                    "max_tokens": llm_max_tokens,
-                    "input_word_count": input_word_count,
-                    "output_word_count": output_word_count,
-                    "total_word_count": total_word_count,
-                    "estimated_input_tokens": estimated_input_tokens,
-                    "estimated_output_tokens": estimated_output_tokens,
-                    "estimated_total_tokens": estimated_total_tokens
-                }
-            }
-        
-        # Extract metadata
-        metadata = extract_metadata(outline_json)
-        
-        # Create formatted text for frontend display
-        formatted_text = format_json_to_display_text(outline_json)
-        
+    if not idea or not idea.strip():
         return {
+            "success": False,
+            "summary": "Please provide a story idea to generate an outline.",
+            "genre": "Unknown",
+            "tone": "Unknown",
+            "book_title": "Untitled Story",
+            "reflection": "No input provided",
+            "chapters": [],
+            "error": "No input provided"
+        }
+    
+    try:
+        # Get optimized generator (cached, only optimizes when needed)
+        if use_optimized:
+            generator = get_optimized_generator()
+        else:
+            generator = OutlineGenerator()
+        
+        # Generate the story
+        result = generator(idea=idea.strip(), include_chapters=include_chapters)
+        
+        # Convert DSPy Prediction to dict
+        output = {
             "success": True,
-            "outline_json": outline_json,
-            "metadata": metadata,
-            "formatted_text": formatted_text,  # New: formatted text for frontend
-            "raw_response": raw_response,
-            # LLM Usage Metrics for database storage
-            "usage_metrics": {
-                "temperature_used": llm_temperature,
-                "model_used": llm_model,
-                "max_tokens": llm_max_tokens,
-                "input_word_count": input_word_count,
-                "output_word_count": output_word_count,
-                "total_word_count": total_word_count,
-                "estimated_input_tokens": estimated_input_tokens,
-                "estimated_output_tokens": estimated_output_tokens,
-                "estimated_total_tokens": estimated_total_tokens,
-                # Calculated story metrics
-                "story_estimated_words": metadata.get("total_estimated_words", 0),
-                "story_Chapters_count": len(outline_json.get("Chapters", [])),
-                "story_characters_count": len(outline_json.get("main_characters", [])),
-                "story_locations_count": len(outline_json.get("key_locations", []))
+            "summary": result.summary,
+            "genre": result.genre,
+            "tone": result.tone,
+            "book_title": result.book_title,  # Now included!
+            "reflection": result.reflection,
+            "chapters": result.chapter_breakdown,  # Now structured as JSON array
+            "is_optimized": generator.is_optimized,
+            "outline_json": {
+                "book_title": result.book_title,
+                "summary": result.summary,
+                "genre": result.genre,
+                "tone": result.tone,
+                "chapters": result.chapter_breakdown,
+                "main_characters": [],  # Can be extracted from chapters if needed
+                "key_locations": [],    # Can be extracted from chapters if needed
+                "theme": result.tone,   # Use tone as theme for now
+                "style": result.genre,  # Use genre as style for now
+                "language": "English",
+                "tags": [result.genre.lower()],
+                "estimated_total_chapters": len(result.chapter_breakdown) if result.chapter_breakdown else 12
             }
         }
+        
+        # Save as new example if requested (include book_title in training data)
+        if save_result and result.summary and len(result.summary.strip()) > 50:
+            save_new_example(
+                idea.strip(), 
+                result.summary, 
+                result.genre, 
+                result.tone, 
+                result.book_title
+            )
+            # Force re-optimization next time since we have new data
+            global _optimized_generator
+            _optimized_generator = None
+        
+        return output
         
     except Exception as e:
         return {
             "success": False,
+            "summary": f"Failed to generate outline: {str(e)}",
+            "genre": "Unknown", 
+            "tone": "Unknown",
+            "book_title": "Untitled Story",
+            "reflection": "Generation failed",
+            "chapters": [],
+            "is_optimized": False,
             "error": str(e),
-            "raw_response": "",
-            "outline_json": None,
-            "metadata": {},
-            "formatted_text": f"❌ Error generating outline: {str(e)}",
-            "usage_metrics": {
-                "temperature_used": llm.temperature,
-                "model_used": llm.model_name,
-                "max_tokens": llm.max_tokens,
-                "error": str(e)
+            "outline_json": {
+                "book_title": "Untitled Story",
+                "summary": f"Failed to generate outline: {str(e)}",
+                "genre": "Unknown",
+                "tone": "Unknown",
+                "chapters": [],
+                "main_characters": [],
+                "key_locations": [],
+                "theme": "Unknown",
+                "style": "Unknown",
+                "language": "English",
+                "tags": [],
+                "estimated_total_chapters": 12
             }
         }
 
-def generate_book_outline(idea: str) -> str:
+def format_json_to_display_text(outline_json: Dict[str, Any]) -> str:
     """
-    Backward compatibility function - returns formatted text.
+    Convert JSON outline to formatted text for display.
+    This function formats the outline for user-friendly display.
     """
     try:
-        result = generate_book_outline_json(idea)
+        book_title = outline_json.get("book_title", "Untitled Story")
+        summary = outline_json.get("summary", "")
+        genre = outline_json.get("genre", "Unknown")
+        tone = outline_json.get("tone", "Unknown")
+        chapters = outline_json.get("chapters", [])
         
-        if not result["success"]:
-            return f"❌ Error generating book outline: {result['error']}"
+        formatted_text = f"""📚 **{book_title}**
+
+**Genre:** {genre}
+**Tone:** {tone}
+
+**Story Summary:**
+{summary}
+
+**Chapter Breakdown:**
+"""
         
-        # Return the formatted text for display
-        return result["formatted_text"]
+        for i, chapter in enumerate(chapters, 1):
+            chapter_title = chapter.get("title", f"Chapter {i}")
+            key_events = chapter.get("key_events", [])
+            
+            formatted_text += f"\n**Chapter {i}: {chapter_title}**\n"
+            
+            if key_events:
+                for event in key_events[:3]:  # Show first 3 events
+                    formatted_text += f"• {event}\n"
+            
+            cliffhanger = chapter.get("cliffhanger", "")
+            if cliffhanger:
+                formatted_text += f"*Ends with: {cliffhanger}*\n"
+        
+        return formatted_text
         
     except Exception as e:
-        return f"❌ Error generating book outline: {str(e)}"
+        return f"Error formatting outline: {str(e)}"
 
-# Entry point
+def generate_specific_chapter(chapter_breakdown: list, chapter_number: int, writing_style: str = "engaging", word_count: int = 2000) -> str:
+    """
+    Generate a specific chapter based on the structured chapter breakdown.
+    
+    Args:
+        chapter_breakdown: List of structured chapter objects
+        chapter_number: Which chapter to generate (1-based)
+        writing_style: Style of writing (engaging, descriptive, fast-paced, etc.)
+        word_count: Target word count for the chapter
+    
+    Returns:
+        The generated chapter content
+    """
+    
+    if not chapter_breakdown or chapter_number < 1 or chapter_number > len(chapter_breakdown):
+        return f"Error: Chapter {chapter_number} not found in breakdown"
+    
+    # Get the specific chapter info (convert to 0-based index)
+    chapter_info = chapter_breakdown[chapter_number - 1]
+    
+    chapter_prompt = f"""
+    You are a professional novelist writing a specific chapter of a story.
+    
+    Write Chapter {chapter_number}: "{chapter_info.get('title', f'Chapter {chapter_number}')}"
+    
+    Chapter Structure:
+    - Key Events: {', '.join(chapter_info.get('key_events', []))}
+    - Character Development: {chapter_info.get('character_development', '')}
+    - Setting: {chapter_info.get('setting', '')}
+    - End with: {chapter_info.get('cliffhanger', '')}
+    
+    Write in an {writing_style} style with approximately {word_count} words.
+    
+    Guidelines:
+    - Follow the plot points and character development outlined above
+    - Include vivid descriptions and dialogue
+    - Maintain consistency with the story's tone and genre
+    - End with the specified cliffhanger or transition
+    - Show don't tell - use scenes and action rather than summary
+    - Include sensory details and emotional depth
+    
+    Write the complete chapter now:
+    """
+    
+    try:
+        # Use the same LM instance
+        chapter_content = lm(chapter_prompt)[0].generations[0].text.strip()
+        return chapter_content
+    except Exception as e:
+        return f"Error generating chapter {chapter_number}: {str(e)}"
+
+def train_from_user_feedback(idea: str, good_summary: str, genre: str, tone: str, book_title: str = None):
+    """
+    Add user feedback as a training example and re-optimize the model.
+    Call this when user provides a good example or corrects a bad one.
+    """
+    save_new_example(idea, good_summary, genre, tone, book_title)
+    
+    # Force re-optimization next time since we have new training data
+    global _optimized_generator
+    _optimized_generator = None
+    print("🔄 New training data added. Will re-optimize on next request.")
+    
+    return True
+
+def force_reoptimization():
+    """Force immediate re-optimization with current examples."""
+    generator = get_optimized_generator(force_reoptimize=True)
+    return generator

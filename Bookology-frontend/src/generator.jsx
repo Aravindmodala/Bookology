@@ -85,6 +85,12 @@ export default function Generator() {
   const [versionLoading, setVersionLoading] = useState({}); // Loading state for version fetching
   const [activeVersions, setActiveVersions] = useState({}); // Track which version is active for each chapter
 
+  // New state for story outline details
+  const [storyGenre, setStoryGenre] = useState(''); // Genre from backend
+  const [storyTone, setStoryTone] = useState(''); // Tone from backend
+  const [chapterTitles, setChapterTitles] = useState([]); // Chapter titles from backend
+  const [storyTitle, setStoryTitle] = useState(''); // Story title (auto-generated or user-edited)
+
   // Fetch saved Stories and their first chapter from Supabase when switching to 'saved' tab
   useEffect(() => {
     const fetchStories = async () => {
@@ -263,8 +269,6 @@ export default function Generator() {
     setEditableLocations([]);
     setOutlineSaved(false);
     setSaveOutlineError('');
-    
-    // CRITICAL: Complete state reset to prevent cross-story data contamination
     setAllChapters([]);
     setAvailableChoices([]);
     setShowChoices(false);
@@ -274,18 +278,19 @@ export default function Generator() {
     setChoiceHistoryError('');
     setCurrentChapterNumber(1);
     setStoryId(null);
-    
-    // Get the user's JWT token from AuthContext
+    // Reset new state variables
+    setStoryGenre('');
+    setStoryTone('');
+    setChapterTitles([]);
+    setStoryTitle('');
+
     const token = session?.access_token;
-    
+
     try {
       const headers = { 'Content-Type': 'application/json' };
-      
-      // Add auth header if user is logged in (for auto-save functionality)
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      
       const response = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_OUTLINE), {
         method: 'POST',
         headers,
@@ -295,23 +300,34 @@ export default function Generator() {
         })
       });
       const data = await response.json();
-      
-      if (data.expanded_prompt) {
-        setResult(data.expanded_prompt);
+
+      // Updated: match backend response
+      if (data.summary) {
+        setResult(data.summary); // Show the summary in the UI
         
-        // Store the JSON data for editing
-        if (data.outline_json) {
-          setOutlineJson(data.outline_json);
-          // Populate editable characters and locations
-          setEditableCharacters(data.characters || []);
-          setEditableLocations(data.locations || []);
+        // Use backend-generated title or fall back to auto-generation
+        if (data.title) {
+          setStoryTitle(data.title);
+        } else {
+          // Fallback: auto-generate title from the first sentence of the summary
+          const firstSentence = data.summary.split('.')[0];
+          const autoTitle = firstSentence.length > 50 ? firstSentence.substring(0, 50) + '...' : firstSentence;
+          setStoryTitle(autoTitle);
         }
         
-        // Note: No auto-save anymore - user must manually save
-        if (token) {
-          setSaveSuccess('✨ Outline generated! You can edit character/location names and then save.');
+        // Extract and set genre and chapter titles
+        if (data.genre) {
+          setStoryGenre(data.genre);
         }
-        
+        if (data.tone) {
+          setStoryTone(data.tone);
+        }
+        if (data.chapters && Array.isArray(data.chapters)) {
+          // Extract just the titles from the chapters array
+          const titles = data.chapters.map(chapter => chapter.title || chapter.chapter_title || `Chapter ${chapter.chapter_number}`);
+          setChapterTitles(titles);
+        }
+        setSaveSuccess('✨ Outline generated! You can edit character/location names and then save.');
       } else if (data.error) {
         setError(data.error);
       } else {
@@ -405,7 +421,8 @@ export default function Generator() {
       return;
     }
 
-    if (!outlineJson) {
+    // Check if we have the new format data from the backend
+    if (!result) {
       setSaveOutlineError('No outline data to save.');
       return;
     }
@@ -414,16 +431,7 @@ export default function Generator() {
     setSaveOutlineError('');
 
     try {
-      // Update the outline JSON with edited characters and locations
-      const updatedOutlineJson = {
-        ...outlineJson,
-        main_characters: editableCharacters,
-        key_locations: editableLocations
-      };
-
-      // Generate updated formatted text (we'll use the original for now, but could regenerate)
-      const formattedText = result; // Using existing formatted text
-
+      // Use the new format from the enhanced outline generator
       const response = await fetch(createApiUrl(API_ENDPOINTS.SAVE_OUTLINE), {
         method: 'POST',
         headers: {
@@ -431,8 +439,16 @@ export default function Generator() {
           'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
-          outline_json: updatedOutlineJson,
-          formatted_text: formattedText
+          summary: result,  // The story summary
+          genre: storyGenre,  // The detected genre
+          tone: storyTone,  // The detected tone
+          title: storyTitle,  // The user-edited title
+          chapters: chapterTitles.map((title, index) => ({
+            chapter_number: index + 1,
+            title: title
+          })),  // Convert titles to chapter objects
+          reflection: '',  // We don't have reflection in frontend state yet
+          is_optimized: true  // Assume optimized since it's from enhanced generator
         })
       });
 
@@ -441,10 +457,6 @@ export default function Generator() {
       if (data.success) {
         setOutlineSaved(true);
         setStoryId(data.story_id); // Store story ID for chapter generation
-        // Update the displayed outline with the new character names
-        if (data.updated_formatted_text) {
-          setResult(data.updated_formatted_text);
-        }
         setSaveSuccess(`✅ Outline saved as "${data.story_title}"! Now you can generate Chapter 1.`);
         setSaveError(''); // Clear any previous errors
 
@@ -2000,6 +2012,7 @@ export default function Generator() {
           preview: {
             chapter_number: data.chapter_number,
             content: data.chapter_content,
+            summary: data.chapter_summary || '',  // Store the generated summary
             choices: data.choices,
             title: `Chapter ${data.chapter_number} (Preview)`
           },
@@ -2325,6 +2338,7 @@ export default function Generator() {
                       // Save the previewed content, not regenerate
                       const { chapterNumber, choiceId, choiceData } = draftComparison.commitParams;
                       const previewContent = draftComparison.preview.content;
+                      const previewSummary = draftComparison.preview.summary;
                       const previewChoices = draftComparison.preview.choices;
                       setShowDraftModal(false);
                       setDraftComparison(null);
@@ -2333,6 +2347,7 @@ export default function Generator() {
                         choiceId,
                         choiceData,
                         content: previewContent,
+                        summary: previewSummary,
                         choices: previewChoices
                       });
                     }}
@@ -2363,7 +2378,7 @@ export default function Generator() {
   };
 
   // Function to save the previewed chapter as a new version
-  const savePreviewedChapter = async ({ chapterNumber, choiceId, choiceData, content, choices }) => {
+  const savePreviewedChapter = async ({ chapterNumber, choiceId, choiceData, content, summary, choices }) => {
     if (!selectedStory || !session?.access_token) return;
     setBranchingLoading(true);
     setChoicesError('');
@@ -2375,6 +2390,7 @@ export default function Generator() {
         choice_id: choiceId,
         choice_data: choiceData,
         content, // The previewed chapter content
+        summary, // The previewed chapter summary
         choices // The previewed choices (if needed)
       };
 
@@ -2708,20 +2724,91 @@ export default function Generator() {
 
               {result && (
                 <div className="space-y-6 mt-6">
-                  {/* Editable Outline Display */}
+                  {/* Story Title Input */}
                   <div className="card">
                     <h3 className="text-lg font-semibold text-white mb-4">
-                      ✏️ Edit Your Outline
+                      📖 Story Title
                     </h3>
                     <p className="text-gray-300 text-sm mb-4">
-                      Click on character names to edit them directly!
+                      Edit your story title (auto-generated from the summary):
                     </p>
                     
-                    <div className="text-gray-200 leading-relaxed">
-                      {/* Render the outline with inline editing for character names */}
-                      {renderEditableOutline()}
+                    <input
+                      type="text"
+                      value={storyTitle}
+                      onChange={(e) => setStoryTitle(e.target.value)}
+                      placeholder="Enter your story title..."
+                      className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      maxLength={100}
+                    />
+                    <p className="text-gray-400 text-xs mt-2">
+                      {storyTitle.length}/100 characters
+                    </p>
+                  </div>
+
+                  {/* Story Summary Display */}
+                  <div className="card">
+                    <h3 className="text-lg font-semibold text-white mb-4">
+                      📝 Story Summary
+                    </h3>
+                    <p className="text-gray-300 text-sm mb-4">
+                      The complete story summary generated from your idea:
+                    </p>
+                    
+                    <div className="bg-gray-800 border border-gray-600 rounded-lg p-4">
+                      <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">
+                        {result}
+                      </p>
                     </div>
                   </div>
+
+                  {/* Genre and Chapter Titles Display */}
+                  {(storyGenre || chapterTitles.length > 0) && (
+                    <div className="card">
+                      <h3 className="text-lg font-semibold text-white mb-4">
+                        📋 Story Details
+                      </h3>
+                      
+                      {/* Genre Display */}
+                      {storyGenre && (
+                        <div className="mb-4">
+                          <span className="text-sm font-medium text-gray-300">Genre:</span>
+                          <span className="ml-2 px-3 py-1 bg-blue-600 text-white text-sm rounded-full">
+                            {storyGenre}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {/* Tone Display */}
+                      {storyTone && (
+                        <div className="mb-4">
+                          <span className="text-sm font-medium text-gray-300">Tone:</span>
+                          <span className="ml-2 px-3 py-1 bg-purple-600 text-white text-sm rounded-full">
+                            {storyTone}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {/* Chapter Titles Display */}
+                      {chapterTitles.length > 0 && (
+                        <div>
+                          <span className="text-sm font-medium text-gray-300 block mb-2">
+                            Chapter Breakdown ({chapterTitles.length} chapters):
+                          </span>
+                          <div className="space-y-1">
+                            {chapterTitles.map((title, index) => (
+                              <div key={index} className="flex items-center text-gray-200">
+                                <span className="text-blue-400 font-mono text-sm w-8">
+                                  {index + 1}.
+                                </span>
+                                <span className="text-sm">{title}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Save & Continue Section */}
                   <div className="text-center">
