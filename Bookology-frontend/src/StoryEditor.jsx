@@ -67,6 +67,7 @@ const StoryEditor = () => {
   // Choice system state (now using cached choices instead of state)
   const [choicesLoading, setChoicesLoading] = useState(false);
   const [selectedChoiceId, setSelectedChoiceId] = useState(null);
+  const [selectedChoiceForContinuation, setSelectedChoiceForContinuation] = useState(null);
   const [generateWithChoiceLoading, setGenerateWithChoiceLoading] = useState(false);
   const [choicesError, setChoicesError] = useState('');
 
@@ -493,6 +494,29 @@ const StoryEditor = () => {
       setGeneratingChapter(null);
       setPendingChapter(null);
     }
+  };
+
+  // New handlers for choice selection without immediate generation
+  const handleChoiceClick = (choiceId, choice) => {
+    setSelectedChoiceId(choiceId);
+    setSelectedChoiceForContinuation({ choiceId, choice });
+  };
+
+  const handleContinueWithChoice = async () => {
+    if (!selectedChoiceForContinuation) {
+      setChoicesError('Please select a choice first.');
+      return;
+    }
+
+    const { choiceId, choice } = selectedChoiceForContinuation;
+    const currentChapterData = currentStoryStructure.chapters[activeChapter];
+    
+    // Call the existing generation logic
+    await handleChoiceSelection(choiceId, choice, currentChapterData.chapterNumber);
+    
+    // Clear the selected choice after generation
+    setSelectedChoiceForContinuation(null);
+    setSelectedChoiceId(null);
   };
 
   // Enhanced content update handler with cache sync and debouncing
@@ -1055,10 +1079,7 @@ const StoryEditor = () => {
                                     ? 'border-blue-500 bg-blue-900/30 ring-2 ring-blue-400/50'
                                     : 'border-gray-600 bg-gray-800/30 hover:border-gray-500'
                                 }`}
-                                onClick={() => {
-                                  setSelectedChoiceId(choice.id);
-                                  handleChoiceSelection(choice.id, choice, currentChapterData.chapterNumber);
-                                }}
+                                onClick={() => handleChoiceClick(choice.id, choice)}
                               >
                                 <div className="flex items-start space-x-3">
                                   <div className={`w-6 h-6 rounded-full border-2 mt-1 flex-shrink-0 ${
@@ -1094,6 +1115,36 @@ const StoryEditor = () => {
                               </div>
                             ))}
                           </div>
+                          {/* Continue with Choice Button */}
+                          {selectedChoiceId && (
+                            <div className="mt-6 text-center">
+                              <button
+                                onClick={handleContinueWithChoice}
+                                disabled={generateWithChoiceLoading}
+                                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white font-semibold rounded-lg transition-colors"
+                              >
+                                {generateWithChoiceLoading ? (
+                                  <span className="flex items-center space-x-2">
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    <span>Generating next chapter...</span>
+                                  </span>
+                                ) : (
+                                  'Continue with this choice'
+                                )}
+                              </button>
+                              
+                              <button
+                                onClick={() => {
+                                  setSelectedChoiceId(null);
+                                  setSelectedChoiceForContinuation(null);
+                                }}
+                                className="ml-3 px-4 py-3 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors"
+                              >
+                                Change choice
+                              </button>
+                            </div>
+                          )}
+
                           {/* Choice Error Display */}
                           {choicesError && (
                             <div className="mt-4 p-3 bg-red-900/20 border border-red-500/30 rounded-lg">

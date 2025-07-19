@@ -813,11 +813,12 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
         story = story_response.data
         logger.info(f"📖 Story retrieved: title='{story.get('story_title', 'No title')}'")
 
-        # Get all previous Chapters
-        logger.info(f"📚 Fetching previous Chapters for story_id={request.story_id}")
-        Chapters_response = supabase.table('Chapters').select('*').eq('story_id', request.story_id).order('chapter_number').execute()
+        # Get only ACTIVE chapters up to the previous chapter (exclude current chapter versions)
+        max_context_chapter = request.next_chapter_num - 1
+        logger.info(f"📚 Fetching ACTIVE chapters up to chapter {max_context_chapter} for story_id={request.story_id}")
+        Chapters_response = supabase.table('Chapters').select('*').eq('story_id', request.story_id).eq('is_active', True).lte('chapter_number', max_context_chapter).order('chapter_number').execute()
         previous_Chapters = Chapters_response.data
-        logger.info(f"📚 Previous Chapters count: {len(previous_Chapters)}")
+        logger.info(f"📚 Active previous chapters count: {len(previous_Chapters)} (chapters 1-{max_context_chapter})")
 
         # Generate the next chapter
         logger.info(f"⚡ Starting chapter generation process")
@@ -2261,8 +2262,9 @@ async def generate_next_chapter_endpoint(
         story = story_response.data[0]
         story_title = story.get("story_title", "Untitled Story")
         
-        # Get previous Chapters and their summaries for context
-        previous_Chapters_response = supabase.table("Chapters").select("content, summary").eq("story_id", chapter_input.story_id).lte("chapter_number", chapter_input.chapter_number).order("chapter_number").execute()
+        # Get previous ACTIVE chapters and their summaries for context (exclude current chapter versions)
+        max_context_chapter = chapter_input.chapter_number - 1
+        previous_Chapters_response = supabase.table("Chapters").select("content, summary").eq("story_id", chapter_input.story_id).eq("is_active", True).lte("chapter_number", max_context_chapter).order("chapter_number").execute()
         
         previous_summaries = []
         if previous_Chapters_response.data:
@@ -2347,8 +2349,9 @@ async def generate_and_save_chapter_endpoint(
         story = story_response.data[0]
         story_title = story.get("story_title", "Untitled Story")
         
-        # Get previous Chapters and their summaries for context - use capitalized table name
-        previous_Chapters_response = supabase.table("Chapters").select("content, summary").eq("story_id", chapter_input.story_id).lte("chapter_number", chapter_input.chapter_number).order("chapter_number").execute()
+        # Get previous ACTIVE chapters and their summaries for context (exclude current chapter versions)
+        max_context_chapter = chapter_input.chapter_number - 1
+        previous_Chapters_response = supabase.table("Chapters").select("content, summary").eq("story_id", chapter_input.story_id).eq("is_active", True).lte("chapter_number", max_context_chapter).order("chapter_number").execute()
         
         previous_summaries = []
         if previous_Chapters_response.data:

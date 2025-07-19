@@ -1,6 +1,6 @@
 """
-Story DNA Extractor - LLM-Powered Version
-Replaces broken regex extraction with intelligent LLM-based DNA extraction
+Enhanced Story DNA Extractor - Plot Thread Aware Version
+Includes active plot tracking, choice context, and continuity preservation
 """
 
 import json
@@ -9,17 +9,13 @@ from typing import Dict, List, Any, Optional
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
-from logger_config import setup_logger
 
 # Load environment variables
 load_dotenv()
 
-logger = setup_logger(__name__)
-
-class LLMStoryDNAExtractor:
+class EnhancedLLMStoryDNAExtractor:
     """
-    LLM-powered DNA extractor that intelligently extracts story genetics
-    instead of relying on broken regex patterns.
+    Enhanced DNA extractor that tracks plot threads, choices, and continuity anchors
     """
     
     def __init__(self):
@@ -27,90 +23,158 @@ class LLMStoryDNAExtractor:
         self.dna_llm = ChatOpenAI(
             api_key=os.getenv("OPENAI_API_KEY"), 
             model_name='gpt-4o-mini', 
-            temperature=0.2,  # Lower temperature for consistent extraction
-            max_tokens=800
+            temperature=0.1,  # Even lower for precise extraction
+            max_tokens=1200   # More tokens for detailed extraction
         )
-        logger.info("🧬 LLM-Powered DNA Extractor initialized")
+        print("🧬 Enhanced LLM-Powered DNA Extractor initialized")
     
-    def extract_chapter_dna(self, chapter_content: str, chapter_number: int) -> Dict[str, Any]:
+    def extract_chapter_dna(
+        self, 
+        chapter_content: str, 
+        chapter_number: int,
+        previous_dna_list: List[Dict] = None,
+        user_choice_made: str = "",
+        choice_options: List[Dict] = None
+    ) -> Dict[str, Any]:
         """
-        Extract story DNA using LLM intelligence instead of regex patterns.
+        Extract comprehensive story DNA with plot thread tracking.
         
         Args:
             chapter_content: Full chapter text
             chapter_number: Chapter number for context
+            previous_dna_list: List of DNA from previous chapters
+            user_choice_made: The choice the user made (if any)
+            choice_options: The choices that were available
             
         Returns:
-            Dict containing intelligently extracted story DNA
+            Dict containing enhanced story DNA with plot tracking
         """
-        logger.info(f"🧬 Extracting DNA from Chapter {chapter_number} using LLM")
+        print(f"🧬 Extracting Enhanced DNA from Chapter {chapter_number}")
         
         try:
-            # Use LLM to extract comprehensive DNA
-            story_dna = self._extract_dna_with_llm(chapter_content, chapter_number)
+            # Build context from previous chapters
+            previous_context = self._build_previous_context(previous_dna_list)
+            choice_context = self._build_choice_context(user_choice_made, choice_options)
+            
+            # Use enhanced LLM extraction
+            story_dna = self._extract_enhanced_dna_with_llm(
+                chapter_content, 
+                chapter_number,
+                previous_context,
+                choice_context
+            )
             
             # Add metadata
             story_dna["chapter_number"] = chapter_number
-            story_dna["extraction_method"] = "LLM"
-            story_dna["dna_version"] = "2.0"
+            story_dna["extraction_method"] = "ENHANCED_LLM"
+            story_dna["dna_version"] = "3.0"
             
-            logger.info(f"✅ Chapter {chapter_number} DNA extracted: {len(str(story_dna))} chars")
+            # Track plot thread evolution
+            if previous_dna_list:
+                story_dna = self._track_plot_evolution(story_dna, previous_dna_list)
+            
+            print(f"✅ Enhanced Chapter {chapter_number} DNA extracted: {len(str(story_dna))} chars")
             return story_dna
             
         except Exception as e:
-            logger.error(f"❌ Error extracting DNA from Chapter {chapter_number}: {e}")
+            print(f"❌ Error extracting enhanced DNA from Chapter {chapter_number}: {e}")
             return self._create_fallback_dna(chapter_content, chapter_number)
     
-    def _extract_dna_with_llm(self, chapter_content: str, chapter_number: int) -> Dict[str, Any]:
-        """Use LLM to intelligently extract story DNA."""
+    def _extract_enhanced_dna_with_llm(
+        self, 
+        chapter_content: str, 
+        chapter_number: int,
+        previous_context: str,
+        choice_context: str
+    ) -> Dict[str, Any]:
+        """Use LLM to extract enhanced DNA with plot tracking."""
         
-        # Create focused extraction prompt
         extraction_prompt = f"""
-Extract the essential story DNA from this chapter for perfect story continuity. Be precise and avoid repetitive descriptions.
+You are extracting COMPREHENSIVE story DNA for perfect continuity in a choice-driven story.
 
-CHAPTER {chapter_number}:
+PREVIOUS STORY CONTEXT:
+{previous_context}
+
+USER CHOICE CONTEXT:
+{choice_context}
+
+CURRENT CHAPTER {chapter_number}:
 {chapter_content}
 
-Extract the following information and return as JSON:
+Extract ALL essential story elements and return as JSON:
 
 {{
     "scene_genetics": {{
-        "location_type": "general location type (forest/village/castle/etc - use variety, not exact phrases)",
-        "location_description": "brief varied description (avoid repeating 'edge of ancient forest' - use alternatives like 'woodland area', 'forest clearing', 'among the trees')",
-        "time_context": "time of day or temporal context",
-        "atmosphere": "emotional atmosphere of the scene"
+        "location_type": "specific location type",
+        "location_description": "brief but distinctive description",
+        "time_context": "time of day/duration",
+        "atmosphere": "emotional atmosphere",
+        "setting_continuity": "how this connects to previous scene"
     }},
     "character_genetics": {{
-        "active_characters": ["only real character names - exclude common words like 'You', 'Each', 'With', 'This'"],
-        "character_states": {{"character_name": "current emotional/physical state"}},
-        "character_relationships": {{"character1_character2": "relationship description"}}
-    }},
-    "emotional_genetics": {{
-        "dominant_emotions": ["primary emotions present in chapter"],
-        "emotional_momentum": "rising/falling/stable/shifting",
-        "tension_level": "high/medium/low"
+        "active_characters": ["actual character names only"],
+        "character_states": {{"character_name": "current physical/emotional state"}},
+        "character_relationships": {{"char1_char2": "relationship status/changes"}},
+        "character_development": {{"character_name": "any growth/change this chapter"}}
     }},
     "plot_genetics": {{
-        "pending_decisions": ["any choices or questions awaiting resolution"],
-        "active_conflicts": ["ongoing tensions or problems"],
-        "conversation_threads": ["key dialogue topics that might continue"]
+        "active_plot_threads": [
+            {{
+                "thread_id": "unique_identifier",
+                "description": "what this plot thread is about",
+                "status": "introduced/ongoing/resolved/escalated",
+                "next_action_needed": "what needs to happen next"
+            }}
+        ],
+        "pending_decisions": ["specific choices/questions awaiting resolution"],
+        "active_conflicts": ["ongoing tensions with specific details"],
+        "conversation_threads": ["dialogue topics that could continue"],
+        "established_facts": ["important facts established this chapter"],
+        "promises_made": ["any commitments or promises made"],
+        "deadlines_mentioned": ["any time pressures or deadlines"]
+    }},
+    "choice_genetics": {{
+        "choice_made": "the choice that led to this chapter",
+        "choice_consequences": ["how the choice played out"],
+        "choice_fulfillment": "did the chapter deliver on choice expectations?",
+        "new_choice_setups": ["situations that could lead to new choices"]
+    }},
+    "emotional_genetics": {{
+        "dominant_emotions": ["primary emotions present"],
+        "emotional_momentum": "rising/falling/stable/shifting",
+        "tension_level": "high/medium/low",
+        "emotional_arcs": {{"character_name": "emotional journey this chapter"}}
     }},
     "ending_genetics": {{
-        "final_scene_context": "what is happening at the very end of the chapter (last 2-3 sentences)",
-        "last_dialogue": "final spoken words if any",
-        "last_action": "final significant action taken",
+        "final_scene_context": "detailed description of chapter ending",
+        "last_dialogue": "final spoken words with speaker",
+        "last_action": "final significant action with who did it",
+        "immediate_situation": "what situation characters are in RIGHT NOW",
         "scene_status": "ongoing/complete/transitional",
-        "cliffhanger_type": "question/decision/suspense/none"
+        "cliffhanger_type": "question/decision/suspense/revelation/none",
+        "urgent_needs": ["what characters urgently need to address next"]
     }},
-    "continuity_anchors": ["critical facts that must remain consistent (character backgrounds, established relationships, important objects, etc)"]
+    "continuity_anchors": [
+        {{
+            "type": "character_fact/relationship/object/location/rule",
+            "description": "the specific fact that must remain consistent",
+            "importance": "critical/important/minor"
+        }}
+    ],
+    "world_building": {{
+        "locations_mentioned": ["any places referenced"],
+        "objects_introduced": ["important items introduced"],
+        "rules_established": ["world rules or constraints mentioned"],
+        "backstory_revealed": ["any character/world history revealed"]
+    }}
 }}
 
-CRITICAL REQUIREMENTS:
-1. For location: Use VARIED descriptions even for same place (forest setting, woodland area, among trees, forest clearing)
-2. For characters: ONLY include actual character names, not pronouns or common words
-3. For final scene: Focus on immediate context needed for next chapter
-4. Keep descriptions brief but unique
-5. Ensure all extracted information is directly from the chapter text
+CRITICAL EXTRACTION REQUIREMENTS:
+1. **PLOT THREADS**: Identify ALL ongoing storylines, especially job offers, financial problems, relationship issues
+2. **CHOICE TRACKING**: Note how user choices affected the story and what they led to
+3. **SPECIFIC DETAILS**: Include names, numbers, specific commitments, exact situations
+4. **CONTINUITY FACTS**: Extract facts that MUST remain consistent (ages, jobs, relationships, past events)
+5. **IMMEDIATE CONTEXT**: Focus on where characters are RIGHT NOW and what they need to do NEXT
 
 Return ONLY the JSON object, no additional text.
 """
@@ -122,18 +186,169 @@ Return ONLY the JSON object, no additional text.
             # Parse JSON response
             dna_dict = self._parse_llm_response(response.content)
             
-            # Validate and clean the extracted DNA
-            validated_dna = self._validate_and_clean_dna(dna_dict)
+            # Validate and enhance the extracted DNA
+            validated_dna = self._validate_and_enhance_dna(dna_dict)
             
             return validated_dna
             
         except Exception as e:
-            logger.error(f"❌ LLM DNA extraction failed: {e}")
+            print(f"❌ Enhanced LLM DNA extraction failed: {e}")
             raise
+    
+    def _build_previous_context(self, previous_dna_list: List[Dict]) -> str:
+        """Build context from previous chapter DNA."""
+        if not previous_dna_list:
+            return "This is the first chapter - no previous context."
+        
+        context_parts = []
+        
+        # Get the most recent chapters (last 2-3)
+        recent_chapters = previous_dna_list[-3:] if len(previous_dna_list) > 3 else previous_dna_list
+        
+        for dna in recent_chapters:
+            chapter_num = dna.get('chapter_number', 'Unknown')
+            
+            # Extract key plot threads
+            plot_threads = []
+            if 'plot_genetics' in dna:
+                plot_data = dna['plot_genetics']
+                if 'active_plot_threads' in plot_data:
+                    plot_threads = [t.get('description', str(t)) for t in plot_data.get('active_plot_threads', [])]
+                elif 'pending_decisions' in plot_data:
+                    plot_threads = plot_data.get('pending_decisions', [])
+            
+            # Extract ending context
+            ending_context = ""
+            if 'ending_genetics' in dna:
+                ending_context = dna['ending_genetics'].get('final_scene_context', '')
+            
+            # Extract continuity anchors
+            anchors = dna.get('continuity_anchors', [])
+            if isinstance(anchors, list) and anchors:
+                anchor_text = '; '.join([str(a) for a in anchors[:3]])
+            else:
+                anchor_text = "None"
+            
+            context_parts.append(f"""
+CHAPTER {chapter_num} SUMMARY:
+- Plot Threads: {'; '.join(plot_threads) if plot_threads else 'None'}
+- Ending: {ending_context}
+- Key Facts: {anchor_text}
+""")
+        
+        return "\n".join(context_parts)
+    
+    def _build_choice_context(self, user_choice_made: str, choice_options: List[Dict]) -> str:
+        """Build context about the choice that led to this chapter."""
+        if not user_choice_made:
+            return "No specific choice led to this chapter."
+        
+        context = f"USER CHOICE MADE: {user_choice_made}\n"
+        
+        if choice_options:
+            for choice in choice_options:
+                if choice.get('title', '').lower() in user_choice_made.lower() or \
+                   choice.get('description', '').lower() in user_choice_made.lower():
+                    context += f"CHOICE IMPACT EXPECTED: {choice.get('story_impact', 'Unknown')}\n"
+                    break
+        
+        context += "REQUIREMENT: This chapter MUST show the consequences of this choice."
+        return context
+    
+    def _track_plot_evolution(self, current_dna: Dict, previous_dna_list: List[Dict]) -> Dict:
+        """Track how plot threads evolved from previous chapters."""
+        
+        # Get previous plot threads
+        previous_threads = set()
+        for prev_dna in previous_dna_list:
+            plot_genetics = prev_dna.get('plot_genetics', {})
+            
+            # From old format
+            if 'pending_decisions' in plot_genetics:
+                previous_threads.update(plot_genetics['pending_decisions'])
+            if 'active_conflicts' in plot_genetics:
+                previous_threads.update(plot_genetics['active_conflicts'])
+            
+            # From new format
+            if 'active_plot_threads' in plot_genetics:
+                for thread in plot_genetics['active_plot_threads']:
+                    if isinstance(thread, dict):
+                        previous_threads.add(thread.get('description', ''))
+                    else:
+                        previous_threads.add(str(thread))
+        
+        # Check if important threads were dropped
+        current_threads = set()
+        current_plot = current_dna.get('plot_genetics', {})
+        
+        if 'active_plot_threads' in current_plot:
+            for thread in current_plot['active_plot_threads']:
+                if isinstance(thread, dict):
+                    current_threads.add(thread.get('description', ''))
+                else:
+                    current_threads.add(str(thread))
+        
+        # Add tracking metadata
+        current_dna['plot_evolution'] = {
+            'threads_continued': len(current_threads.intersection(previous_threads)),
+            'threads_dropped': list(previous_threads - current_threads),
+            'threads_new': list(current_threads - previous_threads)
+        }
+        
+        return current_dna
+    
+    def _validate_and_enhance_dna(self, dna_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and enhance extracted DNA."""
+        
+        # Ensure all required sections exist
+        required_sections = [
+            "scene_genetics", "character_genetics", "plot_genetics", 
+            "choice_genetics", "emotional_genetics", "ending_genetics",
+            "continuity_anchors", "world_building"
+        ]
+        
+        for section in required_sections:
+            if section not in dna_dict:
+                dna_dict[section] = {}
+        
+        # Clean character list
+        if "character_genetics" in dna_dict and "active_characters" in dna_dict["character_genetics"]:
+            common_words = {
+                'You', 'Each', 'With', 'This', 'Then', 'Where', 'When', 'Why', 
+                'How', 'Now', 'Here', 'There', 'Today', 'Everyone', 'Someone'
+            }
+            original_chars = dna_dict["character_genetics"]["active_characters"]
+            cleaned_chars = [char for char in original_chars if char not in common_words and len(char) > 2]
+            dna_dict["character_genetics"]["active_characters"] = cleaned_chars[:6]
+        
+        # Ensure plot threads are properly formatted
+        if "plot_genetics" in dna_dict and "active_plot_threads" in dna_dict["plot_genetics"]:
+            threads = dna_dict["plot_genetics"]["active_plot_threads"]
+            formatted_threads = []
+            
+            for i, thread in enumerate(threads):
+                if isinstance(thread, str):
+                    # Convert string to proper format
+                    formatted_threads.append({
+                        "thread_id": f"thread_{i+1}",
+                        "description": thread,
+                        "status": "ongoing",
+                        "next_action_needed": "continue development"
+                    })
+                elif isinstance(thread, dict):
+                    # Ensure proper keys
+                    if "thread_id" not in thread:
+                        thread["thread_id"] = f"thread_{i+1}"
+                    if "status" not in thread:
+                        thread["status"] = "ongoing"
+                    formatted_threads.append(thread)
+            
+            dna_dict["plot_genetics"]["active_plot_threads"] = formatted_threads
+        
+        return dna_dict
     
     def _parse_llm_response(self, response_content: str) -> Dict[str, Any]:
         """Parse and clean LLM JSON response."""
-        
         try:
             # Clean up the response
             cleaned_text = response_content.strip()
@@ -153,304 +368,130 @@ Return ONLY the JSON object, no additional text.
             
             # Parse JSON
             parsed_json = json.loads(cleaned_text)
-            
             return parsed_json
             
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Failed to parse LLM DNA response: {e}")
-            # Try to extract partial information
-            return self._extract_partial_dna_from_text(response_content)
+            print(f"❌ Failed to parse enhanced DNA response: {e}")
+            return self._extract_fallback_from_text(response_content)
     
-    def _validate_and_clean_dna(self, dna_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate and clean extracted DNA to ensure quality."""
-        
-        # Clean character list - remove common words that aren't character names
-        common_words = {
-            'You', 'Each', 'With', 'This', 'Then', 'Where', 'When', 'Why', 
-            'How', 'Now', 'Here', 'There', 'Today', 'Festival', 'Secrets',
-            'Memories', 'Shadows', 'Light', 'Dark', 'Magic', 'Power', 'Key',
-            'Door', 'Time', 'Moment', 'Voice', 'Sound', 'Suddenly'
-        }
-        
-        if "character_genetics" in dna_dict and "active_characters" in dna_dict["character_genetics"]:
-            original_chars = dna_dict["character_genetics"]["active_characters"]
-            cleaned_chars = [char for char in original_chars if char not in common_words and len(char) > 2]
-            dna_dict["character_genetics"]["active_characters"] = cleaned_chars[:5]  # Limit to 5
-        
-        # Clean location description to avoid repetitive phrases
-        if "scene_genetics" in dna_dict and "location_description" in dna_dict["scene_genetics"]:
-            location_desc = dna_dict["scene_genetics"]["location_description"]
-            
-            # Replace repetitive phrases with varied alternatives
-            if "edge of the ancient forest" in location_desc.lower():
-                alternatives = ["woodland setting", "forest area", "among the trees", "forest clearing"]
-                import random
-                dna_dict["scene_genetics"]["location_description"] = random.choice(alternatives)
-            
-            elif "edge of" in location_desc.lower():
-                dna_dict["scene_genetics"]["location_description"] = location_desc.replace("edge of", "area near")
-        
-        # Ensure all required sections exist
-        required_sections = ["scene_genetics", "character_genetics", "emotional_genetics", "plot_genetics", "ending_genetics"]
-        for section in required_sections:
-            if section not in dna_dict:
-                dna_dict[section] = {}
-        
-        return dna_dict
-    
-    def _extract_partial_dna_from_text(self, response_text: str) -> Dict[str, Any]:
-        """Extract what we can from malformed LLM response."""
-        
-        # Basic fallback extraction
+    def _extract_fallback_from_text(self, response_text: str) -> Dict[str, Any]:
+        """Extract what we can from malformed response."""
         return {
-            "scene_genetics": {
-                "location_type": "unknown",
-                "location_description": "continuing scene",
-                "atmosphere": "neutral"
-            },
-            "character_genetics": {
-                "active_characters": [],
-                "character_states": {},
-                "character_relationships": {}
-            },
-            "emotional_genetics": {
-                "dominant_emotions": [],
-                "emotional_momentum": "stable",
-                "tension_level": "medium"
-            },
-            "plot_genetics": {
-                "pending_decisions": [],
-                "active_conflicts": [],
-                "conversation_threads": []
-            },
-            "ending_genetics": {
-                "final_scene_context": response_text[:200],
-                "last_dialogue": "",
-                "last_action": "",
-                "scene_status": "ongoing",
-                "cliffhanger_type": "none"
-            },
+            "scene_genetics": {"location_description": "continuing scene"},
+            "character_genetics": {"active_characters": []},
+            "plot_genetics": {"active_plot_threads": []},
+            "choice_genetics": {"choice_fulfillment": "unknown"},
+            "emotional_genetics": {"dominant_emotions": []},
+            "ending_genetics": {"final_scene_context": response_text[:200]},
             "continuity_anchors": [],
+            "world_building": {},
             "extraction_status": "partial_fallback"
         }
     
     def _create_fallback_dna(self, content: str, chapter_number: int) -> Dict[str, Any]:
-        """Create minimal DNA if LLM extraction completely fails."""
-        
-        # Simple regex backup for critical information
+        """Create minimal DNA if extraction fails completely."""
         words = content.split()
         ending_words = ' '.join(words[-100:]) if len(words) > 100 else content
         
-        # Extract character names with simple pattern
-        name_pattern = r'\b[A-Z][a-z]{2,}\b'
-        potential_names = re.findall(name_pattern, content)
-        common_words = {'The', 'And', 'But', 'She', 'He', 'Her', 'His', 'You', 'This', 'That'}
-        character_names = [name for name in set(potential_names) if name not in common_words][:3]
-        
         return {
             "chapter_number": chapter_number,
-            "scene_genetics": {
-                "location_type": "continuing",
-                "location_description": "scene continues",
-                "atmosphere": "neutral"
-            },
-            "character_genetics": {
-                "active_characters": character_names,
-                "character_states": {},
-                "character_relationships": {}
-            },
-            "emotional_genetics": {
-                "dominant_emotions": [],
-                "emotional_momentum": "stable",
-                "tension_level": "medium"
-            },
-            "plot_genetics": {
-                "pending_decisions": [],
-                "active_conflicts": [],
-                "conversation_threads": []
-            },
-            "ending_genetics": {
-                "final_scene_context": ending_words,
-                "last_dialogue": "",
-                "last_action": "",
-                "scene_status": "ongoing",
-                "cliffhanger_type": "none"
-            },
+            "scene_genetics": {"location_description": "scene continues"},
+            "character_genetics": {"active_characters": []},
+            "plot_genetics": {"active_plot_threads": []},
+            "choice_genetics": {"choice_fulfillment": "unknown"},
+            "emotional_genetics": {"dominant_emotions": []},
+            "ending_genetics": {"final_scene_context": ending_words},
             "continuity_anchors": [],
+            "world_building": {},
             "extraction_status": "fallback",
-            "fallback_reason": "LLM extraction failed"
+            "fallback_reason": "Complete extraction failure"
         }
     
-    def format_dna_for_prompt(self, story_dna: Dict[str, Any]) -> str:
-        """Format intelligently extracted DNA for story generation prompt."""
+    def format_enhanced_dna_for_prompt(self, story_dna: Dict[str, Any]) -> str:
+        """Format enhanced DNA for story generation."""
         
         if story_dna.get('extraction_status') == 'fallback':
             return f"FALLBACK DNA: {story_dna.get('ending_genetics', {}).get('final_scene_context', '')}"
         
-        # Extract sections
+        # Extract all sections
         scene = story_dna.get('scene_genetics', {})
         chars = story_dna.get('character_genetics', {})
-        emotional = story_dna.get('emotional_genetics', {})
         plot = story_dna.get('plot_genetics', {})
+        choice = story_dna.get('choice_genetics', {})
+        emotional = story_dna.get('emotional_genetics', {})
         ending = story_dna.get('ending_genetics', {})
         anchors = story_dna.get('continuity_anchors', [])
         
-        # Format DNA for generation prompt
-        dna_string = f"""CHAPTER {story_dna.get('chapter_number', 'X')} DNA (LLM-Extracted):
+        # Format active plot threads
+        plot_threads_text = ""
+        if 'active_plot_threads' in plot:
+            for thread in plot['active_plot_threads']:
+                if isinstance(thread, dict):
+                    plot_threads_text += f"  • {thread.get('description', 'Unknown thread')} [{thread.get('status', 'ongoing')}]\n"
+                else:
+                    plot_threads_text += f"  • {thread}\n"
+        
+        # Format continuity anchors
+        anchors_text = ""
+        for anchor in anchors[:5]:
+            if isinstance(anchor, dict):
+                anchors_text += f"  • {anchor.get('description', 'Unknown anchor')}\n"
+            else:
+                anchors_text += f"  • {anchor}\n"
+        
+        dna_string = f"""CHAPTER {story_dna.get('chapter_number', 'X')} ENHANCED DNA:
 
-🏞️ SCENE: {scene.get('location_description', 'unknown location')} - {scene.get('atmosphere', 'neutral')} atmosphere
+🏞️ SCENE: {scene.get('location_description', 'unknown')} - {scene.get('atmosphere', 'neutral')} atmosphere
 👥 CHARACTERS: {', '.join(chars.get('active_characters', []))}
 💭 EMOTIONS: {', '.join(emotional.get('dominant_emotions', []))} (tension: {emotional.get('tension_level', 'medium')})
-🎯 ENDING: {ending.get('scene_status', 'ongoing')} scene
-💬 LAST DIALOGUE: {ending.get('last_dialogue', 'none')}
-🎪 CLIFFHANGER: {ending.get('cliffhanger_type', 'none')}
-⚓ CONTINUITY: {'; '.join(anchors[:3]) if anchors else 'none'}
 
-FINAL SCENE CONTEXT: {ending.get('final_scene_context', 'Scene continues from previous chapter')}"""
+🎯 ACTIVE PLOT THREADS:
+{plot_threads_text or '  • None identified'}
+
+🔄 PREVIOUS CHOICE: {choice.get('choice_made', 'None')}
+✅ CHOICE FULFILLED: {choice.get('choice_fulfillment', 'Unknown')}
+
+📋 PENDING DECISIONS: {'; '.join(plot.get('pending_decisions', []))}
+⚡ ACTIVE CONFLICTS: {'; '.join(plot.get('active_conflicts', []))}
+
+🎪 ENDING: {ending.get('scene_status', 'ongoing')} scene
+💬 LAST DIALOGUE: {ending.get('last_dialogue', 'none')}
+🚨 URGENT NEEDS: {'; '.join(ending.get('urgent_needs', []))}
+
+⚓ CONTINUITY ANCHORS (CRITICAL):
+{anchors_text or '  • None identified'}
+
+🎬 FINAL SCENE CONTEXT: {ending.get('final_scene_context', 'Scene continues')}
+📍 IMMEDIATE SITUATION: {ending.get('immediate_situation', 'Characters in current scene')}"""
         
         return dna_string
-    
-    def extract_variety_safe_dna(self, chapter_content: str, chapter_number: int, previous_extractions: List[Dict] = None) -> Dict[str, Any]:
-        """
-        Extract DNA with automatic variety enforcement to prevent repetitive descriptions.
-        
-        Args:
-            chapter_content: Chapter content to extract from
-            chapter_number: Current chapter number
-            previous_extractions: List of previous DNA extractions to avoid repetition
-        """
-        
-        # Get base DNA
-        base_dna = self.extract_chapter_dna(chapter_content, chapter_number)
-        
-        # If we have previous extractions, enforce variety
-        if previous_extractions:
-            base_dna = self._enforce_variety(base_dna, previous_extractions)
-        
-        return base_dna
-    
-    def _enforce_variety(self, current_dna: Dict[str, Any], previous_extractions: List[Dict]) -> Dict[str, Any]:
-        """Ensure variety in location descriptions across chapters."""
-        
-        # Check for repetitive location descriptions
-        current_location = current_dna.get('scene_genetics', {}).get('location_description', '')
-        
-        # Collect previous location descriptions
-        previous_locations = []
-        for prev_dna in previous_extractions[-3:]:  # Check last 3 chapters
-            prev_location = prev_dna.get('scene_genetics', {}).get('location_description', '')
-            if prev_location:
-                previous_locations.append(prev_location.lower())
-        
-        # If current location is too similar to previous ones, vary it
-        if current_location and any(current_location.lower() in prev for prev in previous_locations):
-            logger.info(f"🔄 Enforcing variety - location '{current_location}' too similar to previous")
-            
-            # Generate varied alternatives based on location type
-            location_type = current_dna.get('scene_genetics', {}).get('location_type', '')
-            varied_description = self._get_varied_location_description(location_type, previous_locations)
-            
-            current_dna['scene_genetics']['location_description'] = varied_description
-            logger.info(f"🎨 Varied location description: '{varied_description}'")
-        
-        return current_dna
-    
-    def _get_varied_location_description(self, location_type: str, avoid_phrases: List[str]) -> str:
-        """Generate varied location descriptions."""
-        
-        variety_map = {
-            'forest': [
-                'woodland setting', 'forest area', 'among the trees', 'forest clearing',
-                'wooded environment', 'tree-lined space', 'sylvan setting', 'forest grove'
-            ],
-            'village': [
-                'village area', 'settlement', 'community space', 'village center',
-                'town square', 'village setting', 'local community', 'village grounds'
-            ],
-            'castle': [
-                'castle grounds', 'fortress area', 'castle setting', 'stronghold',
-                'palace area', 'castle environment', 'fortress grounds', 'royal setting'
-            ]
-        }
-        
-        # Get possible variations
-        variations = variety_map.get(location_type.lower(), ['continuing scene', 'current setting'])
-        
-        # Filter out phrases that are too similar to previous ones
-        available_variations = []
-        for variation in variations:
-            if not any(variation.lower() in avoid.lower() for avoid in avoid_phrases):
-                available_variations.append(variation)
-        
-        # Return a varied description
-        if available_variations:
-            import random
-            return random.choice(available_variations)
-        else:
-            return f"{location_type} environment"
 
-# Global LLM DNA extractor instance
-llm_dna_extractor = LLMStoryDNAExtractor()
+# Create enhanced global instance
+enhanced_dna_extractor = EnhancedLLMStoryDNAExtractor()
 
-# Updated convenience functions
-def extract_chapter_dna(chapter_content: str, chapter_number: int) -> Dict[str, Any]:
-    """
-    Extract story DNA using intelligent LLM analysis.
-    
-    Args:
-        chapter_content: Full chapter text
-        chapter_number: Chapter number
-        
-    Returns:
-        Intelligently extracted story DNA dictionary
-    """
-    return llm_dna_extractor.extract_chapter_dna(chapter_content, chapter_number)
+# Enhanced convenience function
+def extract_enhanced_chapter_dna(
+    chapter_content: str, 
+    chapter_number: int,
+    previous_dna_list: List[Dict] = None,
+    user_choice_made: str = "",
+    choice_options: List[Dict] = None
+) -> Dict[str, Any]:
+    """Extract enhanced DNA with plot tracking."""
+    return enhanced_dna_extractor.extract_chapter_dna(
+        chapter_content, 
+        chapter_number,
+        previous_dna_list,
+        user_choice_made,
+        choice_options
+    )
 
-def format_dna_for_llm(story_dna: Dict[str, Any]) -> str:
-    """
-    Format story DNA for LLM prompt.
-    
-    Args:
-        story_dna: Story DNA dictionary
-        
-    Returns:
-        Formatted DNA string for prompt
-    """
-    return llm_dna_extractor.format_dna_for_prompt(story_dna)
-
-def extract_variety_safe_dna(chapter_content: str, chapter_number: int, previous_extractions: List[Dict] = None) -> Dict[str, Any]:
-    """
-    Extract DNA with automatic variety enforcement.
-    
-    Args:
-        chapter_content: Chapter content
-        chapter_number: Chapter number  
-        previous_extractions: Previous DNA extractions to ensure variety
-        
-    Returns:
-        DNA with variety enforcement applied
-    """
-    return llm_dna_extractor.extract_variety_safe_dna(chapter_content, chapter_number, previous_extractions)
-
-# Backward compatibility - keep the old class name but use LLM backend
-class StoryDNAExtractor:
-    """Backward compatibility wrapper - now uses LLM backend."""
-    
-    def __init__(self):
-        self.llm_extractor = LLMStoryDNAExtractor()
-        logger.info("🔄 Legacy StoryDNAExtractor now using LLM backend")
-    
-    def extract_chapter_dna(self, chapter_content: str, chapter_number: int) -> Dict[str, Any]:
-        return self.llm_extractor.extract_chapter_dna(chapter_content, chapter_number)
-    
-    def format_dna_for_prompt(self, story_dna: Dict[str, Any]) -> str:
-        return self.llm_extractor.format_dna_for_prompt(story_dna)
-
-# Keep the old global instance for compatibility
-dna_extractor = StoryDNAExtractor()
+def format_enhanced_dna_for_llm(story_dna: Dict[str, Any]) -> str:
+    """Format enhanced DNA for prompt."""
+    return enhanced_dna_extractor.format_enhanced_dna_for_prompt(story_dna)
 
 if __name__ == "__main__":
-    print("🧬 LLM-Powered Story DNA Extractor loaded!")
-    print("✅ Intelligent context-aware DNA extraction enabled")
-    print("🎯 Automatic variety enforcement active")
-    print("🔄 Backward compatibility maintained")
+    print("🚀 Enhanced Story DNA Extractor loaded!")
+    print("🧬 Plot thread tracking enabled")
+    print("🎯 Choice consequence validation active")
+    print("⚓ Advanced continuity preservation ready")
