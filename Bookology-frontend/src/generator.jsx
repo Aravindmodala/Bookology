@@ -14,7 +14,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { useAuth } from './AuthContext';
 import StoryChatbot from './StoryChatbot';
-import StoryTreeVisualization from './StoryTreeVisualization';
 import { createApiUrl, API_ENDPOINTS } from './config';
 
 export default function Generator() {

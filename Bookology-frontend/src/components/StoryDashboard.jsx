@@ -25,7 +25,7 @@ const StoryDashboard = ({ onStartNewStory }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('updated_at');
+  const [sortBy, setSortBy] = useState('created_at'); // Changed from 'updated_at' to 'created_at'
   const { user, session } = useAuth();
   const navigate = useNavigate();
 
@@ -51,167 +51,102 @@ const StoryDashboard = ({ onStartNewStory }) => {
     alert(`Delete functionality for "${story.title}" coming soon!`);
   };
 
+  // Fixed data fetching with proper error handling and fallback
   useEffect(() => {
-    if (user && session?.access_token) {
-      // Try backend API first (where real stories are stored)
-      fetchUserStoriesFromBackend();
-    } else if (isSupabaseEnabled && user) {
-      // Fallback to Supabase if available
-      fetchUserStories();
-    } else {
-      // Load mock data for development
-      loadMockStories();
-    }
-  }, [user, session]);
-
-  const fetchUserStoriesFromBackend = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Debug authentication
-      console.log('🔐 AUTH DEBUG:', {
-        hasUser: !!user,
-        hasSession: !!session,
-        hasAccessToken: !!session?.access_token,
-        userId: user?.id,
-        tokenLength: session?.access_token?.length
-      });
-      
-      if (!session?.access_token) {
-        console.log('❌ No access token available');
-        throw new Error('No authentication token available');
-      }
-      
-      const apiUrl = createApiUrl('/stories');
-      console.log('🌐 API DEBUG:', {
-        url: apiUrl,
-        method: 'GET',
-        hasAuthHeader: true
-      });
-      
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      console.log('📡 RESPONSE DEBUG:', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.log('❌ ERROR RESPONSE:', errorText);
-        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.Stories && Array.isArray(data.Stories)) {
-        // Transform backend data to match our UI format
-        const transformedStories = data.Stories.map(story => ({
-          id: story.id,
-          title: story.title || 'Untitled Story',
-          description: story.outline ? story.outline.substring(0, 200) + '...' : 'No description available',
-          genre: story.genre || 'General Fiction',
-          chapter_count: story.chapter_count || 0,
-          created_at: story.created_at,
-          updated_at: story.created_at, // Use created_at if updated_at not available
-          status: story.chapter_count > 1 ? 'in_progress' : 'draft'
-        }));
-        
-        setStories(transformedStories);
-        console.log(`✅ Loaded ${transformedStories.length} real stories from backend`);
-      } else {
-        console.log('No stories found in backend response');
+    const fetchStories = async () => {
+      if (!user) {
+        console.log('No user found, setting empty stories');
         setStories([]);
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      console.error('Error fetching stories from backend:', err);
-      // Fallback to Supabase or mock data
-      if (isSupabaseEnabled && user) {
-        fetchUserStories();
-      } else {
-        loadMockStories();
+
+      try {
+        setLoading(true);
+        setError(null);
+        
+        console.log('🔍 Fetching stories for user:', user.id);
+        console.log('🔧 Supabase client status:', !!supabase);
+        console.log('🔧 isSupabaseEnabled:', isSupabaseEnabled);
+        
+        // Method 1: Try the same approach as Generator (direct Supabase)
+        if (supabase) {
+          try {
+            const { data: Stories, error: StoriesError } = await supabase
+              .from('Stories')
+              .select('*')
+              .eq('user_id', user.id)
+              .order(sortBy, { ascending: false });
+
+            console.log('📦 Supabase response:', { data: Stories, error: StoriesError });
+
+            if (StoriesError) {
+              console.error('❌ Supabase error:', StoriesError);
+              throw new Error(`Supabase error: ${StoriesError.message || JSON.stringify(StoriesError)}`);
+            }
+
+            console.log('✅ Successfully fetched stories via Supabase:', Stories?.length || 0);
+            setStories(Stories || []);
+            setError(null);
+            return; // Success, exit here
+            
+          } catch (supabaseErr) {
+            console.error('❌ Supabase method failed:', supabaseErr);
+            // Continue to fallback method
+          }
+        }
+
+        // Method 2: Fallback - try backend API if available
+        if (session?.access_token) {
+          try {
+            console.log('🔄 Trying backend API fallback...');
+            const response = await fetch(createApiUrl('/stories'), {
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (response.ok) {
+              const data = await response.json();
+              console.log('✅ Successfully fetched via backend API:', data?.stories?.length || 0);
+              setStories(data.stories || []);
+              setError(null);
+              return; // Success, exit here
+            } else {
+              console.error('❌ Backend API failed with status:', response.status);
+            }
+          } catch (apiErr) {
+            console.error('❌ Backend API method failed:', apiErr);
+          }
+        }
+
+        // If we reach here, all methods failed
+        throw new Error('All data fetching methods failed. Please check your connection and try again.');
+        
+      } catch (err) {
+        console.error('❌ Final error in fetchStories:', err);
+        setError(`Failed to load stories: ${err.message}`);
+        setStories([]);
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
-  const fetchUserStories = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('stories')
-        .select('*')
-        .eq('user_id', user.id)
-        .order(sortBy, { ascending: false });
+    fetchStories();
+  }, [user, sortBy, session]); // React to user, sortBy, and session changes
 
-      if (error) throw error;
-      setStories(data || []);
-    } catch (err) {
-      console.error('Error fetching stories:', err);
-      // Silently fallback to mock data for development
-      loadMockStories();
-      // Don't show error since we have fallback data
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadMockStories = () => {
-    console.log('📚 Loading mock stories for development/demo');
-    // Mock data for development
-    const mockStories = [
-      {
-        id: 1,
-        title: 'The Whispering Shadows',
-        description: 'A mysterious tale of a young detective unraveling secrets in a haunted Victorian mansion.',
-        genre: 'Mystery',
-        chapter_count: 5,
-        created_at: '2024-01-15T10:30:00Z',
-        updated_at: '2024-01-20T15:45:00Z',
-        status: 'in_progress'
-      },
-      {
-        id: 2,
-        title: 'Stellar Horizons',
-        description: 'An epic space adventure following a crew of explorers discovering new worlds.',
-        genre: 'Sci-Fi',
-        chapter_count: 12,
-        created_at: '2024-01-10T08:20:00Z',
-        updated_at: '2024-01-22T12:15:00Z',
-        status: 'completed'
-      },
-      {
-        id: 3,
-        title: 'Hearts in Bloom',
-        description: 'A tender romance set in a small coastal town during the spring season.',
-        genre: 'Romance',
-        chapter_count: 3,
-        created_at: '2024-01-22T14:10:00Z',
-        updated_at: '2024-01-22T14:10:00Z',
-        status: 'draft'
-      }
-    ];
-    
-    setStories(mockStories);
-    setLoading(false);
-  };
-
-  const filteredStories = stories.filter(story =>
-    story.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    story.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    story.genre?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredStories = stories.filter(story => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      (story.story_title || '').toLowerCase().includes(searchLower) ||
+      (story.story_outline || '').toLowerCase().includes(searchLower) ||
+      (story.genre || '').toLowerCase().includes(searchLower)
+    );
+  });
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'Unknown date';
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -233,10 +168,10 @@ const StoryDashboard = ({ onStartNewStory }) => {
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1">
           <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-blue-400 transition-colors">
-            {story.title}
+            {story.story_title || 'Untitled Story'}
           </h3>
           <p className="text-gray-400 text-sm line-clamp-2 mb-3">
-            {story.description}
+            {story.story_outline || 'No description available'}
           </p>
         </div>
         <div className="flex items-center space-x-2 ml-4">
@@ -268,11 +203,11 @@ const StoryDashboard = ({ onStartNewStory }) => {
         <div className="flex items-center space-x-4 text-sm text-gray-400">
           <span className="flex items-center">
             <FileText className="w-4 h-4 mr-1" />
-            {story.chapter_count || 0} chapters
+            {story.total_chapters || 0} chapters
           </span>
           <span className="flex items-center">
             <Calendar className="w-4 h-4 mr-1" />
-            {formatDate(story.updated_at)}
+            {formatDate(story.created_at)}
           </span>
         </div>
         <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(story.status)}`}>
@@ -310,122 +245,137 @@ const StoryDashboard = ({ onStartNewStory }) => {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Development Notice */}
-      {!session?.access_token && (
+      {/* Development Notice - Show if no user */}
+      {!user && (
         <div className="bg-yellow-600/20 border-b border-yellow-500/50 text-yellow-200 px-4 py-2 text-center text-sm">
-          ⚠️ Please log in to see your generated stories from the backend. 
+          ⚠️ Please log in to see your generated stories. 
           <a href="/login" className="underline ml-2 hover:text-yellow-100">Click here to login</a>
         </div>
       )}
+      
+      {/* Error Notice */}
+      {error && (
+        <div className="bg-red-600/20 border-b border-red-500/50 text-red-200 px-4 py-2 text-center text-sm">
+          ❌ {error}
+        </div>
+      )}
+      
       <div className="p-8">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-        <div className="mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
-            <div>
-              <h1 className="text-4xl font-bold text-white mb-2">Your Stories</h1>
-              <p className="text-gray-400">
-                Welcome back! Continue your literary journey or start a new adventure.
-              </p>
-            </div>
-            
-            <button
-              onClick={onStartNewStory}
-              className="mt-4 lg:mt-0 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2 shadow-lg"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Start New Story</span>
-            </button>
-          </div>
-
-          {/* Search and Filter Bar */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search stories..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-xl pl-10 pr-4 py-3 text-white placeholder-gray-400 focus:border-blue-500 focus:outline-none transition-colors"
-              />
-            </div>
-            
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
-            >
-              <option value="updated_at">Last Updated</option>
-              <option value="created_at">Date Created</option>
-              <option value="title">Title</option>
-              <option value="chapter_count">Chapter Count</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Stories Grid */}
-        {filteredStories.length === 0 ? (
-          <div className="text-center py-16">
-            <div className="w-24 h-24 bg-gray-800 rounded-3xl flex items-center justify-center mx-auto mb-6">
-              <BookOpen className="w-12 h-12 text-gray-400" />
-            </div>
-            <h3 className="text-2xl font-semibold text-white mb-2">
-              {searchTerm ? 'No stories found' : 'No stories yet'}
-            </h3>
-            <p className="text-gray-400 mb-6 max-w-md mx-auto">
-              {searchTerm 
-                ? 'Try adjusting your search terms or filters.'
-                : 'Your creative journey starts here. Create your first story and bring your imagination to life.'
-              }
-            </p>
-            {!searchTerm && (
+          <div className="mb-8">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
+              <div>
+                <h1 className="text-4xl font-bold text-white mb-2">Your Stories</h1>
+                <p className="text-gray-400">
+                  Welcome back! Continue your literary journey or start a new adventure.
+                </p>
+                {/* Debug info for development */}
+                {process.env.NODE_ENV === 'development' && (
+                  <div className="text-xs text-gray-500 mt-2">
+                    Debug: User: {user ? '✅' : '❌'} | Stories: {stories.length} | Loading: {loading ? 'Yes' : 'No'}
+                  </div>
+                )}
+              </div>
+              
               <button
                 onClick={onStartNewStory}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2 mx-auto"
+                className="mt-4 lg:mt-0 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2 shadow-lg"
               >
-                <PenTool className="w-5 h-5" />
-                <span>Create Your First Story</span>
+                <Plus className="w-5 h-5" />
+                <span>Start New Story</span>
               </button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {filteredStories.map((story) => (
-              <StoryCard key={story.id} story={story} />
-            ))}
-          </div>
-        )}
+            </div>
 
-        {/* Stats Footer */}
-        {filteredStories.length > 0 && (
-          <div className="mt-12 bg-gray-800 rounded-xl p-6 border border-gray-700">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
-              <div>
-                <div className="text-3xl font-bold text-blue-400 mb-1">
-                  {stories.length}
-                </div>
-                <div className="text-gray-400 text-sm">Total Stories</div>
+            {/* Search and Filter Bar */}
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Search stories..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-xl pl-10 pr-4 py-3 text-white placeholder-gray-400 focus:border-blue-500 focus:outline-none transition-colors"
+                />
               </div>
-              <div>
-                <div className="text-3xl font-bold text-green-400 mb-1">
-                  {stories.reduce((sum, story) => sum + (story.chapter_count || 0), 0)}
-                </div>
-                <div className="text-gray-400 text-sm">Chapters Written</div>
-              </div>
-              <div>
-                <div className="text-3xl font-bold text-purple-400 mb-1">
-                  {stories.filter(story => story.status === 'completed').length}
-                </div>
-                <div className="text-gray-400 text-sm">Completed Stories</div>
-              </div>
+              
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
+              >
+                <option value="created_at">Date Created</option>
+                <option value="story_title">Title</option>
+                <option value="total_chapters">Chapter Count</option>
+              </select>
             </div>
           </div>
-                 )}
-       </div>
-       </div>
-     </div>
-   );
- };
- 
- export default StoryDashboard; 
+
+          {/* Stories Grid */}
+          {filteredStories.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="w-24 h-24 bg-gray-800 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                <BookOpen className="w-12 h-12 text-gray-400" />
+              </div>
+              <h3 className="text-2xl font-semibold text-white mb-2">
+                {searchTerm ? 'No stories found' : stories.length === 0 ? 'No stories yet' : 'No matching stories'}
+              </h3>
+              <p className="text-gray-400 mb-6 max-w-md mx-auto">
+                {searchTerm 
+                  ? 'Try adjusting your search terms or filters.'
+                  : stories.length === 0 
+                    ? 'Your creative journey starts here. Create your first story and bring your imagination to life.'
+                    : 'No stories match your current search.'
+                }
+              </p>
+              {!searchTerm && stories.length === 0 && (
+                <button
+                  onClick={onStartNewStory}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2 mx-auto"
+                >
+                  <PenTool className="w-5 h-5" />
+                  <span>Create Your First Story</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {filteredStories.map((story) => (
+                <StoryCard key={story.id} story={story} />
+              ))}
+            </div>
+          )}
+
+          {/* Stats Footer */}
+          {filteredStories.length > 0 && (
+            <div className="mt-12 bg-gray-800 rounded-xl p-6 border border-gray-700">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+                <div>
+                  <div className="text-3xl font-bold text-blue-400 mb-1">
+                    {stories.length}
+                  </div>
+                  <div className="text-gray-400 text-sm">Total Stories</div>
+                </div>
+                <div>
+                  <div className="text-3xl font-bold text-green-400 mb-1">
+                    {stories.reduce((sum, story) => sum + (story.total_chapters || 0), 0)}
+                  </div>
+                  <div className="text-gray-400 text-sm">Chapters Written</div>
+                </div>
+                <div>
+                  <div className="text-3xl font-bold text-purple-400 mb-1">
+                    {stories.filter(story => story.status === 'completed').length}
+                  </div>
+                  <div className="text-gray-400 text-sm">Completed Stories</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default StoryDashboard;
