@@ -1,10 +1,10 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
-import Generator from './generator';
 import BookologyHome from './bookologyhome';
 import Auth from './Auth';
 import StoryEditor from './StoryEditor';
 import StoryDashboard from './components/StoryDashboard';
+import StoryCreator from './StoryCreator';
 import { AuthProvider } from './AuthContext';
 import ErrorBoundary from './ErrorBoundary';
 
@@ -15,7 +15,7 @@ function HomeWrapper() {
 
 function StoriesWrapper() {
   const navigate = useNavigate();
-  return <StoryDashboard onStartNewStory={() => navigate('/generator')} />;
+  return <StoryDashboard onStartNewStory={() => navigate('/create')} />;
 }
 
 function App() {
@@ -26,7 +26,7 @@ function App() {
           <Routes>
             <Route path="/" element={<HomeWrapper />} />
             <Route path="/stories" element={<StoriesWrapper />} />
-            <Route path="/generator" element={<Generator />} />
+            <Route path="/create" element={<StoryCreator />} />
             <Route path="/editor" element={<StoryEditor />} />
             <Route path="/login" element={<Auth />} />
           </Routes>

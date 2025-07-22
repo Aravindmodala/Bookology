@@ -24,7 +24,6 @@ export default function Navbar() {
 
   const navLinks = [
     { href: "/", label: "Home", isActive: location.pathname === "/" },
-    { href: "/generator", label: "Generator", isActive: location.pathname === "/generator" },
     { href: "#about", label: "About", isActive: false },
     { href: "#contact", label: "Contact", isActive: false },
   ];

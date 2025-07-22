@@ -1158,96 +1158,96 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
             chapter_id = None
             if chapter.chapter_number == 1 and chapter.story_id and user:
                 try:
-                    logger.info(f"🚀 OPTIMIZED SAVE: Chapter 1 with DNA, summaries, and vectors...")
+                    logger.info(f"ðŸ’¾ Saving Chapter 1 content to Chapters table...")
                     
-                    # Use our optimized service for Chapter 1 save
-                    from services.fixed_optimized_chapter_service import fixed_optimized_chapter_service
+                    # Get or create branch_id
+                    try:
+                        main_branch_id = await get_main_branch_id(chapter.story_id)
+                    except Exception:
+                        main_branch_id = None
                     
-                    # Prepare chapter data for optimized save
-                    chapter_dict = {
+                    # Prepare chapter data
+                    chapter_insert_data = {
                         "story_id": chapter.story_id,
                         "chapter_number": 1,
-                        "content": chapter_content,
                         "title": "Chapter 1",
-                        "choices": choices,
-                        "user_choice": ""
+                        "content": chapter_content,
+                        "word_count": len(chapter_content.split()),
+                        "version_number": 1,
+                        "is_active": True,
                     }
                     
-                    # Save with full optimization (DNA + summaries + vectors)
-                    save_result = await fixed_optimized_chapter_service.save_chapter_optimized(
-                        chapter_data=chapter_dict,
-                        user_id=user.id,
-                        supabase_client=supabase
-                    )
+                    if main_branch_id:
+                        chapter_insert_data["branch_id"] = main_branch_id
                     
-                    chapter_id = save_result.chapter_id
-                    logger.info(f"✅ OPTIMIZED SAVE COMPLETE: Chapter 1 saved with full features!")
-                    logger.info(f"📊 Save time: {save_result.save_time:.2f}s")
-                    logger.info(f"📝 Summary: {'generated' if save_result.summary else 'failed'}")
-                    logger.info(f"🧬 DNA: {'extracted' if save_result.performance_metrics.get('dna_extracted') else 'failed'}")
-                    logger.info(f"🔍 Vector chunks: {save_result.vector_chunks}")
+                    # Save chapter to database
+                    chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
                     
-                    # Update story metadata
-                    try:
-                        supabase.table("Stories").update({"current_chapter": 1}).eq("id", chapter.story_id).execute()
-                        logger.info(f"✅ Updated story current_chapter to 1")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not update story metadata: {e}")
+                    if chapter_response.data:
+                        chapter_id = chapter_response.data[0]["id"]
+                        logger.info(f"âœ… Chapter 1 saved to database with ID: {chapter_id}")
+                        
+                        # Save choices to database
+                        if choices and len(choices) > 0:
+                            saved_choices = await save_choices_for_chapter(
+                                story_id=chapter.story_id,
+                                chapter_id=chapter_id,
+                                chapter_number=1,
+                                choices=choices,
+                                user_id=user.id,
+                                branch_id=main_branch_id
+                            )
+                            logger.info(f"âœ… Saved {len(saved_choices)} choices to database")
+                        
+                        # Update story metadata
+                        try:
+                            supabase.table("Stories").update({"current_chapter": 1}).eq("id", chapter.story_id).execute()
+                            logger.info(f"âœ… Updated story current_chapter to 1")
+                        except Exception as e:
+                            logger.warning(f"âš ï¸ Could not update story metadata: {e}")
                     
                 except Exception as db_error:
-                    logger.error(f"❌ Failed to save Chapter 1 with optimization: {str(db_error)}")
-                    # Fallback to basic save if optimized save fails
-                    logger.info(f"🔄 Falling back to basic Chapter 1 save...")
-                    try:
-                        chapter_insert_data = {
-                            "story_id": chapter.story_id,
-                            "chapter_number": 1,
-                            "title": "Chapter 1",
-                            "content": chapter_content,
-                            "word_count": len(chapter_content.split()),
-                            "version_number": 1,
-                            "is_active": True,
-                        }
-                        
-                        chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
-                        if chapter_response.data:
-                            chapter_id = chapter_response.data[0]["id"]
-                            logger.info(f"✅ Basic Chapter 1 save successful with ID: {chapter_id}")
-                    except Exception as fallback_error:
-                        logger.error(f"❌ Even fallback save failed: {str(fallback_error)}")
-                        # Do not raise, allow generation to succeed even if save fails
+                    logger.error(f"âŒ Failed to save Chapter 1 or choices: {str(db_error)}")
+                    # Do not raise, allow generation to succeed even if save fails
 
             return {
                 "chapter_1": chapter_content,  # Frontend expects this field name
                 "chapter": chapter_content,    # Keep for compatibility
                 "choices": choices,            # Enhanced: automatic choices
+                # 'reasoning' and 'quality_metrics' removed from response
                 "metadata": {
                     "chapter_number": chapter.chapter_number,
                     "word_count": len(chapter_content.split()),
+                    "character_count": len(chapter_content),
                     "choices_count": len(choices),
-                    "chapter_id": chapter_id,
-                    "already_saved": bool(chapter_id),
-                    "optimized_save": bool(chapter_id)
+                    "generation_success": True,
+                    "cot_reasoning": False,  # No longer included
+                    "quality_validated": False,  # No longer included
+                    "chapter_id": chapter_id,  # Include saved chapter_id
+                    "saved_to_database": bool(chapter_id)  # Indicate if saved
                 }
             }
-        
         else:
-            # For chapters other than 1, just return the generated content
+            # Handle error case - return proper format even on error
+            error_msg = result.get("error", "Enhanced generation failed")
+            logger.error(f"âŒ Enhanced chapter generation failed: {error_msg}")
+            
+            # Return error in expected format for frontend
             return {
-                "chapter_1": chapter_content,
-                "chapter": chapter_content,
-                "choices": choices,
+                "chapter_1": f"Error generating Chapter {chapter.chapter_number}: {error_msg}",
+                "chapter": f"Error generating Chapter {chapter.chapter_number}: {error_msg}",
+                "choices": [],
+                "error": error_msg,
                 "metadata": {
                     "chapter_number": chapter.chapter_number,
-                    "word_count": len(chapter_content.split()),
-                    "choices_count": len(choices)
+                    "generation_success": False,
+                    "error": error_msg
                 }
             }
             
     except Exception as e:
-        logger.error(f"❌ Chapter generation failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Chapter generation failed: {str(e)}")
-
+        logger.error(f"âŒ Chapter generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 class JsonChapterInput(BaseModel):
     """Input model for generating Chapters from JSON outline."""

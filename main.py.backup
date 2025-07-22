@@ -1,4 +1,4 @@
-﻿"""
+"""
 Optimized main.py with service layer architecture and async operations.
 """
 
@@ -437,7 +437,7 @@ async def generate_outline_endpoint(story: StoryInput, user = Depends(get_authen
             "genre": result["genre"],
             "tone": result["tone"],
             "title": result.get("book_title", ""),  # Include the generated title
-            "chapters": result["chapters"],  # â† This might be missing!
+            "chapters": result["chapters"],  # ← This might be missing!
             "reflection": result.get("reflection", ""),
             "is_optimized": result.get("is_optimized", False),
         }
@@ -517,11 +517,11 @@ async def save_outline_endpoint(
 ):
     """Save the user-edited outline to database."""
     try:
-        logger.info(f"ðŸ’¾ Saving enhanced outline to database for user {user.id}...")
+        logger.info(f"💾 Saving enhanced outline to database for user {user.id}...")
         
         # Handle new format (enhanced outline generator)
         if outline_data.summary:
-            logger.info("ðŸ“ Using new enhanced outline format")
+            logger.info("📝 Using new enhanced outline format")
             
             # Use user-provided title or create one from the summary
             story_title = outline_data.title if outline_data.title else outline_data.summary.split('.')[0][:50] + "..."
@@ -558,7 +558,7 @@ async def save_outline_endpoint(
             
         # Handle old format (backward compatibility)
         elif outline_data.outline_json and outline_data.formatted_text:
-            logger.info("ðŸ“ Using legacy outline format")
+            logger.info("📝 Using legacy outline format")
             
             outline_json = outline_data.outline_json
             
@@ -566,7 +566,7 @@ async def save_outline_endpoint(
             from lc_book_generator_prompt import format_json_to_display_text
             formatted_text = format_json_to_display_text(outline_json)
             
-            logger.info(f"âœ… Regenerated formatted text with updated character names")
+            logger.info(f"✅ Regenerated formatted text with updated character names")
             
             # Prepare story data for database save - legacy format
             story_data = {
@@ -597,11 +597,11 @@ async def save_outline_endpoint(
             # Try saving to database
             story_response = supabase.table("Stories").insert(story_data).execute()
             story_id = story_response.data[0]["id"]
-            logger.info(f"âœ… Outline saved successfully with story_id: {story_id}")
+            logger.info(f"✅ Outline saved successfully with story_id: {story_id}")
 
             # --- OUTLINE SAVED SUCCESSFULLY, BUT DON'T AUTO-GENERATE CHAPTER 1 ---
             # The user should explicitly click "Generate Chapter 1" to create chapters
-            logger.info(f"âœ… Outline saved successfully. User can now generate Chapter 1 manually.")
+            logger.info(f"✅ Outline saved successfully. User can now generate Chapter 1 manually.")
             
             return {
                 "success": True,
@@ -612,7 +612,7 @@ async def save_outline_endpoint(
             }
             
         except Exception as save_error:
-            logger.error(f"âŒ Database save failed: {save_error}")
+            logger.error(f"❌ Database save failed: {save_error}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to save outline: {str(save_error)}"
@@ -639,19 +639,19 @@ async def generate_choices_endpoint(
 ):
     """Generate 3-4 choices for the next chapter based on current chapter content."""
     try:
-        logger.info(f"ðŸŽ¯ Generating choices for Chapter {choice_input.current_chapter_num + 1}, Story {choice_input.story_id}")
+        logger.info(f"🎯 Generating choices for Chapter {choice_input.current_chapter_num + 1}, Story {choice_input.story_id}")
         
         # CRITICAL: Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", choice_input.story_id).eq("user_id", user.id).execute()
         
         if not story_response.data:
-            logger.error(f"âŒ STORY ISOLATION: Story {choice_input.story_id} not found for user {user.id}")
+            logger.error(f"❌ STORY ISOLATION: Story {choice_input.story_id} not found for user {user.id}")
             raise HTTPException(status_code=404, detail="Story not found or access denied")
         
         story_data = story_response.data[0]
         story_outline = story_data.get("story_outline", "")
         
-        logger.info(f"âœ… Story verified: {story_data.get('story_title', 'Untitled')}")
+        logger.info(f"✅ Story verified: {story_data.get('story_title', 'Untitled')}")
         
         # Generate choices using existing logic (simplified for now)
         from lc_book_generator import BookStoryGenerator
@@ -713,7 +713,7 @@ Each choice should lead to different story directions and consequences.
         try:
             choices_response = supabase.table("story_choices").insert(choice_records).execute()
             if choices_response.data:
-                logger.info(f"âœ… Saved {len(choice_records)} choices to database for story {choice_input.story_id}")
+                logger.info(f"✅ Saved {len(choice_records)} choices to database for story {choice_input.story_id}")
                 
                 # CRITICAL FIX: Update choices with real database IDs
                 for i, choice in enumerate(choices):
@@ -722,11 +722,11 @@ Each choice should lead to different story directions and consequences.
                     choice["choice_id"] = database_record["id"]  # Use real database ID
                     choice["database_id"] = database_record["id"]  # Keep reference
                     
-                logger.info(f"ðŸ”§ Updated choices with database IDs: {[c['id'] for c in choices]}")
+                logger.info(f"🔧 Updated choices with database IDs: {[c['id'] for c in choices]}")
             else:
-                logger.warning("âš ï¸ Failed to save choices to database")
+                logger.warning("⚠️ Failed to save choices to database")
         except Exception as e:
-            logger.error(f"âŒ Error saving choices: {e}")
+            logger.error(f"❌ Error saving choices: {e}")
             # Continue anyway - don't break the user experience
  
         return {
@@ -740,7 +740,7 @@ Each choice should lead to different story directions and consequences.
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Generate choices failed: {e}")
+        logger.error(f"❌ Generate choices failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate choices: {str(e)}")
 
 class SelectChoiceInput(BaseModel):
@@ -751,27 +751,27 @@ class SelectChoiceInput(BaseModel):
 
 @app.post("/generate_chapter_with_choice")
 async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user = Depends(get_authenticated_user)):
-    logger.info(f"ðŸ”„ Generate chapter with choice request received")
-    logger.info(f"ðŸ“Š Request data: story_id={request.story_id}, next_chapter_num={request.next_chapter_num}, choice_id={request.choice_id}")
-    logger.info(f"ðŸ“Š Request choice_id type: {type(request.choice_id)}")
-    logger.info(f"ðŸ“Š Request choice_id value: '{request.choice_id}'")
+    logger.info(f"🔄 Generate chapter with choice request received")
+    logger.info(f"📊 Request data: story_id={request.story_id}, next_chapter_num={request.next_chapter_num}, choice_id={request.choice_id}")
+    logger.info(f"📊 Request choice_id type: {type(request.choice_id)}")
+    logger.info(f"📊 Request choice_id value: '{request.choice_id}'")
     
     try:
         # User is already authenticated via dependency injection
         user_id = user.id
-        logger.info(f"ðŸ‘¤ User authenticated: {user_id}")
+        logger.info(f"👤 User authenticated: {user_id}")
 
         # First, fetch all available choices for this chapter to validate
         current_chapter_number = request.next_chapter_num - 1  # Choices are for the previous chapter
-        logger.info(f"ðŸ” Fetching available choices for story {request.story_id}, chapter {current_chapter_number}")
+        logger.info(f"🔍 Fetching available choices for story {request.story_id}, chapter {current_chapter_number}")
         choices_response = supabase.table('story_choices').select('*').eq('story_id', request.story_id).eq('user_id', user_id).eq('chapter_number', current_chapter_number).execute()
         
         available_choices = choices_response.data
-        logger.info(f"ðŸ“‹ Available choices count: {len(available_choices)}")
+        logger.info(f"📋 Available choices count: {len(available_choices)}")
         
         for i, choice in enumerate(available_choices):
-            logger.info(f"ðŸ“‹ Choice {i+1}: id={choice.get('id')}, choice_id={choice.get('choice_id')}, title='{choice.get('choice_title', 'No title')}'")
-            logger.info(f"ðŸ“‹ Choice {i+1} types: id type={type(choice.get('id'))}, choice_id type={type(choice.get('choice_id'))}")
+            logger.info(f"📋 Choice {i+1}: id={choice.get('id')}, choice_id={choice.get('choice_id')}, title='{choice.get('choice_title', 'No title')}'")
+            logger.info(f"📋 Choice {i+1} types: id type={type(choice.get('id'))}, choice_id type={type(choice.get('choice_id'))}")
 
         # Try to find the selected choice by matching with both id and choice_id fields
         selected_choice = None
@@ -780,7 +780,7 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
         for choice in available_choices:
             if str(choice.get('id')) == str(request.choice_id):
                 selected_choice = choice
-                logger.info(f"âœ… Found choice by 'id' field: {choice}")
+                logger.info(f"✅ Found choice by 'id' field: {choice}")
                 break
         
         # If not found, try to match with 'choice_id' field (user-facing identifier)
@@ -788,19 +788,19 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
             for choice in available_choices:
                 if str(choice.get('choice_id')) == str(request.choice_id):
                     selected_choice = choice
-                    logger.info(f"âœ… Found choice by 'choice_id' field: {choice}")
+                    logger.info(f"✅ Found choice by 'choice_id' field: {choice}")
                     break
         
         if not selected_choice:
-            logger.error(f"âŒ No choice found matching request.choice_id='{request.choice_id}'")
-            logger.error(f"âŒ Available choice IDs: {[choice.get('id') for choice in available_choices]}")
-            logger.error(f"âŒ Available choice_ids: {[choice.get('choice_id') for choice in available_choices]}")
+            logger.error(f"❌ No choice found matching request.choice_id='{request.choice_id}'")
+            logger.error(f"❌ Available choice IDs: {[choice.get('id') for choice in available_choices]}")
+            logger.error(f"❌ Available choice_ids: {[choice.get('choice_id') for choice in available_choices]}")
             raise HTTPException(status_code=400, detail="Invalid choice selected")
 
-        logger.info(f"ðŸŽ¯ Selected choice found: {selected_choice}")
+        logger.info(f"🎯 Selected choice found: {selected_choice}")
         
         # Mark this choice as selected in the database
-        logger.info(f"ðŸ’¾ Marking choice as selected in database")
+        logger.info(f"💾 Marking choice as selected in database")
         from datetime import datetime
         update_response = supabase.table('story_choices').update({
             'is_selected': True,
@@ -808,27 +808,27 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
         }).eq('id', selected_choice['id']).execute()
 
         # Get the story details
-        logger.info(f"ðŸ“– Fetching story details for story_id={request.story_id}")
+        logger.info(f"📖 Fetching story details for story_id={request.story_id}")
         story_response = supabase.table('Stories').select('*').eq('id', request.story_id).eq('user_id', user_id).single().execute()
         story = story_response.data
-        logger.info(f"ðŸ“– Story retrieved: title='{story.get('story_title', 'No title')}'")
+        logger.info(f"📖 Story retrieved: title='{story.get('story_title', 'No title')}'")
 
         # Get only ACTIVE chapters up to the previous chapter (exclude current chapter versions)
         max_context_chapter = request.next_chapter_num - 1
-        logger.info(f"ðŸ“š Fetching ACTIVE chapters up to chapter {max_context_chapter} for story_id={request.story_id}")
+        logger.info(f"📚 Fetching ACTIVE chapters up to chapter {max_context_chapter} for story_id={request.story_id}")
         Chapters_response = supabase.table('Chapters').select('*').eq('story_id', request.story_id).eq('is_active', True).lte('chapter_number', max_context_chapter).order('chapter_number').execute()
         previous_Chapters = Chapters_response.data
-        logger.info(f"ðŸ“š Active previous chapters count: {len(previous_Chapters)} (chapters 1-{max_context_chapter})")
+        logger.info(f"📚 Active previous chapters count: {len(previous_Chapters)} (chapters 1-{max_context_chapter})")
 
         # Generate the next chapter
-        logger.info(f"âš¡ Starting chapter generation process")
+        logger.info(f"⚡ Starting chapter generation process")
         next_chapter_number = request.next_chapter_num
-        logger.info(f"ðŸ“ Next chapter number will be: {next_chapter_number}")
+        logger.info(f"📝 Next chapter number will be: {next_chapter_number}")
 
         # Use the story service to generate the next chapter
         try:
-            logger.info(f"ðŸŽ¯ Generating Chapter {next_chapter_number} with choice: '{selected_choice.get('title', 'Unknown')}'")
-            logger.info(f"ðŸ“ LLM Input: Story='{story['story_title']}', Previous Chapters={len(previous_Chapters)}, Choice='{selected_choice.get('title', 'Unknown')}'")
+            logger.info(f"🎯 Generating Chapter {next_chapter_number} with choice: '{selected_choice.get('title', 'Unknown')}'")
+            logger.info(f"📝 LLM Input: Story='{story['story_title']}', Previous Chapters={len(previous_Chapters)}, Choice='{selected_choice.get('title', 'Unknown')}'")
             
             next_chapter_result = await story_service.generate_next_chapter_with_dna(
                 story=story,
@@ -837,18 +837,18 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
                 next_chapter_number=next_chapter_number,
                 user_id=user_id
             )
-            logger.info(f"âœ… Chapter {next_chapter_number} generated successfully")
+            logger.info(f"✅ Chapter {next_chapter_number} generated successfully")
             
         except Exception as generation_error:
-            logger.error(f"âŒ Chapter generation failed: {str(generation_error)}")
-            logger.error(f"âŒ Generation error type: {type(generation_error)}")
+            logger.error(f"❌ Chapter generation failed: {str(generation_error)}")
+            logger.error(f"❌ Generation error type: {type(generation_error)}")
             raise HTTPException(status_code=500, detail=f"Failed to generate next chapter: {str(generation_error)}")
 
-        logger.info(f"ðŸŽ‰ Chapter generation process completed successfully")
+        logger.info(f"🎉 Chapter generation process completed successfully")
 
         # --- SAVE GENERATED CHAPTER TO DATABASE ---
         try:
-            logger.info(f"ðŸ’¾ Saving generated chapter {next_chapter_number} to database...")
+            logger.info(f"💾 Saving generated chapter {next_chapter_number} to database...")
             
             # Get the next version number for this chapter
             next_version_number = await get_next_chapter_version_number(request.story_id, next_chapter_number)
@@ -875,10 +875,10 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
             }
             chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
             if not chapter_response.data:
-                logger.error(f"âŒ DATABASE ERROR: Insert returned no data")
+                logger.error(f"❌ DATABASE ERROR: Insert returned no data")
                 raise HTTPException(status_code=500, detail="Failed to save generated chapter")
             chapter_id = chapter_response.data[0]["id"]
-            logger.info(f"âœ… Chapter saved with ID: {chapter_id}")
+            logger.info(f"✅ Chapter saved with ID: {chapter_id}")
             # --- GENERATE AND SAVE CHAPTER SUMMARY ---
             
             try:
@@ -900,15 +900,15 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
                     # Verify the update worked
                     verify_response = supabase.table("Chapters").select("summary").eq("id", chapter_id).execute()
                     if verify_response.data and verify_response.data[0].get("summary"):
-                        logger.info(f"âœ… Chapter {next_chapter_number} summary saved and verified in database")
+                        logger.info(f"✅ Chapter {next_chapter_number} summary saved and verified in database")
                     else:
-                        logger.error(f"âŒ Chapter {next_chapter_number} summary update may have failed")
+                        logger.error(f"❌ Chapter {next_chapter_number} summary update may have failed")
                 else:
-                    logger.error(f"âŒ Failed to generate summary for chapter {next_chapter_number}")
+                    logger.error(f"❌ Failed to generate summary for chapter {next_chapter_number}")
             except Exception as summary_error:
                 import traceback
         except Exception as db_error:
-            logger.error(f"âŒ DATABASE INSERT FAILED: {str(db_error)}")
+            logger.error(f"❌ DATABASE INSERT FAILED: {str(db_error)}")
             raise HTTPException(status_code=500, detail=f"Database insert failed: {str(db_error)}")
 
         # --- SAVE GENERATED CHOICES FOR THE NEW CHAPTER ---
@@ -923,7 +923,7 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
                     user_id=user_id
                 )
         except Exception as choice_error:
-            logger.error(f"âŒ Failed to save choices: {str(choice_error)}")
+            logger.error(f"❌ Failed to save choices: {str(choice_error)}")
             # Continue anyway - don't break the user experience
         
         # Update story's current_chapter
@@ -939,17 +939,17 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
             "selected_choice": selected_choice,
             "choices": next_chapter_result.get("choices", [])  # Include any new choices generated
         }
-        logger.info(f"ðŸš€ Returning response to frontend: success={response_payload.get('success')}, chapter_number={response_payload.get('chapter_number')}, choices_count={len(response_payload.get('choices', []))}")
+        logger.info(f"🚀 Returning response to frontend: success={response_payload.get('success')}, chapter_number={response_payload.get('chapter_number')}, choices_count={len(response_payload.get('choices', []))}")
         return response_payload
 
     except HTTPException:
-        logger.error(f"âŒ HTTP Exception occurred, re-raising")
+        logger.error(f"❌ HTTP Exception occurred, re-raising")
         raise
     except Exception as e:
-        logger.error(f"âŒ Unexpected error in generate_chapter_with_choice: {str(e)}")
-        logger.error(f"âŒ Error type: {type(e)}")
+        logger.error(f"❌ Unexpected error in generate_chapter_with_choice: {str(e)}")
+        logger.error(f"❌ Error type: {type(e)}")
         import traceback
-        logger.error(f"âŒ Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/story/{story_id}/choice_history")
@@ -959,7 +959,7 @@ async def get_choice_history_endpoint(
 ):
     """Get the complete choice history for a story showing all paths taken and not taken."""
     try:
-        logger.info(f"ðŸ“š Getting choice history for story {story_id}")
+        logger.info(f"📚 Getting choice history for story {story_id}")
         
         # Get all choices for this story
         choices_response = supabase.table("story_choices").select("*").eq("story_id", story_id).eq("user_id", user.id).order("chapter_number").order("choice_id").execute()
@@ -1004,7 +1004,7 @@ async def get_choice_history_endpoint(
         history_list = list(choice_history.values())
         history_list.sort(key=lambda x: x["chapter_number"])
         
-        logger.info(f"âœ… Retrieved choice history for {len(history_list)} Chapters")
+        logger.info(f"✅ Retrieved choice history for {len(history_list)} Chapters")
         
         return {
             "success": True,
@@ -1016,7 +1016,7 @@ async def get_choice_history_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Get choice history failed: {e}")
+        logger.error(f"❌ Get choice history failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get choice history: {str(e)}")
 
 @app.get("/chapter/{chapter_id}/choices")
@@ -1033,29 +1033,29 @@ async def get_choices_for_chapter_endpoint(
         choices = choices_response.data or []
         return {"success": True, "chapter_id": chapter_id, "choices": choices, "total_choices": len(choices)}
     except Exception as e:
-        logger.error(f"âŒ Error fetching choices for chapter {chapter_id}: {e}")
+        logger.error(f"❌ Error fetching choices for chapter {chapter_id}: {e}")
         return {"success": False, "detail": str(e)}
 
 @app.post("/lc_generate_chapter")
 async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_authenticated_user_optional)):
     """Generate story chapter from either text or JSON outline."""
-    logger.info(f"ðŸ“– Starting Chapter {chapter.chapter_number} generation...")
+    logger.info(f"📖 Starting Chapter {chapter.chapter_number} generation...")
     logger.info(f"Outline length: {len(chapter.outline)} characters")
     
     # STEP 1: Check if Chapter 1 already exists for this story
     if chapter.chapter_number == 1 and chapter.story_id:
-        logger.info(f"ðŸ” Checking if Chapter 1 already exists for story {chapter.story_id}...")
+        logger.info(f"🔍 Checking if Chapter 1 already exists for story {chapter.story_id}...")
         try:
             existing_chapter = supabase.table("Chapters").select("id, content, title").eq("story_id", chapter.story_id).eq("chapter_number", 1).eq("is_active", True).execute()
             if existing_chapter.data and len(existing_chapter.data) > 0:
                 chapter_id = existing_chapter.data[0]["id"]
-                logger.info(f"âœ… Chapter 1 already exists with ID: {chapter_id}")
+                logger.info(f"✅ Chapter 1 already exists with ID: {chapter_id}")
                 
                 # Fetch choices for this chapter
                 choices_response = supabase.table("story_choices").select("*").eq("chapter_id", chapter_id).execute()
                 choices = choices_response.data if choices_response.data else []
                 
-                logger.info(f"ðŸ“– Returning existing Chapter 1 with {len(choices)} choices")
+                logger.info(f"📖 Returning existing Chapter 1 with {len(choices)} choices")
                 return {
                     "chapter_1": existing_chapter.data[0]["content"],
                     "chapter": existing_chapter.data[0]["content"],
@@ -1072,7 +1072,7 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
                     }
                 }
         except Exception as e:
-            logger.warning(f"âš ï¸ Error checking for existing Chapter 1: {e}")
+            logger.warning(f"⚠️ Error checking for existing Chapter 1: {e}")
             # Continue with generation if check fails
     
     try:
@@ -1084,7 +1084,7 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
             # Try to parse as JSON first (from DSPy)
             import json
             outline_json = json.loads(chapter.outline)
-            logger.info("âœ… Outline detected as JSON from DSPy")
+            logger.info("✅ Outline detected as JSON from DSPy")
             
             # Extract data for enhanced generator
             story_summary = outline_json.get("summary", "")
@@ -1102,7 +1102,7 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
             if not target_chapter:
                 raise ValueError(f"Chapter {chapter.chapter_number} not found in outline")
                 
-            logger.info(f"ðŸŽ¯ Found chapter data: {target_chapter.get('title', 'Untitled')}")
+            logger.info(f"🎯 Found chapter data: {target_chapter.get('title', 'Untitled')}")
             
             # Generate with enhanced CoT system
             result = generator.generate_chapter_from_outline(
@@ -1114,7 +1114,7 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
             
         except json.JSONDecodeError:
             # Fallback: treat as text outline (legacy support)
-            logger.info("ðŸ“„ Outline detected as text (legacy)")
+            logger.info("📄 Outline detected as text (legacy)")
             
             # For text outlines, create minimal chapter data
             chapter_data = {
@@ -1136,7 +1136,7 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
                 tone="Engaging"
             )
         
-        logger.info(f"âœ… Chapter {chapter.chapter_number} generation completed!")
+        logger.info(f"✅ Chapter {chapter.chapter_number} generation completed!")
         
         # Handle new enhanced response structure
         if result.get("success"):
@@ -1145,109 +1145,109 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
             # reasoning = result.get("reasoning", {})  # No longer returned
             # quality_metrics = result.get("quality_metrics", {})  # No longer returned
             
-            logger.info(f"ðŸ“Š Generated: {len(chapter_content)} chars, {len(choices)} choices")
-            # logger.info(f"ðŸ§  CoT reasoning: {bool(reasoning)}")
-            # logger.info(f"ðŸ“ˆ Quality metrics: {bool(quality_metrics)}")
+            logger.info(f"📊 Generated: {len(chapter_content)} chars, {len(choices)} choices")
+            # logger.info(f"🧠 CoT reasoning: {bool(reasoning)}")
+            # logger.info(f"📈 Quality metrics: {bool(quality_metrics)}")
             
             # Validate chapter content
             if not chapter_content or len(chapter_content.strip()) < 50:
-                logger.error(f"âŒ Chapter content too short: {len(chapter_content)} characters")
+                logger.error(f"❌ Chapter content too short: {len(chapter_content)} characters")
                 raise HTTPException(status_code=500, detail="Generated chapter content is too short or empty")
 
             # --- SAVE CHAPTER 1 AND CHOICES TO DATABASE IMMEDIATELY ---
             chapter_id = None
             if chapter.chapter_number == 1 and chapter.story_id and user:
                 try:
-                    logger.info(f"🚀 OPTIMIZED SAVE: Chapter 1 with DNA, summaries, and vectors...")
+                    logger.info(f"💾 Saving Chapter 1 content to Chapters table...")
                     
-                    # Use our optimized service for Chapter 1 save
-                    from services.fixed_optimized_chapter_service import fixed_optimized_chapter_service
+                    # Get or create branch_id
+                    try:
+                        main_branch_id = await get_main_branch_id(chapter.story_id)
+                    except Exception:
+                        main_branch_id = None
                     
-                    # Prepare chapter data for optimized save
-                    chapter_dict = {
+                    # Prepare chapter data
+                    chapter_insert_data = {
                         "story_id": chapter.story_id,
                         "chapter_number": 1,
-                        "content": chapter_content,
                         "title": "Chapter 1",
-                        "choices": choices,
-                        "user_choice": ""
+                        "content": chapter_content,
+                        "word_count": len(chapter_content.split()),
+                        "version_number": 1,
+                        "is_active": True,
                     }
                     
-                    # Save with full optimization (DNA + summaries + vectors)
-                    save_result = await fixed_optimized_chapter_service.save_chapter_optimized(
-                        chapter_data=chapter_dict,
-                        user_id=user.id,
-                        supabase_client=supabase
-                    )
+                    if main_branch_id:
+                        chapter_insert_data["branch_id"] = main_branch_id
                     
-                    chapter_id = save_result.chapter_id
-                    logger.info(f"✅ OPTIMIZED SAVE COMPLETE: Chapter 1 saved with full features!")
-                    logger.info(f"📊 Save time: {save_result.save_time:.2f}s")
-                    logger.info(f"📝 Summary: {'generated' if save_result.summary else 'failed'}")
-                    logger.info(f"🧬 DNA: {'extracted' if save_result.performance_metrics.get('dna_extracted') else 'failed'}")
-                    logger.info(f"🔍 Vector chunks: {save_result.vector_chunks}")
+                    # Save chapter to database
+                    chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
                     
-                    # Update story metadata
-                    try:
-                        supabase.table("Stories").update({"current_chapter": 1}).eq("id", chapter.story_id).execute()
-                        logger.info(f"✅ Updated story current_chapter to 1")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not update story metadata: {e}")
+                    if chapter_response.data:
+                        chapter_id = chapter_response.data[0]["id"]
+                        logger.info(f"✅ Chapter 1 saved to database with ID: {chapter_id}")
+                        
+                        # Save choices to database
+                        if choices and len(choices) > 0:
+                            saved_choices = await save_choices_for_chapter(
+                                story_id=chapter.story_id,
+                                chapter_id=chapter_id,
+                                chapter_number=1,
+                                choices=choices,
+                                user_id=user.id,
+                                branch_id=main_branch_id
+                            )
+                            logger.info(f"✅ Saved {len(saved_choices)} choices to database")
+                        
+                        # Update story metadata
+                        try:
+                            supabase.table("Stories").update({"current_chapter": 1}).eq("id", chapter.story_id).execute()
+                            logger.info(f"✅ Updated story current_chapter to 1")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Could not update story metadata: {e}")
                     
                 except Exception as db_error:
-                    logger.error(f"❌ Failed to save Chapter 1 with optimization: {str(db_error)}")
-                    # Fallback to basic save if optimized save fails
-                    logger.info(f"🔄 Falling back to basic Chapter 1 save...")
-                    try:
-                        chapter_insert_data = {
-                            "story_id": chapter.story_id,
-                            "chapter_number": 1,
-                            "title": "Chapter 1",
-                            "content": chapter_content,
-                            "word_count": len(chapter_content.split()),
-                            "version_number": 1,
-                            "is_active": True,
-                        }
-                        
-                        chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
-                        if chapter_response.data:
-                            chapter_id = chapter_response.data[0]["id"]
-                            logger.info(f"✅ Basic Chapter 1 save successful with ID: {chapter_id}")
-                    except Exception as fallback_error:
-                        logger.error(f"❌ Even fallback save failed: {str(fallback_error)}")
-                        # Do not raise, allow generation to succeed even if save fails
+                    logger.error(f"❌ Failed to save Chapter 1 or choices: {str(db_error)}")
+                    # Do not raise, allow generation to succeed even if save fails
 
             return {
                 "chapter_1": chapter_content,  # Frontend expects this field name
                 "chapter": chapter_content,    # Keep for compatibility
                 "choices": choices,            # Enhanced: automatic choices
+                # 'reasoning' and 'quality_metrics' removed from response
                 "metadata": {
                     "chapter_number": chapter.chapter_number,
                     "word_count": len(chapter_content.split()),
+                    "character_count": len(chapter_content),
                     "choices_count": len(choices),
-                    "chapter_id": chapter_id,
-                    "already_saved": bool(chapter_id),
-                    "optimized_save": bool(chapter_id)
+                    "generation_success": True,
+                    "cot_reasoning": False,  # No longer included
+                    "quality_validated": False,  # No longer included
+                    "chapter_id": chapter_id,  # Include saved chapter_id
+                    "saved_to_database": bool(chapter_id)  # Indicate if saved
                 }
             }
-        
         else:
-            # For chapters other than 1, just return the generated content
+            # Handle error case - return proper format even on error
+            error_msg = result.get("error", "Enhanced generation failed")
+            logger.error(f"❌ Enhanced chapter generation failed: {error_msg}")
+            
+            # Return error in expected format for frontend
             return {
-                "chapter_1": chapter_content,
-                "chapter": chapter_content,
-                "choices": choices,
+                "chapter_1": f"Error generating Chapter {chapter.chapter_number}: {error_msg}",
+                "chapter": f"Error generating Chapter {chapter.chapter_number}: {error_msg}",
+                "choices": [],
+                "error": error_msg,
                 "metadata": {
                     "chapter_number": chapter.chapter_number,
-                    "word_count": len(chapter_content.split()),
-                    "choices_count": len(choices)
+                    "generation_success": False,
+                    "error": error_msg
                 }
             }
             
     except Exception as e:
-        logger.error(f"❌ Chapter generation failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Chapter generation failed: {str(e)}")
-
+        logger.error(f"❌ Chapter generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 class JsonChapterInput(BaseModel):
     """Input model for generating Chapters from JSON outline."""
@@ -1257,7 +1257,7 @@ class JsonChapterInput(BaseModel):
 @app.post("/lc_generate_chapter_from_json")
 async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
     """Generate story chapter specifically from JSON outline data."""
-    logger.info(f"ðŸ“– Starting Chapter {chapter.chapter_number} generation from JSON outline...")
+    logger.info(f"📖 Starting Chapter {chapter.chapter_number} generation from JSON outline...")
     
     try:
         # NEW CODE:
@@ -1281,7 +1281,7 @@ async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
         if not target_chapter:
             raise HTTPException(status_code=400, detail=f"Chapter {chapter.chapter_number} not found in JSON outline")
         
-        logger.info("ðŸš€ Invoking Enhanced Chapter Generator with JSON data...")
+        logger.info("🚀 Invoking Enhanced Chapter Generator with JSON data...")
         
         # Generate with enhanced system
         result = generator.generate_chapter_from_outline(
@@ -1291,7 +1291,7 @@ async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
             tone=tone
         )
         
-        logger.info(f"âœ… Chapter {chapter.chapter_number} generation from JSON completed!")
+        logger.info(f"✅ Chapter {chapter.chapter_number} generation from JSON completed!")
         
         # Handle enhanced response
         if result.get("success"):
@@ -1300,7 +1300,7 @@ async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
             reasoning = result.get("reasoning", {})
             quality_metrics = result.get("quality_metrics", {})
             
-            logger.info(f"ðŸ“Š Generated: {len(chapter_content)} chars, {len(choices)} choices")
+            logger.info(f"📊 Generated: {len(chapter_content)} chars, {len(choices)} choices")
             
             return {
                 "chapter": chapter_content,
@@ -1324,11 +1324,11 @@ async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
         else:
             # Handle error case
             error_msg = result.get("error", "Enhanced generation failed")
-            logger.error(f"âŒ Enhanced chapter generation failed: {error_msg}")
+            logger.error(f"❌ Enhanced chapter generation failed: {error_msg}")
             raise HTTPException(status_code=500, detail=error_msg)
             
     except Exception as e:
-        logger.error(f"âŒ Enhanced chapter generation from JSON failed: {e}")
+        logger.error(f"❌ Enhanced chapter generation from JSON failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/stories/save")
@@ -1447,7 +1447,7 @@ async def save_story_endpoint(
         logger.info(f"Attempting to insert story with fields: {list(story_insert_data.keys())}")
         
         # DEBUG: Show actual values being inserted
-        logger.info(f"ðŸ” FINAL VALUES BEING INSERTED:")
+        logger.info(f"🔍 FINAL VALUES BEING INSERTED:")
         for key, value in story_insert_data.items():
             if key in ['theme', 'style', 'genre']:
                 logger.info(f"   {key}: '{value}' (type: {type(value)})")
@@ -1486,15 +1486,15 @@ async def save_story_endpoint(
         reading_time = max(1, word_count // 200)  # 200 words per minute
         
         # Generate summary for Chapter 1 using the new chapter_summary module
-        logger.info(f"ðŸ¤– CHAPTER 1 SUMMARY: Starting summary generation for Chapter 1...")
+        logger.info(f"🤖 CHAPTER 1 SUMMARY: Starting summary generation for Chapter 1...")
         
         # Build basic story context for Chapter 1
         story_context = f"STORY: {extracted_metadata['book_title']}\nGENRE: {extracted_metadata.get('genre', '')}\nTHEME: {extracted_metadata.get('theme', '')}\n\nSTORY OUTLINE:\n{story_data.story_outline}"
         
-        logger.info(f"ðŸ“„ CHAPTER 1 SUMMARY: Story context built: {len(story_context)} chars")
+        logger.info(f"📄 CHAPTER 1 SUMMARY: Story context built: {len(story_context)} chars")
         
         # Generate summary
-        logger.info(f"ðŸŽ¯ CHAPTER 1 SUMMARY: Calling LLM...")
+        logger.info(f"🎯 CHAPTER 1 SUMMARY: Calling LLM...")
         summary_result = generate_chapter_summary(
             chapter_content=story_data.chapter_1_content,
             chapter_number=1,
@@ -1502,20 +1502,20 @@ async def save_story_endpoint(
             story_title=extracted_metadata["book_title"]
         )
         
-        logger.info(f"ðŸ¤– CHAPTER 1 SUMMARY: LLM Response Status: {summary_result['success']}")
+        logger.info(f"🤖 CHAPTER 1 SUMMARY: LLM Response Status: {summary_result['success']}")
         
         chapter_1_summary = ""
         if summary_result["success"]:
             chapter_1_summary = summary_result["summary"]
-            logger.info(f"âœ… CHAPTER 1 SUMMARY: Generated successfully!")
-            logger.info(f"ðŸ“ CHAPTER 1 SUMMARY: Length: {len(chapter_1_summary)} chars")
-            logger.info(f"ðŸ“ CHAPTER 1 SUMMARY: Preview: {chapter_1_summary[:100]}...")
+            logger.info(f"✅ CHAPTER 1 SUMMARY: Generated successfully!")
+            logger.info(f"📝 CHAPTER 1 SUMMARY: Length: {len(chapter_1_summary)} chars")
+            logger.info(f"📝 CHAPTER 1 SUMMARY: Preview: {chapter_1_summary[:100]}...")
         else:
-            logger.warning(f"âš ï¸ CHAPTER 1 SUMMARY: Generation failed: {summary_result['error']}")
+            logger.warning(f"⚠️ CHAPTER 1 SUMMARY: Generation failed: {summary_result['error']}")
             chapter_1_summary = chapter_1_metadata.get("summary", "First chapter")
         
         # Prepare chapter data WITH summary
-        logger.info(f"ðŸ’¾ CHAPTER 1 DATABASE: Preparing insert with summary...")
+        logger.info(f"💾 CHAPTER 1 DATABASE: Preparing insert with summary...")
         
         # Get the next version number for this chapter
         next_version_number = await get_next_chapter_version_number(story_id, 1)
@@ -1533,10 +1533,10 @@ async def save_story_endpoint(
             "is_active": True,  # Mark this version as active
         }
         
-        logger.info(f"ðŸ“‹ CHAPTER 1 DATABASE: Insert data keys: {list(chapter_insert_data.keys())}")
-        logger.info(f"ðŸ” CHAPTER 1 DATABASE: Summary field in insert: {bool(chapter_insert_data.get('summary'))}")
-        logger.info(f"ðŸ“ CHAPTER 1 DATABASE: Summary length: {len(chapter_insert_data.get('summary', ''))} chars")
-        logger.info(f"ðŸ“ CHAPTER 1 DATABASE: Summary preview: {chapter_insert_data.get('summary', '')[:100]}...")
+        logger.info(f"📋 CHAPTER 1 DATABASE: Insert data keys: {list(chapter_insert_data.keys())}")
+        logger.info(f"🔍 CHAPTER 1 DATABASE: Summary field in insert: {bool(chapter_insert_data.get('summary'))}")
+        logger.info(f"📝 CHAPTER 1 DATABASE: Summary length: {len(chapter_insert_data.get('summary', ''))} chars")
+        logger.info(f"📝 CHAPTER 1 DATABASE: Summary preview: {chapter_insert_data.get('summary', '')[:100]}...")
         
         # Add optional chapter fields - only include fields that exist in database schema
         optional_chapter_fields = {
@@ -1563,45 +1563,45 @@ async def save_story_endpoint(
             if value is not None and value != "" and value != []:
                 chapter_insert_data[field] = value
         
-        logger.info(f"ðŸ”§ CHAPTER 1 DATABASE: Final insert data fields: {list(chapter_insert_data.keys())}")
+        logger.info(f"🔧 CHAPTER 1 DATABASE: Final insert data fields: {list(chapter_insert_data.keys())}")
         
         # Try to insert chapter with fallback handling
-        logger.info(f"ðŸŽ¯ CHAPTER 1 DATABASE: Executing INSERT...")
+        logger.info(f"🎯 CHAPTER 1 DATABASE: Executing INSERT...")
         try:
             chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
             
-            logger.info(f"ðŸ“Š CHAPTER 1 DATABASE: Response: {chapter_response}")
-            logger.info(f"ðŸ“Š CHAPTER 1 DATABASE: Response data: {chapter_response.data}")
+            logger.info(f"📊 CHAPTER 1 DATABASE: Response: {chapter_response}")
+            logger.info(f"📊 CHAPTER 1 DATABASE: Response data: {chapter_response.data}")
             
             if not chapter_response.data:
-                logger.error(f"âŒ CHAPTER 1 DATABASE: Insert returned no data")
+                logger.error(f"❌ CHAPTER 1 DATABASE: Insert returned no data")
                 chapter_id = None
             else:
                 chapter_id = chapter_response.data[0]["id"]
                 saved_chapter = chapter_response.data[0]
                 
-                logger.info(f"âœ… CHAPTER 1 DATABASE: Chapter inserted with metadata: {chapter_id}")
-                logger.info(f"ðŸ” CHAPTER 1 DATABASE: Saved summary field: {saved_chapter.get('summary', 'NOT_FOUND')}")
+                logger.info(f"✅ CHAPTER 1 DATABASE: Chapter inserted with metadata: {chapter_id}")
+                logger.info(f"🔍 CHAPTER 1 DATABASE: Saved summary field: {saved_chapter.get('summary', 'NOT_FOUND')}")
                 
                 # Verification query
-                logger.info(f"ðŸ” CHAPTER 1 DATABASE: Verifying saved chapter...")
+                logger.info(f"🔍 CHAPTER 1 DATABASE: Verifying saved chapter...")
                 verify_response = supabase.table("Chapters").select("id, summary").eq("id", chapter_id).execute()
                 
                 if verify_response.data:
                     verified_summary = verify_response.data[0].get("summary")
-                    logger.info(f"âœ… CHAPTER 1 VERIFICATION: Summary in DB: {bool(verified_summary)}")
+                    logger.info(f"✅ CHAPTER 1 VERIFICATION: Summary in DB: {bool(verified_summary)}")
                     if verified_summary:
-                        logger.info(f"ðŸ“ CHAPTER 1 VERIFICATION: Summary length: {len(verified_summary)} chars")
-                        logger.info(f"ðŸ“ CHAPTER 1 VERIFICATION: Summary preview: {verified_summary[:100]}...")
+                        logger.info(f"📝 CHAPTER 1 VERIFICATION: Summary length: {len(verified_summary)} chars")
+                        logger.info(f"📝 CHAPTER 1 VERIFICATION: Summary preview: {verified_summary[:100]}...")
                     else:
-                        logger.error(f"âŒ CHAPTER 1 VERIFICATION: Summary is NULL in database!")
+                        logger.error(f"❌ CHAPTER 1 VERIFICATION: Summary is NULL in database!")
                 else:
-                    logger.error(f"âŒ CHAPTER 1 VERIFICATION: Could not query saved chapter!")
+                    logger.error(f"❌ CHAPTER 1 VERIFICATION: Could not query saved chapter!")
                     
         except Exception as chapter_error:
-            logger.error(f"âŒ CHAPTER 1 DATABASE: Full metadata insert failed: {chapter_error}")
-            logger.error(f"ðŸ” CHAPTER 1 DATABASE: Error type: {type(chapter_error)}")
-            logger.info("ðŸ”„ CHAPTER 1 DATABASE: Falling back to minimal chapter insert...")
+            logger.error(f"❌ CHAPTER 1 DATABASE: Full metadata insert failed: {chapter_error}")
+            logger.error(f"🔍 CHAPTER 1 DATABASE: Error type: {type(chapter_error)}")
+            logger.info("🔄 CHAPTER 1 DATABASE: Falling back to minimal chapter insert...")
             
             # Fallback: minimal chapter data WITH summary if possible
             minimal_chapter_data = {
@@ -1612,18 +1612,18 @@ async def save_story_endpoint(
                 "summary": chapter_1_summary,  # Include summary in fallback too!
             }
             
-            logger.info(f"ðŸ”§ CHAPTER 1 FALLBACK: Minimal data keys: {list(minimal_chapter_data.keys())}")
+            logger.info(f"🔧 CHAPTER 1 FALLBACK: Minimal data keys: {list(minimal_chapter_data.keys())}")
             
             try:
                 chapter_response = supabase.table("Chapters").insert(minimal_chapter_data).execute()
                 chapter_id = chapter_response.data[0]["id"]
-                logger.info(f"âœ… CHAPTER 1 FALLBACK: Chapter inserted with minimal data: {chapter_id}")
+                logger.info(f"✅ CHAPTER 1 FALLBACK: Chapter inserted with minimal data: {chapter_id}")
             except Exception as minimal_chapter_error:
-                logger.error(f"âŒ CHAPTER 1 FALLBACK: Even minimal chapter insert failed: {minimal_chapter_error}")
-                logger.error(f"ðŸ” CHAPTER 1 FALLBACK: Error type: {type(minimal_chapter_error)}")
+                logger.error(f"❌ CHAPTER 1 FALLBACK: Even minimal chapter insert failed: {minimal_chapter_error}")
+                logger.error(f"🔍 CHAPTER 1 FALLBACK: Error type: {type(minimal_chapter_error)}")
                 # Don't fail the entire save if chapter insert fails
                 chapter_id = None
-                logger.warning("âš ï¸ CHAPTER 1 FALLBACK: Story saved but Chapter 1 could not be inserted due to schema issues")
+                logger.warning("⚠️ CHAPTER 1 FALLBACK: Story saved but Chapter 1 could not be inserted due to schema issues")
         
         # Save Chapter 1 choices if provided
         choices_saved_count = 0
@@ -1640,7 +1640,7 @@ async def save_story_endpoint(
                 choices_saved_count = len(saved_choices)
                     
             except Exception as e:
-                logger.error(f"âŒ CHOICES: Error saving choices to database: {e}")
+                logger.error(f"❌ CHOICES: Error saving choices to database: {e}")
                 choices_saved_count = 0
                 # Continue anyway - don't break the user experience
         
@@ -1774,7 +1774,7 @@ async def test_formatted_outline(idea: str = "A detective solving mysteries in V
             return {
                 "success": False,
                 "error": "No summary returned",
-                "formatted_text": "âŒ Failed to generate outline."
+                "formatted_text": "❌ Failed to generate outline."
             }
         return {
             "success": True,
@@ -1788,20 +1788,20 @@ async def test_formatted_outline(idea: str = "A detective solving mysteries in V
         return {
             "success": False,
             "error": str(e),
-            "formatted_text": f"âŒ Error: {str(e)}"
+            "formatted_text": f"❌ Error: {str(e)}"
         }
 
 @app.post("/test/complete_json_to_chapter_flow")
 async def test_complete_json_to_chapter_flow(idea: str = "A space explorer discovers a mysterious alien artifact"):
-    """Test the complete flow: Idea â†’ JSON Outline â†’ Chapter 1 Generation (no auth required)."""
-    logger.info(f"ðŸš€ Testing COMPLETE JSON to Chapter 1 flow with idea: {idea}")
+    """Test the complete flow: Idea → JSON Outline → Chapter 1 Generation (no auth required)."""
+    logger.info(f"🚀 Testing COMPLETE JSON to Chapter 1 flow with idea: {idea}")
     
     try:
         from lc_book_generator_prompt import generate_book_outline_json
         from lc_book_generator import BookStoryGenerator
         
         # Step 1: Generate JSON outline from idea
-        logger.info("ðŸ“ Step 1: Generating JSON outline...")
+        logger.info("📝 Step 1: Generating JSON outline...")
         outline_result = generate_book_outline_json(idea)
         
         if not outline_result["success"]:
@@ -1813,15 +1813,15 @@ async def test_complete_json_to_chapter_flow(idea: str = "A space explorer disco
             }
         
         outline_json = outline_result["outline_json"]
-        logger.info("âœ… Step 1 completed: JSON outline generated successfully")
+        logger.info("✅ Step 1 completed: JSON outline generated successfully")
         
         # Step 2: Generate Chapter 1 from JSON outline
-        logger.info("ðŸ“– Step 2: Generating Chapter 1 from JSON outline...")
+        logger.info("📖 Step 2: Generating Chapter 1 from JSON outline...")
         generator = BookStoryGenerator()
         
         chapter_1_content = generator.generate_chapter_from_json(outline_json, 1)
         
-        if chapter_1_content.startswith("âŒ"):
+        if chapter_1_content.startswith("❌"):
             return {
                 "step": "chapter_generation_failed",
                 "success": False,
@@ -1830,7 +1830,7 @@ async def test_complete_json_to_chapter_flow(idea: str = "A space explorer disco
                 "idea": idea
             }
         
-        logger.info("âœ… Step 2 completed: Chapter 1 generated successfully")
+        logger.info("✅ Step 2 completed: Chapter 1 generated successfully")
         
         # Step 3: Extract metadata for analysis
         Chapters = outline_json.get("Chapters", [])
@@ -1843,7 +1843,7 @@ async def test_complete_json_to_chapter_flow(idea: str = "A space explorer disco
         actual_word_count = len(chapter_1_content.split())
         estimated_word_count = chapter_1_data.get("estimated_word_count", 0)
         
-        logger.info(f"ðŸ“Š Final Statistics:")
+        logger.info(f"📊 Final Statistics:")
         logger.info(f"   Title: {outline_json.get('book_title', 'N/A')}")
         logger.info(f"   Genre: {outline_json.get('genre', 'N/A')}")
         logger.info(f"   Chapter 1 Title: {chapter_1_data.get('chapter_title', 'N/A')}")
@@ -1882,7 +1882,7 @@ async def test_complete_json_to_chapter_flow(idea: str = "A space explorer disco
             # Next Steps for Implementation
             "implementation_ready": {
                 "has_complete_json": bool(outline_json),
-                "has_chapter_content": bool(chapter_1_content and not chapter_1_content.startswith("âŒ")),
+                "has_chapter_content": bool(chapter_1_content and not chapter_1_content.startswith("❌")),
                 "ready_for_database": True,
                 "can_continue_to_chapter_2": bool(len(Chapters) > 1)
             },
@@ -1896,7 +1896,7 @@ async def test_complete_json_to_chapter_flow(idea: str = "A space explorer disco
         }
         
     except Exception as e:
-        logger.error(f"âŒ Complete flow test failed: {e}")
+        logger.error(f"❌ Complete flow test failed: {e}")
         return {
             "step": "error",
             "success": False,
@@ -1916,7 +1916,7 @@ async def test_auto_save_outline_flow(idea: str = "A brave knight embarks on a q
         # Test the outline generation with auto-save
         from lc_book_generator_prompt import generate_book_outline_json
         
-        logger.info(f"ðŸ§ª Testing auto-save outline for idea: {idea[:50]}...")
+        logger.info(f"🧪 Testing auto-save outline for idea: {idea[:50]}...")
         
         # Generate JSON outline
         result = generate_book_outline_json(idea)
@@ -1935,7 +1935,7 @@ async def test_auto_save_outline_flow(idea: str = "A brave knight embarks on a q
         database_save_success = False
         
         try:
-            logger.info("ðŸ§ª Testing database auto-save...")
+            logger.info("🧪 Testing database auto-save...")
             
             story_data = {
                 "user_id": mock_user.id,
@@ -1963,17 +1963,17 @@ async def test_auto_save_outline_flow(idea: str = "A brave knight embarks on a q
             # Remove None values
             story_data = {k: v for k, v in story_data.items() if v is not None and v != [] and v != ""}
             
-            logger.info(f"ðŸ§ª Saving test outline with fields: {list(story_data.keys())}")
+            logger.info(f"🧪 Saving test outline with fields: {list(story_data.keys())}")
             
             # Insert to database
             story_response = supabase.table("Stories").insert(story_data).execute()
             story_id = story_response.data[0]["id"]
             database_save_success = True
             
-            logger.info(f"âœ… Test outline auto-saved with story_id: {story_id}")
+            logger.info(f"✅ Test outline auto-saved with story_id: {story_id}")
             
         except Exception as db_error:
-            logger.warning(f"âŒ Test database save failed: {db_error}")
+            logger.warning(f"❌ Test database save failed: {db_error}")
             database_save_success = False
         
         return {
@@ -1992,11 +1992,11 @@ async def test_auto_save_outline_flow(idea: str = "A brave knight embarks on a q
                 "locations_count": len(metadata["key_locations"])
             },
             "database_fields_saved": list(story_data.keys()) if database_save_success else [],
-            "message": "âœ… Auto-save outline test completed! JSON outline was generated and saved to database automatically." if database_save_success else "âš ï¸ Outline generated but database save failed."
+            "message": "✅ Auto-save outline test completed! JSON outline was generated and saved to database automatically." if database_save_success else "⚠️ Outline generated but database save failed."
         }
         
     except Exception as e:
-        logger.error(f"âŒ Auto-save outline test failed: {e}")
+        logger.error(f"❌ Auto-save outline test failed: {e}")
         return {"success": False, "error": str(e)}
 
 class ChaptersaveInput(BaseModel):
@@ -2032,16 +2032,16 @@ async def save_chapter_with_summary_endpoint(
     - Smart caching and monitoring
     """
     try:
-        logger.info(f"ðŸš€ OPTIMIZED SAVE: Starting Chapter {chapter_data.chapter_number}, Story {chapter_data.story_id}")
-        logger.info(f"ðŸ‘¤ User ID: {user.id}")
+        logger.info(f"🚀 OPTIMIZED SAVE: Starting Chapter {chapter_data.chapter_number}, Story {chapter_data.story_id}")
+        logger.info(f"👤 User ID: {user.id}")
         
         # STEP 0: Check if chapter already exists to prevent duplicate saves
-        logger.info(f"ðŸ” STEP 0: Checking if Chapter {chapter_data.chapter_number} already exists...")
+        logger.info(f"🔍 STEP 0: Checking if Chapter {chapter_data.chapter_number} already exists...")
         existing_chapter = supabase.table("Chapters").select("id, content").eq("story_id", chapter_data.story_id).eq("chapter_number", chapter_data.chapter_number).eq("is_active", True).execute()
         
         if existing_chapter.data and len(existing_chapter.data) > 0:
             existing_chapter_id = existing_chapter.data[0]["id"]
-            logger.info(f"âœ… STEP 0: Chapter {chapter_data.chapter_number} already exists with ID: {existing_chapter_id}")
+            logger.info(f"✅ STEP 0: Chapter {chapter_data.chapter_number} already exists with ID: {existing_chapter_id}")
             
             # Fetch existing choices
             choices_response = supabase.table("story_choices").select("*").eq("chapter_id", existing_chapter_id).execute()
@@ -2077,7 +2077,7 @@ async def save_chapter_with_summary_endpoint(
             supabase_client=supabase
         )
         
-        logger.info(f"âœ… OPTIMIZED SAVE COMPLETE: Chapter {chapter_data.chapter_number} saved in {save_result.save_time:.2f}s")
+        logger.info(f"✅ OPTIMIZED SAVE COMPLETE: Chapter {chapter_data.chapter_number} saved in {save_result.save_time:.2f}s")
         
         # Return optimized response
         return {
@@ -2102,30 +2102,30 @@ async def save_chapter_with_summary_endpoint(
         }
 
         # STEP 1: Verify story ownership
-        logger.info(f"ðŸ” STEP 1: Verifying story ownership...")
+        logger.info(f"🔍 STEP 1: Verifying story ownership...")
         story_response = supabase.table("Stories").select("*").eq("id", chapter_data.story_id).eq("user_id", user.id).execute()
         
         if not story_response.data:
-            logger.error(f"âŒ AUTHORIZATION: Story {chapter_data.story_id} not found for user {user.id}")
+            logger.error(f"❌ AUTHORIZATION: Story {chapter_data.story_id} not found for user {user.id}")
             raise HTTPException(status_code=404, detail="Story not found or access denied")
         
         story = story_response.data[0]
         story_title = story.get("story_title", "Untitled Story")
         story_outline = story.get("story_outline", "")
         
-        logger.info(f"âœ… STEP 1 COMPLETE: Story '{story_title}' verified")
+        logger.info(f"✅ STEP 1 COMPLETE: Story '{story_title}' verified")
         
         # STEP 2: Get or create branch_id for proper branching support
-        logger.info(f"ðŸŒ¿ STEP 2: Managing story branches...")
+        logger.info(f"🌿 STEP 2: Managing story branches...")
         try:
             main_branch_id = await get_main_branch_id(chapter_data.story_id)
-            logger.info(f"âœ… Using main branch: {main_branch_id}")
+            logger.info(f"✅ Using main branch: {main_branch_id}")
         except Exception as branch_error:
-            logger.warning(f"âš ï¸ Branch management failed: {branch_error}, continuing without branch_id")
+            logger.warning(f"⚠️ Branch management failed: {branch_error}, continuing without branch_id")
             main_branch_id = None
         
         # STEP 3: Optimized previous chapters fetching (summaries only, not full content)
-        logger.info(f"ðŸ“š STEP 3: Fetching previous chapter summaries...")
+        logger.info(f"📚 STEP 3: Fetching previous chapter summaries...")
         
         # Only get summaries from previous chapters for efficiency
         query = supabase.table("Chapters").select("summary, chapter_number").eq("story_id", chapter_data.story_id).lt("chapter_number", chapter_data.chapter_number)
@@ -2141,14 +2141,14 @@ async def save_chapter_with_summary_endpoint(
             for prev_chapter in previous_chapters_response.data:
                 if prev_chapter.get("summary"):
                     previous_summaries.append(prev_chapter["summary"])
-                    logger.info(f"ðŸ“ Chapter {prev_chapter['chapter_number']}: Using existing summary")
+                    logger.info(f"📝 Chapter {prev_chapter['chapter_number']}: Using existing summary")
                 else:
-                    logger.warning(f"âš ï¸ Chapter {prev_chapter['chapter_number']}: No summary found")
+                    logger.warning(f"⚠️ Chapter {prev_chapter['chapter_number']}: No summary found")
         
-        logger.info(f"ðŸ“‹ STEP 3 COMPLETE: Found {len(previous_summaries)} previous summaries")
+        logger.info(f"📋 STEP 3 COMPLETE: Found {len(previous_summaries)} previous summaries")
         
         # STEP 4: Enhanced summary generation with CoT
-        logger.info(f"ðŸ§  STEP 4: Generating enhanced summary with CoT reasoning...")
+        logger.info(f"🧠 STEP 4: Generating enhanced summary with CoT reasoning...")
         
         # Import the enhanced summary function
         from chapter_summary import generate_chapter_summary  # This should be your enhanced version
@@ -2173,24 +2173,24 @@ async def save_chapter_with_summary_endpoint(
             cot_analysis = summary_result.get("cot_analysis", "")
             quality_score = summary_result.get("metadata", {}).get("quality_score", 0)
             
-            logger.info(f"âœ… STEP 4 COMPLETE: Enhanced summary generated!")
-            logger.info(f"ðŸ“Š Quality Score: {quality_score}/10")
-            logger.info(f"ðŸ“ Summary: {len(summary_text)} chars")
-            logger.info(f"ðŸ§  CoT Analysis: {len(cot_analysis)} chars")
+            logger.info(f"✅ STEP 4 COMPLETE: Enhanced summary generated!")
+            logger.info(f"📊 Quality Score: {quality_score}/10")
+            logger.info(f"📝 Summary: {len(summary_text)} chars")
+            logger.info(f"🧠 CoT Analysis: {len(cot_analysis)} chars")
         else:
             # Fallback to basic summary if enhanced fails
-            logger.warning(f"âš ï¸ Enhanced summary failed: {summary_result.get('error', 'Unknown error')}")
+            logger.warning(f"⚠️ Enhanced summary failed: {summary_result.get('error', 'Unknown error')}")
             summary_text = f"Chapter {chapter_data.chapter_number} summary generation failed. Manual summary needed."
-            logger.info(f"ðŸ”„ Using fallback summary")
+            logger.info(f"🔄 Using fallback summary")
         
         # STEP 5: Calculate metadata
         word_count = len(chapter_data.content.split())
         summary_token_metrics = summary_result.get("usage_metrics", {})
         
-        logger.info(f"ðŸ“Š Chapter metadata: {word_count} words")
+        logger.info(f"📊 Chapter metadata: {word_count} words")
         
         # STEP 6: Database operations with proper versioning
-        logger.info(f"ðŸ’¾ STEP 6: Database save operations...")
+        logger.info(f"💾 STEP 6: Database save operations...")
         
         # Get next version and deactivate previous
         next_version_number = await get_next_chapter_version_number(
@@ -2240,15 +2240,15 @@ async def save_chapter_with_summary_endpoint(
             try:
                 chapter_insert_data["cot_analysis"] = cot_analysis[:1000]  # Truncate if too long
             except:
-                logger.info("ðŸ“ CoT analysis field not available in schema")
+                logger.info("📝 CoT analysis field not available in schema")
         
         if quality_score > 0:
             try:
                 chapter_insert_data["quality_score"] = quality_score
             except:
-                logger.info("ðŸ“Š Quality score field not available in schema")
+                logger.info("📊 Quality score field not available in schema")
         
-        logger.info(f"ðŸ“‹ Insert fields: {list(chapter_insert_data.keys())}")
+        logger.info(f"📋 Insert fields: {list(chapter_insert_data.keys())}")
         
         # Execute database insert
         try:
@@ -2258,21 +2258,21 @@ async def save_chapter_with_summary_endpoint(
                 raise HTTPException(status_code=500, detail="Failed to save chapter")
             
             chapter_id = chapter_response.data[0]["id"]
-            logger.info(f"âœ… STEP 6 COMPLETE: Chapter saved with ID: {chapter_id}")
+            logger.info(f"✅ STEP 6 COMPLETE: Chapter saved with ID: {chapter_id}")
             
             # Verify summary was saved
             verify_response = supabase.table("Chapters").select("summary").eq("id", chapter_id).execute()
             if verify_response.data and verify_response.data[0].get("summary"):
-                logger.info(f"âœ… VERIFICATION: Summary confirmed in database")
+                logger.info(f"✅ VERIFICATION: Summary confirmed in database")
             else:
-                logger.warning(f"âš ï¸ VERIFICATION: Summary may not have saved properly")
+                logger.warning(f"⚠️ VERIFICATION: Summary may not have saved properly")
                 
         except Exception as db_error:
-            logger.error(f"âŒ DATABASE INSERT FAILED: {str(db_error)}")
+            logger.error(f"❌ DATABASE INSERT FAILED: {str(db_error)}")
             raise HTTPException(status_code=500, detail=f"Database insert failed: {str(db_error)}")
         
         # STEP 7: Save choices for this chapter (from frontend or LLM result)
-        logger.info(f"ðŸŽ¯ STEP 7: Saving choices for Chapter {chapter_data.chapter_number}...")
+        logger.info(f"🎯 STEP 7: Saving choices for Chapter {chapter_data.chapter_number}...")
         choices_to_save = getattr(chapter_data, 'choices', None) or getattr(chapter_data, 'chapter_1_choices', None) or []
         if not choices_to_save and hasattr(chapter_data, 'content'):
             # Try to extract choices from content if present (for future-proofing)
@@ -2296,15 +2296,15 @@ async def save_chapter_with_summary_endpoint(
                     branch_id=main_branch_id
                 )
                 choices_saved_count = len(saved_choices)
-                logger.info(f"âœ… STEP 7 COMPLETE: Saved {choices_saved_count} choices")
+                logger.info(f"✅ STEP 7 COMPLETE: Saved {choices_saved_count} choices")
             except Exception as e:
-                logger.warning(f"âš ï¸ STEP 7: Error saving choices: {e}")
+                logger.warning(f"⚠️ STEP 7: Error saving choices: {e}")
                 choices_saved_count = 0
         else:
-            logger.info(f"â„¹ï¸ No choices to save for this chapter.")
+            logger.info(f"ℹ️ No choices to save for this chapter.")
         
         # STEP 8: Update story metadata
-        logger.info(f"ðŸ“ˆ STEP 8: Updating story metadata...")
+        logger.info(f"📈 STEP 8: Updating story metadata...")
         try:
             story_update = {"current_chapter": chapter_data.chapter_number}
             
@@ -2316,12 +2316,12 @@ async def save_chapter_with_summary_endpoint(
                     pass
             
             supabase.table("Stories").update(story_update).eq("id", chapter_data.story_id).execute()
-            logger.info(f"âœ… STEP 8 COMPLETE: Story metadata updated")
+            logger.info(f"✅ STEP 8 COMPLETE: Story metadata updated")
         except Exception as e:
-            logger.warning(f"âš ï¸ STEP 8: Could not update story metadata: {e}")
+            logger.warning(f"⚠️ STEP 8: Could not update story metadata: {e}")
         
         # STEP 9: Background tasks
-        logger.info(f"ðŸ”„ STEP 9: Scheduling background tasks...")
+        logger.info(f"🔄 STEP 9: Scheduling background tasks...")
         try:
             # Generate embeddings
             from services.embedding_service import embedding_service
@@ -2337,11 +2337,11 @@ async def save_chapter_with_summary_endpoint(
                 chapter_data.story_id
             )
             
-            logger.info(f"âœ… STEP 9 COMPLETE: Background tasks scheduled")
+            logger.info(f"✅ STEP 9 COMPLETE: Background tasks scheduled")
         except Exception as bg_error:
-            logger.warning(f"âš ï¸ STEP 9: Background task scheduling failed: {bg_error}")
+            logger.warning(f"⚠️ STEP 9: Background task scheduling failed: {bg_error}")
         
-        logger.info(f"ðŸŽ‰ ENHANCED SAVE COMPLETE: All steps successful!")
+        logger.info(f"🎉 ENHANCED SAVE COMPLETE: All steps successful!")
         
         # Enhanced response with all new features
         return {
@@ -2379,9 +2379,9 @@ async def save_chapter_with_summary_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ FATAL ERROR in optimized chapter save: {str(e)}")
+        logger.error(f"❌ FATAL ERROR in optimized chapter save: {str(e)}")
         import traceback
-        logger.error(f"âŒ Traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save chapter: {str(e)}")
 
 @app.get("/performance/chapter_save")
@@ -2428,7 +2428,7 @@ async def generate_next_chapter_endpoint(
     - Character consistency validation
     """
     try:
-        logger.info(f"ðŸš€ ENHANCED Chapter Generation: Chapter {chapter_input.chapter_number} for story {chapter_input.story_id}")
+        logger.info(f"🚀 ENHANCED Chapter Generation: Chapter {chapter_input.chapter_number} for story {chapter_input.story_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", chapter_input.story_id).eq("user_id", user.id).execute()
@@ -2449,7 +2449,7 @@ async def generate_next_chapter_endpoint(
         
         previous_chapters = previous_chapters_response.data if previous_chapters_response.data else []
         
-        logger.info(f"ðŸ“š Retrieved {len(previous_chapters)} previous chapters with DNA and summaries")
+        logger.info(f"📚 Retrieved {len(previous_chapters)} previous chapters with DNA and summaries")
         
         # Get user's choice that led to this chapter
         user_choice = getattr(chapter_input, 'user_choice', "")
@@ -2475,7 +2475,7 @@ async def generate_next_chapter_endpoint(
                             user_choice = f"{choice.get('title', '')}: {choice.get('description', '')}"
                             break
         
-        logger.info(f"ðŸŽ¯ User choice context: {user_choice[:100]}..." if user_choice else "ðŸŽ¯ No specific user choice")
+        logger.info(f"🎯 User choice context: {user_choice[:100]}..." if user_choice else "🎯 No specific user choice")
         
         # Use enhanced chapter generator with DNA and summaries
         from services.enhanced_chapter_generator import enhanced_chapter_generator
@@ -2490,11 +2490,11 @@ async def generate_next_chapter_endpoint(
             choice_options=choice_options
         )
         
-        logger.info(f"âœ… ENHANCED Chapter {chapter_input.chapter_number} generated successfully!")
-        logger.info(f"ðŸ“Š Generation time: {generation_result['metrics']['generation_time']:.2f}s")
-        logger.info(f"ðŸ§¬ DNA components used: {generation_result['metrics']['context_components_used']['dna_components']}")
-        logger.info(f"ðŸ“ Summary components used: {generation_result['metrics']['context_components_used']['summary_components']}")
-        logger.info(f"ðŸŽ¯ Continuity score: {generation_result['metrics']['continuity_score']:.2f}")
+        logger.info(f"✅ ENHANCED Chapter {chapter_input.chapter_number} generated successfully!")
+        logger.info(f"📊 Generation time: {generation_result['metrics']['generation_time']:.2f}s")
+        logger.info(f"🧬 DNA components used: {generation_result['metrics']['context_components_used']['dna_components']}")
+        logger.info(f"📝 Summary components used: {generation_result['metrics']['context_components_used']['summary_components']}")
+        logger.info(f"🎯 Continuity score: {generation_result['metrics']['continuity_score']:.2f}")
         
         return {
             "chapter": generation_result["content"],
@@ -2525,12 +2525,10 @@ async def generate_next_chapter_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Error in ENHANCED chapter generation: {str(e)}")
+        logger.error(f"❌ Error in ENHANCED chapter generation: {str(e)}")
         import traceback
-        logger.error(f"âŒ Traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to generate enhanced chapter: {str(e)}")
-
-
 
 @app.post("/generate_and_save_chapter")
 async def generate_and_save_chapter_endpoint(
@@ -2538,119 +2536,198 @@ async def generate_and_save_chapter_endpoint(
     background_tasks: BackgroundTasks,
     user = Depends(get_authenticated_user)
 ):
-    '''
-    ENHANCED: Generate and save chapter with DNA, summaries, and vector embeddings.
-    Now uses the optimized service for complete feature support.
-    '''
+    """
+    Generate the next chapter AND save it to database with complete token tracking.
+    This endpoint combines chapter generation and saving in one step.
+    """
     try:
-        logger.info(f' ENHANCED GENERATE & SAVE: Starting Chapter {chapter_input.chapter_number} for story {chapter_input.story_id}...')
+        logger.info(f"🚀 GENERATE & SAVE: Starting Chapter {chapter_input.chapter_number} for story {chapter_input.story_id}...")
         
-        # Verify story belongs to user
-        story_response = supabase.table('Stories').select('*').eq('id', chapter_input.story_id).eq('user_id', user.id).execute()
+        # Verify story belongs to user - use capitalized table name
+        story_response = supabase.table("Stories").select("*").eq("id", chapter_input.story_id).eq("user_id", user.id).execute()
         if not story_response.data:
-            raise HTTPException(status_code=404, detail='Story not found or access denied')
+            raise HTTPException(status_code=404, detail="Story not found or access denied")
         
         story = story_response.data[0]
-        story_title = story.get('story_title', 'Untitled Story')
-        story_outline = story.get('story_outline', chapter_input.story_outline)
+        story_title = story.get("story_title", "Untitled Story")
         
-        # STEP 1: Generate chapter using enhanced generator
-        from services.enhanced_chapter_generator import enhanced_chapter_generator
+        # Get previous ACTIVE chapters and their summaries for context (exclude current chapter versions)
+        max_context_chapter = chapter_input.chapter_number - 1
+        previous_Chapters_response = supabase.table("Chapters").select("content, summary").eq("story_id", chapter_input.story_id).eq("is_active", True).lte("chapter_number", max_context_chapter).order("chapter_number").execute()
         
-        # Get previous chapters for context (with DNA and summaries)
-        previous_chapters_response = supabase.table('Chapters').select(
-            'content, summary, dna, chapter_number, title'
-        ).eq('story_id', chapter_input.story_id).eq('is_active', True).lt(
-            'chapter_number', chapter_input.chapter_number
-        ).order('chapter_number').execute()
+        previous_summaries = []
+        if previous_Chapters_response.data:
+            for prev_chapter in previous_Chapters_response.data:
+                if prev_chapter.get("summary"):
+                    previous_summaries.append(prev_chapter["summary"])
+                else:
+                    # If no summary exists, create a quick one from content
+                    prev_content = prev_chapter.get("content", "")[:500] + "..."
+                    previous_summaries.append(f"Previous chapter: {prev_content}")
         
-        previous_chapters = previous_chapters_response.data if previous_chapters_response.data else []
+        logger.info(f"📚 Using {len(previous_summaries)} previous chapter summaries for context")
         
-        logger.info(f' Using {len(previous_chapters)} previous chapters for enhanced generation')
+        # STEP 1: Generate the chapter with token tracking
+        from lc_next_chapter_generator import NextChapterGenerator
+        next_generator = NextChapterGenerator()
         
-        # Generate chapter with enhanced context (DNA + summaries + vectors)
-        generation_result = await enhanced_chapter_generator.generate_next_chapter_enhanced(
-            story_id=chapter_input.story_id,
+        generation_result = next_generator.generate_next_chapter(
             story_title=story_title,
-            story_outline=story_outline,
-            current_chapter_number=chapter_input.chapter_number,
-            user_choice='',  # No specific user choice for initial generation
-            previous_chapters=previous_chapters,
-            choice_options=[]
+            story_outline=chapter_input.story_outline,
+            previous_chapter_summaries=previous_summaries,
+            chapter_number=chapter_input.chapter_number
         )
         
-        logger.info(f' STEP 1 COMPLETE: Enhanced chapter generated!')
-        logger.info(f' Content: {len(generation_result["content"])} chars')
-        logger.info(f' DNA: {"generated" if generation_result.get("dna") else "none"}')
-        logger.info(f' Summary: {"generated" if generation_result.get("summary") else "none"}')
+        if not generation_result["success"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Chapter generation failed: {generation_result['token_metrics'].get('error', 'Unknown error')}"
+            )
         
-        # STEP 2: Save using optimized service (DNA + summaries + vectors)
-        from services.fixed_optimized_chapter_service import fixed_optimized_chapter_service
+        chapter_content = generation_result["chapter_content"]
+        token_metrics = generation_result["token_metrics"]
         
-        # Prepare chapter data for optimized save
-        chapter_dict = {
-            'story_id': chapter_input.story_id,
-            'chapter_number': chapter_input.chapter_number,
-            'content': generation_result['content'],
-            'title': generation_result.get('title', f'Chapter {chapter_input.chapter_number}'),
-            'choices': generation_result.get('choices', []),
-            'user_choice': ''
+        logger.info(f"✅ STEP 1 COMPLETE: Chapter {chapter_input.chapter_number} generated successfully!")
+        logger.info(f"📊 Generated content: {len(chapter_content)} characters, {len(chapter_content.split())} words")
+        logger.info(f"📊 Token usage: {token_metrics['token_count_total']} total tokens")
+        
+        # STEP 2: Generate summary for the chapter
+        from chapter_summary import generate_chapter_summary
+        
+        # Build story context for summary
+        story_context = f"STORY: {story_title}\nOUTLINE:\n{chapter_input.story_outline}"
+        if previous_summaries:
+            story_context += f"\n\nPREVIOUS CHAPTERS:\n" + '\n'.join(previous_summaries)
+        
+        logger.info(f"🤖 STEP 2: Generating summary for Chapter {chapter_input.chapter_number}...")
+        
+        summary_result = generate_chapter_summary(
+            chapter_content=chapter_content,
+            chapter_number=chapter_input.chapter_number,
+            story_context=story_context,
+            story_title=story_title
+        )
+        
+        summary_text = ""
+        summary_tokens = {}
+        if summary_result["success"]:
+            summary_text = summary_result["summary"]
+            summary_tokens = summary_result.get("usage_metrics", {})
+            logger.info(f"✅ STEP 2 COMPLETE: Summary generated ({len(summary_text)} chars)")
+        else:
+            logger.warning(f"⚠️ STEP 2 WARNING: Summary generation failed: {summary_result['error']}")
+            summary_text = f"Summary generation failed: {summary_result['error']}"
+        
+        # STEP 3: Save chapter with complete token tracking
+        word_count = len(chapter_content.split())
+        
+        # Combine token metrics from both generation and summarization
+        total_prompt_tokens = token_metrics["token_count_prompt"] + summary_tokens.get("estimated_input_tokens", 0)
+        total_completion_tokens = token_metrics["token_count_completion"] + summary_tokens.get("estimated_output_tokens", 0)
+        total_all_tokens = total_prompt_tokens + total_completion_tokens
+        
+        # Get the next version number for this chapter
+        next_version_number = await get_next_chapter_version_number(chapter_input.story_id, chapter_input.chapter_number)
+        
+        # Deactivate previous versions of this chapter
+        await deactivate_previous_chapter_versions(chapter_input.story_id, chapter_input.chapter_number)
+        
+        # Use only fields that exist in basic schema 
+        chapter_insert_data = {
+            "story_id": chapter_input.story_id,
+            "chapter_number": chapter_input.chapter_number,
+            "title": f"Chapter {chapter_input.chapter_number}",  # Auto-generated title
+            "content": chapter_content,
+            "summary": summary_text,
+            "version_number": next_version_number,  # Add proper versioning
+            "is_active": True,  # Mark this version as active
+            # Note: Removed token tracking fields since they don't exist in basic schema
         }
         
-        # Save with full optimization (DNA + summaries + vectors)
-        save_result = await fixed_optimized_chapter_service.save_chapter_optimized(
-            chapter_data=chapter_dict,
-            user_id=user.id,
-            supabase_client=supabase
-        )
+        logger.info(f"💾 STEP 3: Saving chapter with complete metrics...")
+        logger.info(f"📊 Total tokens: prompt={total_prompt_tokens}, completion={total_completion_tokens}, total={total_all_tokens}")
         
-        logger.info(f' STEP 2 COMPLETE: Chapter saved with optimization!')
-        logger.info(f' Total save time: {save_result.save_time:.2f}s')
-        logger.info(f' Vector chunks: {save_result.vector_chunks}')
-        
-        # STEP 3: Update story current chapter
         try:
-            supabase.table('Stories').update({
-                'current_chapter': chapter_input.chapter_number
-            }).eq('id', chapter_input.story_id).execute()
-            logger.info(f' Updated story current_chapter to {chapter_input.chapter_number}')
-        except Exception as update_error:
-            logger.warning(f' Could not update story current_chapter: {update_error}')
-        
-        return {
-            'success': True,
-            'message': f'Chapter {chapter_input.chapter_number} generated and saved with full optimization!',
-            'chapter_id': save_result.chapter_id,
-            'story_id': chapter_input.story_id,
-            'chapter_number': chapter_input.chapter_number,
-            'chapter_content': generation_result['content'],
-            'title': generation_result.get('title'),
-            'summary': save_result.summary,
-            'choices': save_result.choices,
-            'enhanced_features': {
-                'dna_extracted': bool(generation_result.get('dna')),
-                'summary_generated': bool(save_result.summary),
-                'vector_chunks_created': save_result.vector_chunks,
-                'async_pipeline': True,
-                'background_processing': True
-            },
-            'performance_metrics': {
-                'generation_time': generation_result['metrics']['generation_time'],
-                'save_time': save_result.save_time,
-                'total_time': generation_result['metrics']['generation_time'] + save_result.save_time,
-                **save_result.performance_metrics
+            chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
+            
+            if not chapter_response.data:
+                raise HTTPException(status_code=500, detail="Failed to save chapter")
+            
+            chapter_id = chapter_response.data[0]["id"]
+            
+            logger.info(f"✅ STEP 3 COMPLETE: Chapter saved with ID: {chapter_id}")
+            
+            # Update story's current_chapter count if field exists
+            try:
+                supabase.table("Stories").update({
+                    "current_chapter": chapter_input.chapter_number
+                }).eq("id", chapter_input.story_id).execute()
+                logger.info(f"✅ Updated story current_chapter to {chapter_input.chapter_number}")
+            except Exception as update_error:
+                logger.warning(f"⚠️ Could not update story current_chapter: {update_error}")
+            
+            # Generate embeddings for the updated story (including new chapter)
+            logger.info(f"🔍 Triggering embedding generation for story {chapter_input.story_id}...")
+            from services.embedding_service import embedding_service
+            
+            try:
+                background_tasks.add_task(
+                    embedding_service.create_embeddings_async,
+                    chapter_input.story_id,
+                    True  # Force recreate to include the new chapter
+                )
+                logger.info(f"✅ Embedding generation scheduled in background")
+            except Exception as embedding_error:
+                logger.warning(f"⚠️ Could not schedule embedding generation: {embedding_error}")
+            
+            logger.info(f"🎉 SUCCESS: Generate & Save completed for Chapter {chapter_input.chapter_number}!")
+            
+            return {
+                "success": True,
+                "message": "Chapter generated and saved successfully!",
+                "chapter_id": chapter_id,
+                "chapter_number": chapter_input.chapter_number,
+                "story_id": chapter_input.story_id,
+                "chapter_content": chapter_content,
+                "summary": summary_text,
+                "metadata": {
+                    "word_count": word_count,
+                    "character_count": len(chapter_content),
+                    "generation_success": True,
+                    "summary_success": summary_result["success"]
+                },
+                "token_metrics": {
+                    "generation": {
+                        "prompt_tokens": token_metrics["token_count_prompt"],
+                        "completion_tokens": token_metrics["token_count_completion"],
+                        "total_tokens": token_metrics["token_count_total"],
+                        "temperature": token_metrics["temperature_used"],
+                        "model": token_metrics["model_used"]
+                    },
+                    "summarization": {
+                        "prompt_tokens": summary_tokens.get("estimated_input_tokens", 0),
+                        "completion_tokens": summary_tokens.get("estimated_output_tokens", 0),
+                        "total_tokens": summary_tokens.get("estimated_total_tokens", 0),
+                        "temperature": summary_tokens.get("temperature_used", 0.3),
+                        "model": summary_tokens.get("model_used", "gpt-4o-mini")
+                    },
+                    "combined": {
+                        "total_prompt_tokens": total_prompt_tokens,
+                        "total_completion_tokens": total_completion_tokens,
+                        "total_all_tokens": total_all_tokens
+                    }
+                }
             }
-        }
+            
+        except Exception as db_error:
+            logger.error(f"❌ DATABASE ERROR: {str(db_error)}")
+            raise HTTPException(status_code=500, detail=f"Failed to save chapter: {str(db_error)}")
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f' Error in enhanced generate & save: {str(e)}')
-        import traceback
-        logger.error(f' Traceback: {traceback.format_exc()}')
-        raise HTTPException(status_code=500, detail=f'Failed to generate and save chapter: {str(e)}')
-
-
+        logger.error(f"❌ FATAL ERROR in generate & save: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate and save chapter: {str(e)}")
 
 @app.get("/debug/story/{story_id}/Chapters")
 async def debug_story_Chapters(
@@ -2664,11 +2741,11 @@ async def debug_story_Chapters(
         story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
         
         if not story_response.data:
-            logger.error(f"âŒ DEBUG - Story {story_id} not found for user {user.id}")
+            logger.error(f"❌ DEBUG - Story {story_id} not found for user {user.id}")
             raise HTTPException(status_code=404, detail="Story not found or access denied")
         
         story_data = story_response.data[0]
-        logger.info(f"âœ… DEBUG - Found story: {story_data.get('story_title', 'Untitled')}")
+        logger.info(f"✅ DEBUG - Found story: {story_data.get('story_title', 'Untitled')}")
         
         # Get Chapters from database
         Chapters_response = supabase.table("Chapters").select("*").eq("story_id", story_id).order("chapter_number").execute()
@@ -2686,7 +2763,7 @@ async def debug_story_Chapters(
                     "has_summary": bool(chapter.get("summary"))
                 })
         
-        logger.info(f"ðŸ“Š DEBUG - Found {len(Chapters_info)} Chapters for story {story_id}")
+        logger.info(f"📊 DEBUG - Found {len(Chapters_info)} Chapters for story {story_id}")
         
         return {
             "success": True,
@@ -2701,7 +2778,7 @@ async def debug_story_Chapters(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ DEBUG - Failed to get Chapters for story {story_id}: {e}")
+        logger.error(f"❌ DEBUG - Failed to get Chapters for story {story_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Debug query failed: {str(e)}")
 
 # Add this after the existing endpoint definitions, before the test endpoints section
@@ -2729,8 +2806,8 @@ async def branch_from_choice_endpoint(
     This will generate new chapters from that point onward while preserving the original path.
     """
     try:
-        logger.info(f"ðŸŒ¿ BRANCH: User wants to branch from chapter {request.chapter_number}, choice {request.choice_id}")
-        logger.info(f"ðŸ“Š BRANCH: story_id={request.story_id}")
+        logger.info(f"🌿 BRANCH: User wants to branch from chapter {request.chapter_number}, choice {request.choice_id}")
+        logger.info(f"📊 BRANCH: story_id={request.story_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", request.story_id).eq("user_id", user.id).execute()
@@ -2738,7 +2815,7 @@ async def branch_from_choice_endpoint(
             raise HTTPException(status_code=404, detail="Story not found or access denied")
         
         story = story_response.data[0]
-        logger.info(f"âœ… BRANCH: Story verified: {story.get('story_title', 'Untitled')}")
+        logger.info(f"✅ BRANCH: Story verified: {story.get('story_title', 'Untitled')}")
         
         # Get the main branch ID for this story
         main_branch_id = await get_main_branch_id(request.story_id)
@@ -2760,15 +2837,15 @@ async def branch_from_choice_endpoint(
         if not selected_choice:
             raise HTTPException(status_code=400, detail="Invalid choice selected for branching")
         
-        logger.info(f"ðŸŽ¯ BRANCH: Selected choice found: {selected_choice.get('title', 'No title')}")
+        logger.info(f"🎯 BRANCH: Selected choice found: {selected_choice.get('title', 'No title')}")
         
         # Clear the "is_selected" flag from all choices in this chapter (reset previous selection)
-        logger.info(f"ðŸ”„ BRANCH: Resetting previous choice selections for chapter {request.chapter_number}")
+        logger.info(f"🔄 BRANCH: Resetting previous choice selections for chapter {request.chapter_number}")
         supabase.table("story_choices").update({"is_selected": False, "selected_at": None}).eq("story_id", request.story_id).eq("branch_id", main_branch_id).eq("chapter_number", request.chapter_number).execute()
         
         # Mark the new choice as selected
         from datetime import datetime
-        logger.info(f"âœ… BRANCH: Marking new choice as selected")
+        logger.info(f"✅ BRANCH: Marking new choice as selected")
         supabase.table("story_choices").update({
             "is_selected": True,
             "selected_at": datetime.utcnow().isoformat()
@@ -2782,11 +2859,11 @@ async def branch_from_choice_endpoint(
         chapters_response = supabase.table("Chapters").select("*").eq("story_id", request.story_id).eq("branch_id", main_branch_id).lte("chapter_number", request.chapter_number).order("chapter_number").execute()
         
         previous_chapters = chapters_response.data
-        logger.info(f"ðŸ“š BRANCH: Using {len(previous_chapters)} previous chapters for context")
+        logger.info(f"📚 BRANCH: Using {len(previous_chapters)} previous chapters for context")
         
         # Generate the next chapter based on the new choice
         next_chapter_number = request.chapter_number + 1
-        logger.info(f"ðŸ“ BRANCH: Generating chapter {next_chapter_number} based on new choice")
+        logger.info(f"📝 BRANCH: Generating chapter {next_chapter_number} based on new choice")
         
         # Use the story service to generate the next chapter
         try:
@@ -2797,11 +2874,11 @@ async def branch_from_choice_endpoint(
                 next_chapter_number=next_chapter_number,
                 user_id=user.id
             )
-            logger.info(f"âœ… BRANCH: Chapter {next_chapter_number} generated successfully")
+            logger.info(f"✅ BRANCH: Chapter {next_chapter_number} generated successfully")
             chapter_content_length = len(next_chapter_result.get("chapter_content", "")) if next_chapter_result.get("chapter_content") else 0
             
         except Exception as generation_error:
-            logger.error(f"âŒ BRANCH: Chapter generation failed: {str(generation_error)}")
+            logger.error(f"❌ BRANCH: Chapter generation failed: {str(generation_error)}")
             raise HTTPException(status_code=500, detail=f"Failed to generate branched chapter: {str(generation_error)}")
         
         # Get the next version number for this chapter (with branch support)
@@ -2811,7 +2888,7 @@ async def branch_from_choice_endpoint(
         await deactivate_previous_chapter_versions(request.story_id, next_chapter_number, main_branch_id)
         
         # Always insert new chapter version (don't update existing ones)
-        logger.info(f"ðŸ’¾ BRANCH: Inserting new chapter version {next_version_number} for chapter {next_chapter_number}")
+        logger.info(f"💾 BRANCH: Inserting new chapter version {next_version_number} for chapter {next_chapter_number}")
         chapter_content = next_chapter_result.get("chapter_content") or next_chapter_result.get("content", "")
         chapter_insert_data = {
                 "story_id": request.story_id,
@@ -2828,7 +2905,7 @@ async def branch_from_choice_endpoint(
         
         # Generate and save chapter summary
         chapter_text = next_chapter_result.get("chapter_content") or next_chapter_result.get("content", "")
-        logger.info(f"ðŸ” BRANCH SUMMARY: Starting summary generation for chapter {next_chapter_number}")
+        logger.info(f"🔍 BRANCH SUMMARY: Starting summary generation for chapter {next_chapter_number}")
         
         try:
             from chapter_summary import generate_chapter_summary
@@ -2843,16 +2920,16 @@ async def branch_from_choice_endpoint(
             
             if summary_result["success"]:
                 summary_text = summary_result["summary"]
-                logger.info(f"ðŸ” BRANCH SUMMARY: Updating database with summary for chapter ID {chapter_id}")
+                logger.info(f"🔍 BRANCH SUMMARY: Updating database with summary for chapter ID {chapter_id}")
                 supabase.table("Chapters").update({"summary": summary_text}).eq("id", chapter_id).execute()
-                logger.info(f"âœ… BRANCH SUMMARY: Chapter {next_chapter_number} summary saved")
+                logger.info(f"✅ BRANCH SUMMARY: Chapter {next_chapter_number} summary saved")
             else:
-                logger.error(f"âŒ BRANCH SUMMARY: Failed to generate summary for chapter {next_chapter_number}")
+                logger.error(f"❌ BRANCH SUMMARY: Failed to generate summary for chapter {next_chapter_number}")
         except Exception as summary_error:
-            logger.error(f"âŒ BRANCH SUMMARY: Exception during summary generation: {str(summary_error)}")
+            logger.error(f"❌ BRANCH SUMMARY: Exception during summary generation: {str(summary_error)}")
         
         # Remove any choices for chapters beyond this point (they're now invalid due to branching)
-        logger.info(f"ðŸ§¹ BRANCH: Cleaning up choices for chapters > {next_chapter_number}")
+        logger.info(f"🧹 BRANCH: Cleaning up choices for chapters > {next_chapter_number}")
         supabase.table("story_choices").delete().eq("story_id", request.story_id).eq("branch_id", main_branch_id).gt("chapter_number", next_chapter_number).execute()
         
         # Save new choices for the generated chapter
@@ -2886,15 +2963,15 @@ async def branch_from_choice_endpoint(
             }
         }
         
-        logger.info(f"ðŸŒ¿ BRANCH: Successfully completed branching operation")
+        logger.info(f"🌿 BRANCH: Successfully completed branching operation")
         return response_payload
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ BRANCH: Unexpected error: {str(e)}")
+        logger.error(f"❌ BRANCH: Unexpected error: {str(e)}")
         import traceback
-        logger.error(f"âŒ BRANCH: Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ BRANCH: Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/branch_preview")
@@ -2907,7 +2984,7 @@ async def branch_preview_endpoint(
     This endpoint does NOT save anything to the database - it only returns what the chapter would look like.
     """
     try:
-        logger.info(f"ðŸ‘€ BRANCH-PREVIEW: User {user.id} requesting preview for story {request.story_id}, chapter {request.chapter_number}, choice {request.choice_id}")
+        logger.info(f"👀 BRANCH-PREVIEW: User {user.id} requesting preview for story {request.story_id}, chapter {request.chapter_number}, choice {request.choice_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", request.story_id).eq("user_id", user.id).execute()
@@ -2915,27 +2992,27 @@ async def branch_preview_endpoint(
             raise HTTPException(status_code=404, detail="Story not found or access denied")
         
         story = story_response.data[0]
-        logger.info(f"âœ… BRANCH-PREVIEW: Story verified: {story.get('story_title', 'Untitled')}")
+        logger.info(f"✅ BRANCH-PREVIEW: Story verified: {story.get('story_title', 'Untitled')}")
         
         # Get the main branch ID for this story
         main_branch_id = await get_main_branch_id(request.story_id)
         
         # Get all choices for the specified chapter to validate the choice exists
-        logger.info(f"ðŸ” BRANCH-PREVIEW: Looking for choices with story_id={request.story_id}, branch_id={main_branch_id}, user_id={user.id}, chapter_number={request.chapter_number}")
+        logger.info(f"🔍 BRANCH-PREVIEW: Looking for choices with story_id={request.story_id}, branch_id={main_branch_id}, user_id={user.id}, chapter_number={request.chapter_number}")
         choices_response = supabase.table("story_choices").select("*").eq("story_id", request.story_id).eq("branch_id", main_branch_id).eq("user_id", user.id).eq("chapter_number", request.chapter_number).execute()
         
         available_choices = choices_response.data
-        logger.info(f"ðŸ“Š BRANCH-PREVIEW: Found {len(available_choices)} choices for chapter {request.chapter_number}")
+        logger.info(f"📊 BRANCH-PREVIEW: Found {len(available_choices)} choices for chapter {request.chapter_number}")
         
         if not available_choices:
             # Let's try without branch_id to see if choices exist but with wrong branch
-            logger.info(f"ðŸ” BRANCH-PREVIEW: No choices found with branch_id, trying without branch_id...")
+            logger.info(f"🔍 BRANCH-PREVIEW: No choices found with branch_id, trying without branch_id...")
             fallback_choices_response = supabase.table("story_choices").select("*").eq("story_id", request.story_id).eq("user_id", user.id).eq("chapter_number", request.chapter_number).execute()
             fallback_choices = fallback_choices_response.data
-            logger.info(f"ðŸ“Š BRANCH-PREVIEW: Found {len(fallback_choices)} choices without branch_id filter")
+            logger.info(f"📊 BRANCH-PREVIEW: Found {len(fallback_choices)} choices without branch_id filter")
             
             if fallback_choices:
-                logger.info(f"ðŸ”„ BRANCH-PREVIEW: Updating {len(fallback_choices)} choices to use main branch {main_branch_id}")
+                logger.info(f"🔄 BRANCH-PREVIEW: Updating {len(fallback_choices)} choices to use main branch {main_branch_id}")
                 # Update the choices to use the correct branch_id
                 for choice in fallback_choices:
                     supabase.table("story_choices").update({"branch_id": main_branch_id}).eq("id", choice["id"]).execute()
@@ -2943,7 +3020,7 @@ async def branch_preview_endpoint(
                 # Now try again with the updated choices
                 choices_response = supabase.table("story_choices").select("*").eq("story_id", request.story_id).eq("branch_id", main_branch_id).eq("user_id", user.id).eq("chapter_number", request.chapter_number).execute()
                 available_choices = choices_response.data
-                logger.info(f"âœ… BRANCH-PREVIEW: After update, found {len(available_choices)} choices")
+                logger.info(f"✅ BRANCH-PREVIEW: After update, found {len(available_choices)} choices")
             
             if not available_choices:
                 raise HTTPException(status_code=404, detail=f"No choices found for chapter {request.chapter_number}")
@@ -2958,25 +3035,25 @@ async def branch_preview_endpoint(
         if not selected_choice:
             raise HTTPException(status_code=400, detail="Invalid choice selected for preview")
         
-        logger.info(f"ðŸŽ¯ BRANCH-PREVIEW: Selected choice found: {selected_choice.get('title', 'No title')}")
+        logger.info(f"🎯 BRANCH-PREVIEW: Selected choice found: {selected_choice.get('title', 'No title')}")
         
         # Get all chapters up to (but not including) the next chapter for context
         chapters_response = supabase.table("Chapters").select("*").eq("story_id", request.story_id).eq("branch_id", main_branch_id).lte("chapter_number", request.chapter_number).order("chapter_number").execute()
         
         previous_chapters = chapters_response.data
-        logger.info(f"ðŸ“š BRANCH-PREVIEW: Using {len(previous_chapters)} previous chapters for context")
+        logger.info(f"📚 BRANCH-PREVIEW: Using {len(previous_chapters)} previous chapters for context")
         
         # Generate the next chapter based on the choice (WITHOUT saving to database)
         next_chapter_number = request.chapter_number + 1
-        logger.info(f"ðŸ“ BRANCH-PREVIEW: Generating preview for chapter {next_chapter_number} based on choice")
+        logger.info(f"📝 BRANCH-PREVIEW: Generating preview for chapter {next_chapter_number} based on choice")
         
         # Use the story service to generate the next chapter
         try:
-            logger.info(f"ðŸ“ BRANCH-PREVIEW: Calling story_service.generate_next_chapter...")
-            logger.info(f"ðŸ“ BRANCH-PREVIEW: story_title='{story.get('story_title', 'Unknown')}'")
-            logger.info(f"ðŸ“ BRANCH-PREVIEW: previous_chapters_count={len(previous_chapters)}")
-            logger.info(f"ðŸ“ BRANCH-PREVIEW: selected_choice_title='{selected_choice.get('title', 'Unknown')}'")
-            logger.info(f"ðŸ“ BRANCH-PREVIEW: next_chapter_number={next_chapter_number}")
+            logger.info(f"📝 BRANCH-PREVIEW: Calling story_service.generate_next_chapter...")
+            logger.info(f"📝 BRANCH-PREVIEW: story_title='{story.get('story_title', 'Unknown')}'")
+            logger.info(f"📝 BRANCH-PREVIEW: previous_chapters_count={len(previous_chapters)}")
+            logger.info(f"📝 BRANCH-PREVIEW: selected_choice_title='{selected_choice.get('title', 'Unknown')}'")
+            logger.info(f"📝 BRANCH-PREVIEW: next_chapter_number={next_chapter_number}")
             
             next_chapter_result = await story_service.generate_next_chapter_with_dna(
                 story=story,
@@ -2985,19 +3062,19 @@ async def branch_preview_endpoint(
                 next_chapter_number=next_chapter_number,
                 user_id=user.id
             )
-            logger.info(f"âœ… BRANCH-PREVIEW: Chapter {next_chapter_number} preview generated successfully")
-            logger.info(f"ðŸ“Š BRANCH-PREVIEW: Result keys: {list(next_chapter_result.keys()) if next_chapter_result else 'None'}")
+            logger.info(f"✅ BRANCH-PREVIEW: Chapter {next_chapter_number} preview generated successfully")
+            logger.info(f"📊 BRANCH-PREVIEW: Result keys: {list(next_chapter_result.keys()) if next_chapter_result else 'None'}")
             
             chapter_content = next_chapter_result.get("chapter_content") or next_chapter_result.get("content", "")
             
         except Exception as generation_error:
-            logger.error(f"âŒ BRANCH-PREVIEW: Chapter generation failed: {str(generation_error)}")
+            logger.error(f"❌ BRANCH-PREVIEW: Chapter generation failed: {str(generation_error)}")
             import traceback
-            logger.error(f"âŒ BRANCH-PREVIEW: Full traceback: {traceback.format_exc()}")
+            logger.error(f"❌ BRANCH-PREVIEW: Full traceback: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to generate preview chapter: {str(generation_error)}")
         
         # Generate summary for the preview chapter
-        logger.info(f"ðŸ¤– BRANCH-PREVIEW: Generating summary for preview chapter {next_chapter_number}...")
+        logger.info(f"🤖 BRANCH-PREVIEW: Generating summary for preview chapter {next_chapter_number}...")
         
         try:
             from chapter_summary import generate_chapter_summary
@@ -3029,13 +3106,13 @@ async def branch_preview_endpoint(
             chapter_summary = ""
             if summary_result["success"]:
                 chapter_summary = summary_result["summary"]
-                logger.info(f"âœ… BRANCH-PREVIEW: Summary generated successfully ({len(chapter_summary)} chars)")
+                logger.info(f"✅ BRANCH-PREVIEW: Summary generated successfully ({len(chapter_summary)} chars)")
             else:
-                logger.warning(f"âš ï¸ BRANCH-PREVIEW: Summary generation failed: {summary_result['error']}")
+                logger.warning(f"⚠️ BRANCH-PREVIEW: Summary generation failed: {summary_result['error']}")
                 chapter_summary = f"Summary generation failed: {summary_result['error']}"
                 
         except Exception as summary_error:
-            logger.error(f"âŒ BRANCH-PREVIEW: Summary generation error: {str(summary_error)}")
+            logger.error(f"❌ BRANCH-PREVIEW: Summary generation error: {str(summary_error)}")
             chapter_summary = f"Summary generation error: {str(summary_error)}"
         
         # Return the preview with summary (without saving anything to database)
@@ -3050,15 +3127,15 @@ async def branch_preview_endpoint(
             "message": f"Preview generated for chapter {next_chapter_number} based on choice: {selected_choice.get('title', 'Unknown')}"
         }
         
-        logger.info(f"ðŸ‘€ BRANCH-PREVIEW: Successfully generated preview for chapter {next_chapter_number}")
+        logger.info(f"👀 BRANCH-PREVIEW: Successfully generated preview for chapter {next_chapter_number}")
         return response_payload
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ BRANCH-PREVIEW: Unexpected error: {str(e)}")
+        logger.error(f"❌ BRANCH-PREVIEW: Unexpected error: {str(e)}")
         import traceback
-        logger.error(f"âŒ BRANCH-PREVIEW: Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ BRANCH-PREVIEW: Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # New branching endpoints
@@ -3072,7 +3149,7 @@ async def create_branch_endpoint(
     This preserves all existing branches and creates a new parallel storyline.
     """
     try:
-        logger.info(f"ðŸŒ¿ CREATE-BRANCH: Creating new branch from chapter {request.chapter_number}, choice {request.choice_id}")
+        logger.info(f"🌿 CREATE-BRANCH: Creating new branch from chapter {request.chapter_number}, choice {request.choice_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", request.story_id).eq("user_id", user.id).execute()
@@ -3080,7 +3157,7 @@ async def create_branch_endpoint(
             raise HTTPException(status_code=404, detail="Story not found or access denied")
         
         story = story_response.data[0]
-        logger.info(f"âœ… CREATE-BRANCH: Story verified: {story.get('story_title', 'Untitled')}")
+        logger.info(f"✅ CREATE-BRANCH: Story verified: {story.get('story_title', 'Untitled')}")
         
         # Get the main branch ID
         main_branch_id = await get_main_branch_id(request.story_id)
@@ -3102,7 +3179,7 @@ async def create_branch_endpoint(
         if not selected_choice:
             raise HTTPException(status_code=400, detail="Invalid choice selected for branching")
         
-        logger.info(f"ðŸŽ¯ CREATE-BRANCH: Selected choice found: {selected_choice.get('title', 'No title')}")
+        logger.info(f"🎯 CREATE-BRANCH: Selected choice found: {selected_choice.get('title', 'No title')}")
         
         # Create new branch
         new_branch_id = await create_new_branch(
@@ -3112,7 +3189,7 @@ async def create_branch_endpoint(
             branch_name=f"branch_from_ch{request.chapter_number}_{selected_choice.get('title', 'choice')[:20]}"
         )
         
-        logger.info(f"âœ… CREATE-BRANCH: New branch created: {new_branch_id}")
+        logger.info(f"✅ CREATE-BRANCH: New branch created: {new_branch_id}")
         
         # Copy chapters and choices up to the branch point
         await copy_chapters_to_branch(
@@ -3131,7 +3208,7 @@ async def create_branch_endpoint(
         
         # Generate the next chapter for the new branch
         next_chapter_number = request.chapter_number + 1
-        logger.info(f"ðŸ“ CREATE-BRANCH: Generating chapter {next_chapter_number} for new branch")
+        logger.info(f"📝 CREATE-BRANCH: Generating chapter {next_chapter_number} for new branch")
         
         # Get chapters from the new branch for context
         chapters_response = supabase.table("Chapters").select("*").eq("story_id", request.story_id).eq("branch_id", new_branch_id).lte("chapter_number", request.chapter_number).order("chapter_number").execute()
@@ -3198,9 +3275,9 @@ async def create_branch_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ CREATE-BRANCH: Unexpected error: {str(e)}")
+        logger.error(f"❌ CREATE-BRANCH: Unexpected error: {str(e)}")
         import traceback
-        logger.error(f"âŒ CREATE-BRANCH: Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ CREATE-BRANCH: Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/story/{story_id}/branches")
@@ -3210,7 +3287,7 @@ async def get_story_branches_endpoint(
 ):
     """Get all branches for a story to display in the branch visualization."""
     try:
-        logger.info(f"ðŸ“Š Getting branches for story {story_id}")
+        logger.info(f"📊 Getting branches for story {story_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
@@ -3245,7 +3322,7 @@ async def get_story_branches_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Get branches failed: {e}")
+        logger.error(f"❌ Get branches failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get branches: {str(e)}")
 
 @app.get("/story/{story_id}/branch/{branch_id}/chapters")
@@ -3256,7 +3333,7 @@ async def get_branch_chapters_endpoint(
 ):
     """Get all chapters for a specific branch."""
     try:
-        logger.info(f"ðŸ“š Getting chapters for story {story_id}, branch {branch_id}")
+        logger.info(f"📚 Getting chapters for story {story_id}, branch {branch_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
@@ -3289,7 +3366,7 @@ async def get_branch_chapters_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Get branch chapters failed: {e}")
+        logger.error(f"❌ Get branch chapters failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get branch chapters: {str(e)}")
 
 # Chapter versioning helper functions
@@ -3299,7 +3376,7 @@ async def get_next_chapter_version_number(story_id: int, chapter_number: int, br
     and incrementing it by 1. If no versions exist, returns 1.
     """
     try:
-        logger.info(f"ðŸ” Getting next version number for story {story_id}, chapter {chapter_number}")
+        logger.info(f"🔍 Getting next version number for story {story_id}, chapter {chapter_number}")
         
         # Build query to find highest version number
         query = supabase.table("Chapters").select("version_number").eq("story_id", story_id).eq("chapter_number", chapter_number)
@@ -3314,15 +3391,15 @@ async def get_next_chapter_version_number(story_id: int, chapter_number: int, br
         if existing_versions.data and len(existing_versions.data) > 0:
             max_version = existing_versions.data[0]["version_number"] or 0
             next_version = max_version + 1
-            logger.info(f"âœ… Found existing version {max_version}, next version will be {next_version}")
+            logger.info(f"✅ Found existing version {max_version}, next version will be {next_version}")
         else:
             next_version = 1
-            logger.info(f"âœ… No existing versions found, starting with version 1")
+            logger.info(f"✅ No existing versions found, starting with version 1")
         
         return next_version
         
     except Exception as e:
-        logger.error(f"âŒ Error getting next version number: {str(e)}")
+        logger.error(f"❌ Error getting next version number: {str(e)}")
         # Default to 1 if there's an error
         return 1
 
@@ -3331,7 +3408,7 @@ async def deactivate_previous_chapter_versions(story_id: int, chapter_number: in
     Mark all previous versions of a chapter as inactive.
     """
     try:
-        logger.info(f"ðŸ”„ Deactivating previous versions for story {story_id}, chapter {chapter_number}")
+        logger.info(f"🔄 Deactivating previous versions for story {story_id}, chapter {chapter_number}")
         
         # Build query to find all active versions
         query = supabase.table("Chapters").update({"is_active": False}).eq("story_id", story_id).eq("chapter_number", chapter_number).eq("is_active", True)
@@ -3344,12 +3421,12 @@ async def deactivate_previous_chapter_versions(story_id: int, chapter_number: in
         result = query.execute()
         
         if result.data:
-            logger.info(f"âœ… Deactivated {len(result.data)} previous version(s)")
+            logger.info(f"✅ Deactivated {len(result.data)} previous version(s)")
         else:
-            logger.info(f"â„¹ï¸ No previous active versions found")
+            logger.info(f"ℹ️ No previous active versions found")
             
     except Exception as e:
-        logger.error(f"âŒ Error deactivating previous versions: {str(e)}")
+        logger.error(f"❌ Error deactivating previous versions: {str(e)}")
         # Don't raise exception - this is not critical
 
 async def save_choices_for_chapter(story_id: int, chapter_id: int, chapter_number: int, choices: list, user_id: int, branch_id: str = None):
@@ -3358,7 +3435,7 @@ async def save_choices_for_chapter(story_id: int, chapter_id: int, chapter_numbe
     This helper function ensures consistency across all endpoints.
     """
     try:
-        logger.info(f"ðŸ’¾ Saving {len(choices)} choices for chapter {chapter_number} (ID: {chapter_id}) in story {story_id}")
+        logger.info(f"💾 Saving {len(choices)} choices for chapter {chapter_number} (ID: {chapter_id}) in story {story_id}")
         
         # Remove any existing choices for this specific chapter version
         delete_query = supabase.table("story_choices").delete().eq("chapter_id", chapter_id)
@@ -3390,15 +3467,15 @@ async def save_choices_for_chapter(story_id: int, chapter_id: int, chapter_numbe
         if choice_records:
             choices_response = supabase.table("story_choices").insert(choice_records).execute()
             if choices_response.data:
-                logger.info(f"âœ… Successfully saved {len(choice_records)} choices for chapter version {chapter_id}")
+                logger.info(f"✅ Successfully saved {len(choice_records)} choices for chapter version {chapter_id}")
                 return choices_response.data
             else:
-                logger.error(f"âŒ Failed to save choices - no data returned")
+                logger.error(f"❌ Failed to save choices - no data returned")
         
         return []
         
     except Exception as e:
-        logger.error(f"âŒ Error saving choices for chapter {chapter_id}: {str(e)}")
+        logger.error(f"❌ Error saving choices for chapter {chapter_id}: {str(e)}")
         # Don't raise exception - continue with the main operation
         return []
 
@@ -3406,16 +3483,16 @@ async def save_choices_for_chapter(story_id: int, chapter_id: int, chapter_numbe
 async def get_main_branch_id(story_id: int) -> str:
     """Get the main branch ID for a story."""
     try:
-        logger.info(f"ðŸ” Getting main branch ID for story {story_id}")
+        logger.info(f"🔍 Getting main branch ID for story {story_id}")
         branch_response = supabase.table("branches").select("id").eq("story_id", story_id).eq("branch_name", "main").execute()
         
         if branch_response.data:
             branch_id = branch_response.data[0]["id"]
-            logger.info(f"âœ… Found existing main branch: {branch_id}")
+            logger.info(f"✅ Found existing main branch: {branch_id}")
             return branch_id
         else:
             # Create main branch if it doesn't exist
-            logger.info(f"ðŸ†• Creating main branch for story {story_id}")
+            logger.info(f"🆕 Creating main branch for story {story_id}")
             main_branch = {
                 "id": str(uuid.uuid4()),
                 "story_id": story_id,
@@ -3426,21 +3503,21 @@ async def get_main_branch_id(story_id: int) -> str:
             }
             create_response = supabase.table("branches").insert(main_branch).execute()
             new_branch_id = create_response.data[0]["id"]
-            logger.info(f"âœ… Created main branch: {new_branch_id}")
+            logger.info(f"✅ Created main branch: {new_branch_id}")
             
             # Update existing chapters to use this branch
-            logger.info(f"ðŸ”„ Updating existing chapters to use main branch")
+            logger.info(f"🔄 Updating existing chapters to use main branch")
             supabase.table("Chapters").update({"branch_id": new_branch_id}).eq("story_id", story_id).is_("branch_id", "null").execute()
             
             # Update existing choices to use this branch  
-            logger.info(f"ðŸ”„ Updating existing choices to use main branch")
+            logger.info(f"🔄 Updating existing choices to use main branch")
             supabase.table("story_choices").update({"branch_id": new_branch_id}).eq("story_id", story_id).is_("branch_id", "null").execute()
             
             return new_branch_id
     except Exception as e:
-        logger.error(f"âŒ Error getting/creating main branch ID for story {story_id}: {e}")
+        logger.error(f"❌ Error getting/creating main branch ID for story {story_id}: {e}")
         import traceback
-        logger.error(f"âŒ Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to get main branch for story {story_id}: {str(e)}")
 
 async def create_new_branch(story_id: int, parent_branch_id: str, branched_from_chapter: int, branch_name: str = None) -> str:
@@ -3499,7 +3576,7 @@ async def delete_story_endpoint(
     This handles cascade deletion properly.
     """
     try:
-        logger.info(f"ðŸ—‘ï¸ Deleting story {story_id} for user {user.id}")
+        logger.info(f"🗑️ Deleting story {story_id} for user {user.id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
@@ -3508,38 +3585,38 @@ async def delete_story_endpoint(
         
         story = story_response.data[0]
         story_title = story.get("story_title", "Untitled")
-        logger.info(f"âœ… Story verified for deletion: {story_title}")
+        logger.info(f"✅ Story verified for deletion: {story_title}")
         
         # Delete in the correct order to avoid foreign key constraint violations
         
         # 1. Delete embeddings first (if any)
         try:
-            logger.info(f"ðŸ§¹ Deleting embeddings for story {story_id}")
+            logger.info(f"🧹 Deleting embeddings for story {story_id}")
             await embedding_service._delete_embeddings(story_id)
         except Exception as e:
-            logger.warning(f"âš ï¸ Could not delete embeddings: {e}")
+            logger.warning(f"⚠️ Could not delete embeddings: {e}")
         
         # 2. Delete story_choices (they reference branches)
-        logger.info(f"ðŸ§¹ Deleting story choices for story {story_id}")
+        logger.info(f"🧹 Deleting story choices for story {story_id}")
         supabase.table("story_choices").delete().eq("story_id", story_id).execute()
         
         # 3. Delete chapters (they reference branches)
-        logger.info(f"ðŸ§¹ Deleting chapters for story {story_id}")
+        logger.info(f"🧹 Deleting chapters for story {story_id}")
         supabase.table("Chapters").delete().eq("story_id", story_id).execute()
         
         # 4. Delete branches (they reference the story)
-        logger.info(f"ðŸ§¹ Deleting branches for story {story_id}")
+        logger.info(f"🧹 Deleting branches for story {story_id}")
         supabase.table("branches").delete().eq("story_id", story_id).execute()
         
         # 5. Finally delete the story itself
-        logger.info(f"ðŸ§¹ Deleting story {story_id}")
+        logger.info(f"🧹 Deleting story {story_id}")
         supabase.table("Stories").delete().eq("id", story_id).eq("user_id", user.id).execute()
         
         # Invalidate caches
         await story_service.invalidate_story_cache(story_id)
         await story_service.invalidate_user_cache(user.id)
         
-        logger.info(f"âœ… Story {story_id} '{story_title}' deleted successfully")
+        logger.info(f"✅ Story {story_id} '{story_title}' deleted successfully")
         
         return {
             "success": True,
@@ -3550,9 +3627,9 @@ async def delete_story_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Delete story failed: {e}")
+        logger.error(f"❌ Delete story failed: {e}")
         import traceback
-        logger.error(f"âŒ Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to delete story: {str(e)}")
 
 @app.get("/story/{story_id}/tree")
@@ -3565,7 +3642,7 @@ async def get_story_tree_endpoint(
     Returns nodes (chapters) and edges (choices) with their relationships.
     """
     try:
-        logger.info(f"ðŸŒ³ Getting story tree for story {story_id}")
+        logger.info(f"🌳 Getting story tree for story {story_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
@@ -3703,7 +3780,7 @@ async def get_story_tree_endpoint(
             "main_branch_id": next((b["id"] for b in tree_data["branches"] if b["is_main"]), None)
         }
         
-        logger.info(f"âœ… Story tree generated: {tree_data['metadata']['total_branches']} branches, {tree_data['metadata']['total_chapters']} chapters, {tree_data['metadata']['total_choices']} choices")
+        logger.info(f"✅ Story tree generated: {tree_data['metadata']['total_branches']} branches, {tree_data['metadata']['total_chapters']} chapters, {tree_data['metadata']['total_choices']} choices")
         
         return {
             "success": True,
@@ -3714,9 +3791,9 @@ async def get_story_tree_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Get story tree failed: {e}")
+        logger.error(f"❌ Get story tree failed: {e}")
         import traceback
-        logger.error(f"âŒ Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to get story tree: {str(e)}")
 
 class SetMainBranchInput(BaseModel):
@@ -3734,7 +3811,7 @@ async def set_main_branch_endpoint(
     This effectively promotes a branch to be the main storyline for all users.
     """
     try:
-        logger.info(f"ðŸŽ¯ SET-MAIN-BRANCH: User {user.id} setting branch {request.branch_id} as main for story {request.story_id}")
+        logger.info(f"🎯 SET-MAIN-BRANCH: User {user.id} setting branch {request.branch_id} as main for story {request.story_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", request.story_id).eq("user_id", user.id).execute()
@@ -3742,7 +3819,7 @@ async def set_main_branch_endpoint(
             raise HTTPException(status_code=404, detail="Story not found or access denied")
         
         story = story_response.data[0]
-        logger.info(f"âœ… SET-MAIN-BRANCH: Story verified: {story.get('story_title', 'Untitled')}")
+        logger.info(f"✅ SET-MAIN-BRANCH: Story verified: {story.get('story_title', 'Untitled')}")
         
         # Verify the branch exists and belongs to this story
         branch_response = supabase.table("branches").select("*").eq("id", request.branch_id).eq("story_id", request.story_id).execute()
@@ -3750,7 +3827,7 @@ async def set_main_branch_endpoint(
             raise HTTPException(status_code=404, detail="Branch not found or does not belong to this story")
         
         branch = branch_response.data[0]
-        logger.info(f"âœ… SET-MAIN-BRANCH: Branch verified: {branch.get('branch_name', 'Unknown')}")
+        logger.info(f"✅ SET-MAIN-BRANCH: Branch verified: {branch.get('branch_name', 'Unknown')}")
         
         # Get current main branch
         current_main_response = supabase.table("branches").select("*").eq("story_id", request.story_id).eq("branch_name", "main").execute()
@@ -3758,11 +3835,11 @@ async def set_main_branch_endpoint(
             raise HTTPException(status_code=404, detail="No main branch found for this story")
         
         current_main_branch = current_main_response.data[0]
-        logger.info(f"ðŸ” SET-MAIN-BRANCH: Current main branch: {current_main_branch['id']}")
+        logger.info(f"🔍 SET-MAIN-BRANCH: Current main branch: {current_main_branch['id']}")
         
         # If the branch is already the main branch, nothing to do
         if request.branch_id == current_main_branch["id"]:
-            logger.info(f"âš ï¸ SET-MAIN-BRANCH: Branch {request.branch_id} is already the main branch")
+            logger.info(f"⚠️ SET-MAIN-BRANCH: Branch {request.branch_id} is already the main branch")
             return {
                 "success": True,
                 "message": "Branch is already the main branch",
@@ -3772,11 +3849,11 @@ async def set_main_branch_endpoint(
         
         # Step 1: Rename current main branch to a backup name
         backup_branch_name = f"main_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-        logger.info(f"ðŸ”„ SET-MAIN-BRANCH: Renaming current main branch to: {backup_branch_name}")
+        logger.info(f"🔄 SET-MAIN-BRANCH: Renaming current main branch to: {backup_branch_name}")
         supabase.table("branches").update({"branch_name": backup_branch_name}).eq("id", current_main_branch["id"]).execute()
         
         # Step 2: Set the new branch as main
-        logger.info(f"ðŸŽ¯ SET-MAIN-BRANCH: Setting branch {request.branch_id} as main")
+        logger.info(f"🎯 SET-MAIN-BRANCH: Setting branch {request.branch_id} as main")
         supabase.table("branches").update({"branch_name": "main"}).eq("id", request.branch_id).execute()
         
         # Step 3: Update story's current_chapter to match the new main branch's latest chapter
@@ -3784,10 +3861,10 @@ async def set_main_branch_endpoint(
         
         if chapters_response.data:
             latest_chapter_num = chapters_response.data[0]["chapter_number"]
-            logger.info(f"ðŸ”„ SET-MAIN-BRANCH: Updating story current_chapter to {latest_chapter_num}")
+            logger.info(f"🔄 SET-MAIN-BRANCH: Updating story current_chapter to {latest_chapter_num}")
             supabase.table("Stories").update({"current_chapter": latest_chapter_num}).eq("id", request.story_id).execute()
         
-        logger.info(f"âœ… SET-MAIN-BRANCH: Successfully set branch {request.branch_id} as main for story {request.story_id}")
+        logger.info(f"✅ SET-MAIN-BRANCH: Successfully set branch {request.branch_id} as main for story {request.story_id}")
         
         return {
             "success": True,
@@ -3801,9 +3878,9 @@ async def set_main_branch_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ SET-MAIN-BRANCH: Unexpected error: {str(e)}")
+        logger.error(f"❌ SET-MAIN-BRANCH: Unexpected error: {str(e)}")
         import traceback
-        logger.error(f"âŒ SET-MAIN-BRANCH: Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ SET-MAIN-BRANCH: Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Add this new endpoint after the existing branch endpoints
@@ -3820,12 +3897,12 @@ async def accept_preview_with_versioning_endpoint(
     Accept a preview and create a new version of the chapter, keeping the old version.
     This implements proper versioning where old versions are preserved but hidden.
     """
-    logger.warning(f"âš ï¸ DEPRECATED ENDPOINT: /accept_preview_with_versioning called. Use /save_previewed_chapter for efficiency.")
+    logger.warning(f"⚠️ DEPRECATED ENDPOINT: /accept_preview_with_versioning called. Use /save_previewed_chapter for efficiency.")
     
     # Redirect to efficient approach: first generate preview, then save it
     # This avoids duplicating the regeneration logic
     try:
-        logger.info(f"âœ… ACCEPT-PREVIEW-VERSIONING: User accepting preview for chapter {request.chapter_number}")
+        logger.info(f"✅ ACCEPT-PREVIEW-VERSIONING: User accepting preview for chapter {request.chapter_number}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", request.story_id).eq("user_id", user.id).execute()
@@ -3866,7 +3943,7 @@ async def accept_preview_with_versioning_endpoint(
             new_version_number = existing_chapter["version_number"] + 1
             
             # Deactivate the old version
-            logger.info(f"ðŸ”„ VERSIONING: Deactivating old version {existing_chapter['version_number']}")
+            logger.info(f"🔄 VERSIONING: Deactivating old version {existing_chapter['version_number']}")
             supabase.table("Chapters").update({"is_active": False}).eq("id", existing_chapter["id"]).execute()
         
         # Generate the new chapter content
@@ -3930,11 +4007,11 @@ async def accept_preview_with_versioning_endpoint(
             "chapter_id": new_chapter_id,
             "chapter_number": next_chapter_number,
             "version_number": new_version_number,
-            "message": f"âœ… Chapter {next_chapter_number} (v{new_version_number}) created based on choice: '{selected_choice.get('title')}'"
+            "message": f"✅ Chapter {next_chapter_number} (v{new_version_number}) created based on choice: '{selected_choice.get('title')}'"
         }
         
     except Exception as e:
-        logger.error(f"âŒ ACCEPT-PREVIEW-VERSIONING: Error: {str(e)}")
+        logger.error(f"❌ ACCEPT-PREVIEW-VERSIONING: Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -3984,7 +4061,7 @@ async def get_chapter_versions_endpoint(
         }
         
     except Exception as e:
-        logger.error(f"âŒ GET-VERSIONS: Error: {str(e)}")
+        logger.error(f"❌ GET-VERSIONS: Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -4024,11 +4101,11 @@ async def switch_chapter_version_endpoint(
         
         return {
             "success": True,
-            "message": f"âœ… Switched to version {chapter_response.data[0]['version_number']} of Chapter {chapter_number}"
+            "message": f"✅ Switched to version {chapter_response.data[0]['version_number']} of Chapter {chapter_number}"
         }
         
     except Exception as e:
-        logger.error(f"âŒ SWITCH-VERSION: Error: {str(e)}")
+        logger.error(f"❌ SWITCH-VERSION: Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/save_previewed_chapter")
@@ -4048,9 +4125,9 @@ async def save_previewed_chapter_endpoint(
         summary = request.get("summary", "")  # Accept summary from preview
         choices = request.get("choices", [])
 
-        logger.info(f"ðŸ’¾ SAVE-PREVIEW: Saving previewed chapter {chapter_number} for story {story_id}")
-        logger.info(f"ðŸ“ Content length: {len(content) if content else 0} chars")
-        logger.info(f"ðŸ“ Summary length: {len(summary) if summary else 0} chars")
+        logger.info(f"💾 SAVE-PREVIEW: Saving previewed chapter {chapter_number} for story {story_id}")
+        logger.info(f"📝 Content length: {len(content) if content else 0} chars")
+        logger.info(f"📝 Summary length: {len(summary) if summary else 0} chars")
 
         # Get the next version number for this chapter
         next_version_number = await get_next_chapter_version_number(story_id, chapter_number)
@@ -4090,7 +4167,7 @@ async def save_previewed_chapter_endpoint(
 
         return {"success": True, "message": "Previewed chapter saved!", "chapter_id": chapter_id}
     except Exception as e:
-        logger.error(f"âŒ Error saving previewed chapter: {e}")
+        logger.error(f"❌ Error saving previewed chapter: {e}")
         return {"success": False, "detail": str(e)}
 
 @app.delete("/story/{story_id}/chapter/{chapter_number}")
@@ -4103,7 +4180,7 @@ async def delete_chapter_endpoint(
     Delete a specific chapter (all versions) and its choices from a story.
     """
     try:
-        logger.info(f"ðŸ—‘ï¸ Deleting chapter {chapter_number} from story {story_id} for user {user.id}")
+        logger.info(f"🗑️ Deleting chapter {chapter_number} from story {story_id} for user {user.id}")
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
         if not story_response.data:
@@ -4138,14 +4215,14 @@ async def delete_chapter_endpoint(
         await story_service.invalidate_story_cache(story_id)
         await story_service.invalidate_user_cache(user.id)
 
-        logger.info(f"âœ… Chapter {chapter_number} deleted from story {story_id}")
+        logger.info(f"✅ Chapter {chapter_number} deleted from story {story_id}")
         return {"success": True, "message": f"Chapter {chapter_number} deleted from story {story_id}", "chapter_number": chapter_number}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Delete chapter failed: {e}")
+        logger.error(f"❌ Delete chapter failed: {e}")
         import traceback
-        logger.error(f"âŒ Full traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to delete chapter: {str(e)}")
 
 @app.get("/test/enhanced_continuity/{story_id}")
@@ -4161,7 +4238,7 @@ async def test_enhanced_continuity(
     - Plot consistency
     """
     try:
-        logger.info(f"ðŸ”¬ Testing enhanced continuity for story {story_id}")
+        logger.info(f"🔬 Testing enhanced continuity for story {story_id}")
         
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
@@ -4254,8 +4331,8 @@ async def test_enhanced_continuity(
         if overall_score < 0.7:
             recommendations.append("Overall continuity score is low - consider regenerating chapters")
         
-        logger.info(f"âœ… Enhanced continuity test complete for story {story_id}")
-        logger.info(f"ðŸ“Š Overall score: {overall_score:.2f}")
+        logger.info(f"✅ Enhanced continuity test complete for story {story_id}")
+        logger.info(f"📊 Overall score: {overall_score:.2f}")
         
         return {
             "success": True,
@@ -4280,7 +4357,7 @@ async def test_enhanced_continuity(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"âŒ Enhanced continuity test failed: {e}")
+        logger.error(f"❌ Enhanced continuity test failed: {e}")
         raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
 
 if __name__ == "__main__":
@@ -4294,4 +4371,3 @@ if __name__ == "__main__":
         reload=settings.RELOAD,
         log_level="debug" if settings.DEBUG else "info"
     )
-

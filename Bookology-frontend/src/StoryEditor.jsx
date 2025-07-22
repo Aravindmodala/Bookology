@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useSearchParams, useLocation } from 'react-router-dom';
+import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import { useAuth } from './AuthContext';
 import { createApiUrl, API_ENDPOINTS } from './config';
@@ -16,7 +16,8 @@ import {
   Loader2,
   Zap,
   Target,
-  Users
+  Users,
+  ArrowLeft
 } from 'lucide-react';
 import EditorToolbar from './components/EditorToolbar';
 import AIAssistantPanel from './components/AIAssistantPanel';
@@ -24,12 +25,21 @@ import AIAssistantPanel from './components/AIAssistantPanel';
 const StoryEditor = () => {
   const [searchParams] = useSearchParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, session } = useAuth();
   
-  // Get story data from either URL params or route state (from dashboard)
+  // Get story data from either URL params or route state (from dashboard OR StoryCreator)
   const urlStoryId = searchParams.get('story');
   const routeStoryData = location.state?.story;
+  const creationMode = location.state?.mode; // 'generate_chapter_1' from StoryCreator
   const storyId = urlStoryId || routeStoryData?.id;
+  
+  // NEW: Chapter 1 generation state
+  const [isGeneratingChapter1, setIsGeneratingChapter1] = useState(false);
+  const [chapter1Generated, setChapter1Generated] = useState(false);
+  const [generationError, setGenerationError] = useState('');
+  const [chapter1GenerationComplete, setChapter1GenerationComplete] = useState(false);
+  const [saveInProgress, setSaveInProgress] = useState(false); // Track save operations
   
   // Zustand store for caching
   const { 
@@ -88,31 +98,227 @@ const StoryEditor = () => {
     }
   });
 
-  // Load story and chapters with caching for instant loading
-  useEffect(() => {
-    const loadStoryData = async () => {
-      if (!storyId || !user || !session?.access_token) {
-        console.log('❌ Missing required data:', { storyId, user: !!user, token: !!session?.access_token });
-        setLoading(false);
-        return;
+  // NEW: Generate Chapter 1 from outline data
+  const generateChapter1FromOutline = async () => {
+    if (!routeStoryData || !session?.access_token) {
+      setGenerationError('Missing story data or authentication');
+      return;
+    }
+
+    // Only block if a chapter already exists or save is in progress
+    if (isGeneratingChapter1 || saveInProgress || Object.keys(storyStructure.chapters).length > 0) {
+      console.log('⚠️ Chapter 1 generation already in progress, save in progress, or completed');
+      return;
+    }
+
+    console.log('🚀 GENERATING CHAPTER 1 from outline data:', routeStoryData);
+    
+    setIsGeneratingChapter1(true);
+    setGenerationError('');
+    
+    // Show generating state in editor
+    setContent('');
+    if (editorRef.current) {
+      editorRef.current.innerHTML = `
+        <div style="color: #3b82f6; text-align: center; padding: 4rem; border: 2px dashed #3b82f6; border-radius: 12px; background: rgba(59, 130, 246, 0.1);">
+          <div style="font-size: 3rem; margin-bottom: 1rem;">✨</div>
+          <div style="font-size: 1.5rem; margin-bottom: 1rem; font-weight: bold;">AI is crafting Chapter 1...</div>
+          <div style="color: #9ca3af; font-size: 1rem; line-height: 1.6;">
+            Using your outline to create an engaging opening chapter.<br/>
+            This may take 30-60 seconds. The chapter will appear here when ready.
+          </div>
+        </div>
+      `;
+    }
+
+    try {
+      // Call the backend to generate Chapter 1 from outline
+      const response = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_CHAPTER), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          outline: routeStoryData.story_outline, // The outline text
+          chapter_number: 1,
+          story_id: routeStoryData.id // Include story ID for saving
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      console.log('📖 Loading story data for story:', storyId);
+      const data = await response.json();
+      console.log('📦 Chapter 1 generation response:', data);
 
-      // 🚀 STEP 1: Check cache first for instant loading
-      const cachedData = getCachedData(storyId);
+      if (data.chapter_1 || data.chapter) {
+        const chapterContent = data.chapter_1 || data.chapter;
+        const choices = data.choices || [];
+        
+        console.log('✅ Chapter 1 generated successfully!');
+        console.log('📊 Content length:', chapterContent.length);
+        console.log('🎯 Choices generated:', choices.length);
+        
+        // Update the content immediately
+        setContent(chapterContent);
+        if (editorRef.current) {
+          editorRef.current.innerHTML = chapterContent;
+        }
+        
+        // Create Chapter 1 in story structure
+        const chapter1Key = 'chapter-1';
+        const chapter1Data = {
+          id: `temp-chapter-1-${Date.now()}`, // Temporary ID until saved
+          title: 'Chapter 1',
+          content: chapterContent,
+          wordCount: chapterContent.trim().split(/\s+/).length,
+          chapterNumber: 1,
+          createdAt: new Date().toISOString(),
+          isNew: true // Mark as new for saving
+        };
+
+        setStoryStructure(prev => ({
+          ...prev,
+          chapters: {
+            [chapter1Key]: chapter1Data
+          }
+        }));
+
+        setActiveChapter(chapter1Key);
+        setChapter1Generated(true);
+        setChapter1GenerationComplete(true); // Prevent re-generation
+
+        // Cache choices if available
+        if (choices.length > 0) {
+          const choicesData = {
+            choices: choices.map(choice => ({
+              ...choice,
+              id: choice.id || choice.choice_id,
+              choice_id: choice.choice_id || choice.id
+            })),
+            selected_choice: null
+          };
+          
+          // Use temporary ID for caching until we get real chapter ID
+          addChoicesForChapter(chapter1Data.id, choicesData);
+          console.log('💾 Cached', choices.length, 'choices for Chapter 1');
+        }
+
+        // Auto-save the generated chapter (only if not already saved)
+        if (!data.metadata?.already_saved) {
+          console.log('💾 AUTO-SAVING Chapter 1...');
+          await autoSaveChapter1(chapterContent, choices, chapter1Data);
+        } else {
+          console.log('✅ Chapter 1 already saved during generation, skipping auto-save');
+          // Update state with real chapter ID from generation
+          const realChapterId = data.metadata.chapter_id;
+          if (realChapterId && choices.length > 0) {
+            addChoicesForChapter(realChapterId, {
+              choices: choices.map(choice => ({
+                ...choice,
+                id: choice.id || choice.choice_id,
+                choice_id: choice.choice_id || choice.id
+              })),
+              selected_choice: null
+            });
+          }
+        }
+
+      } else {
+        throw new Error(data.error || 'Failed to generate Chapter 1');
+      }
+    } catch (err) {
+      console.error('❌ Chapter 1 generation failed:', err);
+      setGenerationError(err.message || 'Failed to generate Chapter 1');
       
-      if (cachedData.isCached) {
-        console.log('⚡ Found cached data! Loading instantly...');
-        
-        // Load cached data immediately (no spinner!)
-        setStoryData(cachedData.story);
-        setChapters(cachedData.chapters);
-        // Choices are already in cache, no need to set them again
-        
-        // Build story structure from cache
+      // Show error in editor
+      if (editorRef.current) {
+        editorRef.current.innerHTML = `
+          <div style="color: #ef4444; text-align: center; padding: 4rem; border: 2px dashed #ef4444; border-radius: 12px; background: rgba(239, 68, 68, 0.1);">
+            <div style="font-size: 2rem; margin-bottom: 1rem;">❌</div>
+            <div style="font-size: 1.2rem; margin-bottom: 1rem; font-weight: bold;">Chapter Generation Failed</div>
+            <div style="color: #9ca3af; font-size: 0.9rem;">${err.message}</div>
+            <button onclick="window.location.reload()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer;">
+              Try Again
+            </button>
+          </div>
+        `;
+      }
+    } finally {
+      setIsGeneratingChapter1(false);
+    }
+  };
+
+  // NEW: Auto-save Chapter 1 after generation
+  const autoSaveChapter1 = async (chapterContent, choices, tempChapterData) => {
+    console.log('💾 AUTO-SAVE: Starting Chapter 1 save...');
+    
+    // Check if chapter already exists in current chapters state
+    const existingChapter = chapters.find(c => c.chapter_number === 1);
+    if (existingChapter) {
+      console.log('✅ Chapter 1 already exists in state with ID:', existingChapter.id);
+      console.log('⏭️ Skipping duplicate save');
+      return existingChapter.id;
+    }
+    
+    // Set save in progress to prevent concurrent saves
+    if (saveInProgress) {
+      console.log('⚠️ Save already in progress, skipping duplicate save');
+      return;
+    }
+    setSaveInProgress(true);
+    // Save chapter to database using the correct endpoint
+    const response = await fetch(createApiUrl('/save_chapter_with_summary'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': session?.access_token ? `Bearer ${session.access_token}` : undefined,
+      },
+      body: JSON.stringify({
+        story_id: routeStoryData.id,
+        chapter_number: 1,
+        content: chapterContent,
+        title: 'Chapter 1',
+        choices: choices, // Pass choices for chapter 1
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Failed to save chapter');
+    const realChapterId = data.chapter_id || data.id;
+    console.log('✅ AUTO-SAVE: Chapter 1 saved with ID:', realChapterId);
+    
+    // Cache choices with real chapter ID from save response
+    if (realChapterId && data.choices && data.choices.length > 0) {
+      console.log('💾 Caching choices from save response for real chapter ID:', realChapterId);
+      addChoicesForChapter(realChapterId, {
+        choices: data.choices.map(choice => ({
+          ...choice,
+          id: choice.id || choice.choice_id,
+          choice_id: choice.choice_id || choice.id
+        })),
+        selected_choice: null
+      });
+      console.log('✅ Cached', data.choices.length, 'choices from save response');
+    }
+
+    // Fetch latest chapters from backend to update sidebar and state
+    try {
+      const chaptersResponse = await fetch(createApiUrl(`/story/${routeStoryData.id}/chapters`), {
+        method: 'GET',
+        headers: {
+          'Authorization': session?.access_token ? `Bearer ${session.access_token}` : undefined,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (chaptersResponse.ok) {
+        const chaptersData = await chaptersResponse.json();
+        const chapters = chaptersData.chapters || [];
+        setChapters(chapters);
+        // Build story structure with real chapter keys
         const chaptersObject = {};
-        cachedData.chapters.forEach(chapter => {
+        chapters.forEach(chapter => {
           const chapterKey = `chapter-${chapter.chapter_number}`;
           chaptersObject[chapterKey] = {
             id: chapter.id,
@@ -120,149 +326,154 @@ const StoryEditor = () => {
             content: chapter.content || '',
             wordCount: chapter.content ? chapter.content.trim().split(/\s+/).length : 0,
             chapterNumber: chapter.chapter_number,
-            createdAt: chapter.created_at
+            createdAt: chapter.created_at,
           };
         });
-
         setStoryStructure(prev => ({
           ...prev,
-          chapters: chaptersObject
+          chapters: chaptersObject,
         }));
+        // Set active chapter to the real chapter key
+        if (chapters.length > 0) {
+          setActiveChapter(`chapter-${chapters[0].chapter_number}`);
+          setContent(chapters[0].content || '');
+        }
+        // Update cached choices with real chapter ID
+        if (chapters.length > 0 && tempChapterData) {
+          const realChapter = chapters.find(c => c.chapter_number === 1);
+          if (realChapter) {
+            // Get choices that were cached with temporary ID
+            const tempChoices = getCachedChoices(tempChapterData.id);
+            console.log('🔍 Temp choices found:', tempChoices.choices.length, 'for temp ID:', tempChapterData.id);
+            console.log('🎯 Real chapter ID:', realChapter.id);
+            
+            if (tempChoices.choices.length > 0) {
+              console.log('🔄 Updating choices cache with real chapter ID:', realChapter.id);
+              // Cache choices with real chapter ID
+              addChoicesForChapter(realChapter.id, {
+                choices: tempChoices.choices,
+                selected_choice: tempChoices.selected_choice
+              });
+              console.log('✅ Choices updated in cache for real chapter ID');
+            } else {
+              console.log('⚠️ No temp choices found to transfer');
+            }
+          }
+        }
+        
+        // Fetch choices for the new chapter (with force refresh to ensure choices are loaded)
+        await fetchChoicesForChapters(chapters, true); // Force refresh to bypass cache
+      }
+    } catch (err) {
+      console.error('Error refreshing chapters after save:', err);
+    } finally {
+      // Always clear save in progress flag
+      setSaveInProgress(false);
+    }
+  };
 
-        // Set first chapter as active
-        if (cachedData.chapters.length > 0) {
-          const firstChapterKey = `chapter-${cachedData.chapters[0].chapter_number}`;
-          setActiveChapter(firstChapterKey);
-          setContent(cachedData.chapters[0].content || '');
-        }
-        
-        setLoading(false); // Show content immediately!
-        
-        // Always fetch choices even from cache (choices might be updated)
-        if (cachedData.chapters && cachedData.chapters.length > 0) {
-          console.log('📋 Fetching choices for cached chapters...');
-          await fetchChoicesForChapters(cachedData.chapters);
-        }
-        
-        // If cache is fresh (< 5 minutes), we can skip the main background fetch
-        if (!cachedData.isStale) {
-          console.log('✅ Cache is fresh, skipping background fetch');
-          return;
-        }
-        
-        console.log('🔄 Cache is stale, fetching updates in background...');
-      } else {
-        // No cache available, show loading spinner
-        setLoading(true);
-        setError('');
-        console.log('📡 No cache found, fetching fresh data...');
+  // Load story and chapters with caching for instant loading
+  useEffect(() => {
+    const loadStoryData = async () => {
+      if (!storyId || !user || !session?.access_token) {
+        setLoading(false);
+        return;
       }
 
-      // 🔄 STEP 2: Fetch fresh data (either in background or as primary load)
-      try {
-        let story = null;
-        
-        // Get story data (from route or backend)
-        if (routeStoryData) {
-          console.log('✅ Using story data from route state:', routeStoryData.title);
-          story = {
-            id: routeStoryData.id,
-            title: routeStoryData.title,
-            description: routeStoryData.description,
-            genre: routeStoryData.genre,
-            chapter_count: routeStoryData.chapter_count,
-            created_at: routeStoryData.created_at,
-            status: routeStoryData.status
-          };
-        } else {
-          console.log('🔍 Fetching story details from backend...');
-          const storyResponse = await fetch(createApiUrl(`/story/${storyId}`), {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-
-          if (!storyResponse.ok) {
-            throw new Error(`Failed to fetch story: ${storyResponse.status}`);
-          }
-
-          story = await storyResponse.json();
-        }
-
-        // Fetch chapters
-        console.log('📚 Fetching chapters from backend...');
-        const chaptersResponse = await fetch(createApiUrl(`/story/${storyId}/chapters`), {
+      // Always fetch chapters from backend first
+      let chapters = [];
+      let story = null;
+      if (routeStoryData) {
+        story = {
+          id: routeStoryData.id,
+          story_title: routeStoryData.story_title || routeStoryData.title,
+          story_outline: routeStoryData.story_outline || routeStoryData.description,
+          genre: routeStoryData.genre,
+          chapter_count: routeStoryData.chapter_count,
+          created_at: routeStoryData.created_at,
+          status: routeStoryData.status
+        };
+      } else {
+        const storyResponse = await fetch(createApiUrl(`/story/${storyId}`), {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json'
           }
         });
-
-        if (!chaptersResponse.ok) {
-          throw new Error(`Failed to fetch chapters: ${chaptersResponse.status}`);
+        if (!storyResponse.ok) {
+          setError(`Failed to fetch story: ${storyResponse.status}`);
+          setLoading(false);
+          return;
         }
-
-        const chaptersData = await chaptersResponse.json();
-        const chapters = chaptersData.chapters || [];
-        
-        console.log(`✅ Loaded ${chapters.length} fresh chapters from backend`);
-
-        // 📦 STEP 3: Update cache with fresh data
-        setStoryCache(storyId, story, chapters, {});
-
-        // 🎯 STEP 4: Update UI only if not already showing cached data
-        if (!cachedData.isCached) {
-          setStoryData(story);
-          setChapters(chapters);
-
-          // Build story structure
-          const chaptersObject = {};
-          chapters.forEach(chapter => {
-            const chapterKey = `chapter-${chapter.chapter_number}`;
-            chaptersObject[chapterKey] = {
-              id: chapter.id,
-              title: chapter.title || `Chapter ${chapter.chapter_number}`,
-              content: chapter.content || '',
-              wordCount: chapter.content ? chapter.content.trim().split(/\s+/).length : 0,
-              chapterNumber: chapter.chapter_number,
-              createdAt: chapter.created_at
-            };
-          });
-
-          setStoryStructure(prev => ({
-            ...prev,
-            chapters: chaptersObject
-          }));
-
-          // Set first chapter as active
-          if (chapters.length > 0) {
-            const firstChapterKey = `chapter-${chapters[0].chapter_number}`;
-            setActiveChapter(firstChapterKey);
-            setContent(chapters[0].content || '');
-          }
-        } else {
-          console.log('🔄 Updated cache in background, UI already showing cached data');
-        }
-
-        // Fetch choices for chapters
-        if (chapters && chapters.length > 0) {
-          console.log('📋 Fetching choices for', chapters.length, 'chapters...');
-          await fetchChoicesForChapters(chapters);
-        }
-
-      } catch (err) {
-        console.error('Error loading story:', err);
-        setError(err.message || 'Failed to load story');
-      } finally {
-        setLoading(false);
+        story = await storyResponse.json();
       }
+
+      // Fetch chapters
+      const chaptersResponse = await fetch(createApiUrl(`/story/${storyId}/chapters`), {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!chaptersResponse.ok) {
+        setError(`Failed to fetch chapters: ${chaptersResponse.status}`);
+        setLoading(false);
+        return;
+      }
+      const chaptersData = await chaptersResponse.json();
+      chapters = chaptersData.chapters || [];
+
+      setStoryData(story);
+      setChapters(chapters);
+
+      // Build story structure
+      const chaptersObject = {};
+      chapters.forEach(chapter => {
+        const chapterKey = `chapter-${chapter.chapter_number}`;
+        chaptersObject[chapterKey] = {
+          id: chapter.id,
+          title: chapter.title || `Chapter ${chapter.chapter_number}`,
+          content: chapter.content || '',
+          wordCount: chapter.content ? chapter.content.trim().split(/\s+/).length : 0,
+          chapterNumber: chapter.chapter_number,
+          createdAt: chapter.created_at
+        };
+      });
+      setStoryStructure(prev => ({
+        ...prev,
+        chapters: chaptersObject
+      }));
+
+      // If chapters exist, show the first one and set generation complete
+      if (chapters.length > 0) {
+        const firstChapterKey = `chapter-${chapters[0].chapter_number}`;
+        setActiveChapter(firstChapterKey);
+        setContent(chapters[0].content || '');
+        setChapter1GenerationComplete(true); // Prevent further generation
+        setLoading(false);
+        // Fetch choices for chapters
+        await fetchChoicesForChapters(chapters);
+        return;
+      }
+
+      // If no chapters, and creationMode is 'generate_chapter_1', and not already complete, generate it
+      // Only trigger generation if this is the initial load from StoryCreator
+      if (creationMode === 'generate_chapter_1' && routeStoryData && !chapter1GenerationComplete && !isGeneratingChapter1) {
+        console.log('🎯 Triggering Chapter 1 generation from useEffect (initial load from StoryCreator)');
+        setLoading(false);
+        setTimeout(() => {
+          generateChapter1FromOutline();
+        }, 500);
+        return;
+      }
+
+      setLoading(false);
     };
 
     loadStoryData();
-  }, [storyId, user, session, routeStoryData]);
+  }, [storyId, user, session, routeStoryData, creationMode, chapter1GenerationComplete]);
 
   // Fetch choices for all chapters (cache-first approach)
   const fetchChoicesForChapters = async (chaptersData, forceRefresh = false) => {
@@ -295,10 +506,12 @@ const StoryEditor = () => {
         });
 
         console.log(`📡 Response for chapter ${chapter.id}:`, response.status);
+        console.log(`🔗 API URL called:`, createApiUrl(API_ENDPOINTS.GET_CHAPTER_CHOICES.replace('{chapter_id}', chapter.id)));
 
         if (response.ok) {
           const data = await response.json();
           console.log(`📦 Choices data for chapter ${chapter.id}:`, data);
+          console.log(`📊 Choices count in response:`, data.choices ? data.choices.length : 'no choices field');
           
           if (data.success && data.choices && data.choices.length > 0) {
             const choicesData = {
@@ -761,12 +974,28 @@ const StoryEditor = () => {
       )}
 
       {/* Error State */}
-      {error && (
+      {(error || generationError) && (
         <div className="fixed top-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg z-50">
-          {error}
+          {error || generationError}
           <button
-            onClick={() => setError('')}
+            onClick={() => {
+              setError('');
+              setGenerationError('');
+            }}
             className="ml-2 text-red-200 hover:text-white"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* NEW: Chapter 1 Generation Success Notification */}
+      {chapter1Generated && (
+        <div className="fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50">
+          ✅ Chapter 1 generated and saved successfully!
+          <button
+            onClick={() => setChapter1Generated(false)}
+            className="ml-2 text-green-200 hover:text-white"
           >
             ×
           </button>
@@ -778,9 +1007,28 @@ const StoryEditor = () => {
         {/* Sidebar Header */}
         <div className="p-4 border-b border-gray-700 flex items-center justify-between">
           {!isSidebarCollapsed && (
-            <div>
-              <h2 className="text-lg font-semibold text-white">{storyTitle}</h2>
-              <p className="text-sm text-gray-400">{storyGenre}</p>
+            <div className="flex-1">
+              <div className="flex items-center space-x-2">
+                {/* NEW: Back to Stories button */}
+                <button
+                  onClick={() => navigate('/stories')}
+                  className="p-1 hover:bg-gray-700 rounded transition-colors"
+                  title="Back to Stories"
+                >
+                  <ArrowLeft className="w-4 h-4 text-gray-400" />
+                </button>
+                <div>
+                  <h2 className="text-lg font-semibold text-white">{storyTitle}</h2>
+                  <p className="text-sm text-gray-400">{storyGenre}</p>
+                </div>
+              </div>
+              {/* NEW: Generation status indicator */}
+              {isGeneratingChapter1 && (
+                <div className="mt-2 flex items-center space-x-2 text-yellow-400">
+                  <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-xs">Generating Chapter 1...</span>
+                </div>
+              )}
             </div>
           )}
           <button
@@ -793,27 +1041,16 @@ const StoryEditor = () => {
 
         {!isSidebarCollapsed && (
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Front Matter */}
+            {/* Outline Option */}
             <div>
               <button
-                onClick={() => toggleSection('frontMatter')}
-                className="flex items-center w-full text-left text-sm font-medium text-gray-300 hover:text-white mb-2"
+                onClick={() => setActiveChapter('outline')}
+                className={`flex items-center w-full text-left text-sm font-medium px-3 py-2 rounded-lg mb-2 ${activeChapter === 'outline' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:text-white hover:bg-gray-700'}`}
               >
-                {expandedSections.frontMatter ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
-                Front Matter
+                <FileText className="w-4 h-4 mr-2" />
+                Outline
               </button>
-              {expandedSections.frontMatter && (
-                <div className="ml-5 space-y-2">
-                  {Object.entries(currentStoryStructure.frontMatter).map(([key, section]) => (
-                    <div key={key} className="flex items-center text-sm text-gray-400 hover:text-white cursor-pointer py-1">
-                      <FileText className="w-4 h-4 mr-2" />
-                      {section.title}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
-
             {/* Chapters */}
             <div>
               <button
@@ -849,6 +1086,10 @@ const StoryEditor = () => {
                           {chapter.title}
                           {chapter.isGenerating && ' (Generating...)'}
                         </span>
+                        {/* NEW: Show if chapter is newly generated */}
+                        {chapter.isNew && (
+                          <span className="text-xs px-1 py-0.5 bg-green-600 text-white rounded">NEW</span>
+                        )}
                         {/* Choice indicator */}
                         {!chapter.isGenerating && (() => {
                           const chapterCachedChoices = getCachedChoices(chapter.id);
@@ -926,6 +1167,38 @@ const StoryEditor = () => {
                     </div>
                   ))}
                   
+                  {/* Start the Journey Button - show when no chapters exist */}
+                  {Object.keys(currentStoryStructure.chapters).length === 0 && storyData?.story_outline && (
+                    <button
+                      onClick={generateChapter1FromOutline}
+                      disabled={isGeneratingChapter1 || chapter1GenerationComplete}
+                      className={`flex items-center w-full text-sm py-3 px-4 rounded-lg transition-colors ${
+                        isGeneratingChapter1 
+                          ? 'bg-yellow-600/20 text-yellow-400 cursor-not-allowed' 
+                          : chapter1GenerationComplete
+                          ? 'bg-green-600/20 text-green-400 cursor-not-allowed'
+                          : 'bg-blue-600 hover:bg-blue-700 text-white'
+                      }`}
+                    >
+                      {isGeneratingChapter1 ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mr-2"></div>
+                          Generating Chapter 1...
+                        </>
+                      ) : chapter1GenerationComplete ? (
+                        <>
+                          <FileText className="w-4 h-4 mr-2" />
+                          Chapter 1 Generated ✓
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-4 h-4 mr-2" />
+                          Start the Journey
+                        </>
+                      )}
+                    </button>
+                  )}
+                  
                   {/* Add Chapter Button - only show for new stories */}
                   {!storyId && (
                     <button
@@ -991,6 +1264,10 @@ const StoryEditor = () => {
                     {currentStoryStructure.chapters[activeChapter].isGenerating && (
                       <span className="ml-3 text-yellow-400 text-lg">(Generating...)</span>
                     )}
+                    {/* NEW: Show auto-save status */}
+                    {currentStoryStructure.chapters[activeChapter].isSaved && (
+                      <span className="ml-3 text-green-400 text-sm">(Auto-saved ✓)</span>
+                    )}
                   </h1>
                   <div className="flex items-center space-x-4 text-sm text-gray-400">
                     <span>{wordCount} words</span>
@@ -1004,15 +1281,40 @@ const StoryEditor = () => {
                         <span>AI is crafting your next chapter...</span>
                       </span>
                     )}
+                    {/* NEW: Chapter 1 generation status */}
+                    {isGeneratingChapter1 && activeChapter === 'chapter-1' && (
+                      <span className="flex items-center space-x-2 text-blue-400">
+                        <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                        <span>Generating from outline...</span>
+                      </span>
+                    )}
                   </div>
+                </div>
+              )}
+
+              {activeChapter === 'outline' && storyData?.story_outline && (
+                <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
+                  <h2 className="text-2xl font-bold text-white mb-4">Story Outline</h2>
+                  <div className="text-gray-200 whitespace-pre-wrap mb-6">{storyData.story_outline}</div>
+                  {/* Show helper text if no chapters exist */}
+                  {Object.keys(currentStoryStructure.chapters).length === 0 && (
+                    <div className="mt-6 p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
+                      <p className="text-blue-300 text-sm mb-2">
+                        ✨ Your story outline is ready! 
+                      </p>
+                      <p className="text-gray-400 text-sm">
+                        Click the <strong className="text-blue-400">"Start the Journey"</strong> button in the sidebar to generate Chapter 1.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
               <div
                 ref={editorRef}
-                contentEditable={!currentStoryStructure.chapters[activeChapter]?.isGenerating}
+                contentEditable={!currentStoryStructure.chapters[activeChapter]?.isGenerating && !isGeneratingChapter1}
                 className={`min-h-screen p-6 bg-gray-800 rounded-xl border border-gray-700 text-white leading-relaxed overflow-auto ${
-                  currentStoryStructure.chapters[activeChapter]?.isGenerating 
+                  currentStoryStructure.chapters[activeChapter]?.isGenerating || isGeneratingChapter1
                     ? 'opacity-70 cursor-not-allowed' 
                     : 'focus:outline-none focus:ring-2 focus:ring-blue-500'
                 }`}
@@ -1031,7 +1333,7 @@ const StoryEditor = () => {
               />
 
               {/* Choices Section - Show ALL choices for every chapter */}
-              {activeChapter && currentStoryStructure.chapters[activeChapter] && (
+              {activeChapter && currentStoryStructure.chapters[activeChapter] && !isGeneratingChapter1 && (
                 <div className="mt-8">
                   {(() => {
                     const currentChapterData = currentStoryStructure.chapters[activeChapter];

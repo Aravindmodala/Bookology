@@ -19,6 +19,7 @@ import {
 import { useAuth } from '../AuthContext';
 import { supabase, isSupabaseEnabled } from '../supabaseClient';
 import { createApiUrl, API_ENDPOINTS } from '../config';
+import { Menu, Transition } from '@headlessui/react';
 
 const StoryDashboard = ({ onStartNewStory }) => {
   const [stories, setStories] = useState([]);
@@ -45,10 +46,23 @@ const StoryDashboard = ({ onStartNewStory }) => {
     navigate('/editor', { state: { story, mode: 'edit' } });
   };
 
-  const handleDeleteStory = (story) => {
-    // TODO: Add delete confirmation and functionality
-    console.log('Delete story:', story.title);
-    alert(`Delete functionality for "${story.title}" coming soon!`);
+  const handleDeleteStory = async (story) => {
+    if (!window.confirm(`Are you sure you want to delete the story "${story.story_title}" and all its chapters? This action cannot be undone.`)) return;
+    try {
+      setLoading(true);
+      // Delete the story from Supabase (will cascade if FK is set)
+      const { error } = await supabase
+        .from('Stories')
+        .delete()
+        .eq('id', story.id);
+      if (error) throw error;
+      // Refresh stories list
+      setStories(prev => prev.filter(s => s.id !== story.id));
+    } catch (err) {
+      setError('Failed to delete story: ' + (err.message || err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Fixed data fetching with proper error handling and fallback
@@ -189,13 +203,36 @@ const StoryDashboard = ({ onStartNewStory }) => {
           >
             <Edit3 className="w-4 h-4" />
           </button>
-          <button 
-            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all"
-            onClick={() => handleDeleteStory(story)}
-            title="More Options"
-          >
-            <MoreVertical className="w-4 h-4" />
-          </button>
+          {/* Three dots menu */}
+          <Menu as="div" className="relative inline-block text-left">
+            <Menu.Button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all" title="More Options">
+              <MoreVertical className="w-4 h-4" />
+            </Menu.Button>
+            <Transition
+              as={React.Fragment}
+              enter="transition ease-out duration-100"
+              enterFrom="transform opacity-0 scale-95"
+              enterTo="transform opacity-100 scale-100"
+              leave="transition ease-in duration-75"
+              leaveFrom="transform opacity-100 scale-100"
+              leaveTo="transform opacity-0 scale-95"
+            >
+              <Menu.Items className="absolute right-0 z-10 mt-2 w-36 origin-top-right rounded-md bg-gray-900 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                <div className="py-1">
+                  <Menu.Item>
+                    {({ active }) => (
+                      <button
+                        onClick={() => handleDeleteStory(story)}
+                        className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-red-600 text-white' : 'text-red-400'}`}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </button>
+                    )}
+                  </Menu.Item>
+                </div>
+              </Menu.Items>
+            </Transition>
+          </Menu>
         </div>
       </div>
 

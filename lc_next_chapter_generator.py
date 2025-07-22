@@ -748,16 +748,32 @@ class NextChapterGeneratorWithDNA:
         story_outline: str, 
         story_dna_contexts: List[str], 
         chapter_number: int,
-        user_choice: str = ""
+        user_choice: str = "",
+        previous_chapter_summaries: List[str] = None,  # Add summaries parameter
+        generation_focus: str = "enhanced_continuity",
+        quality_instructions: str = ""
     ) -> Dict[str, Any]:
-        """Generate chapter using the new bestseller system."""
+        """Generate chapter using the new bestseller system with summaries."""
         logger.info(f"🔄 Using bestseller system for Chapter {chapter_number}")
+        logger.info(f"📝 Using {len(previous_chapter_summaries or [])} chapter summaries")
+        
+        # Format summaries for inclusion in DNA context
+        formatted_summaries = ""
+        if previous_chapter_summaries:
+            formatted_summaries = "\n\n=== PREVIOUS CHAPTER SUMMARIES ===\n"
+            for i, summary in enumerate(previous_chapter_summaries, 1):
+                formatted_summaries += f"Chapter {i}: {summary}\n"
+        
+        # Combine DNA contexts with summaries
+        enhanced_dna_contexts = story_dna_contexts.copy()
+        if formatted_summaries:
+            enhanced_dna_contexts.append(formatted_summaries)
         
         # Use the new bestseller generator
         result = self.bestseller_generator.generate_bestseller_chapter(
             story_title=story_title,
             story_outline=story_outline,
-            story_dna_contexts=story_dna_contexts,
+            story_dna_contexts=enhanced_dna_contexts,  # Now includes summaries
             chapter_number=chapter_number,
             user_choice=user_choice,
             target_quality=8.5  # Bestseller quality threshold
@@ -770,12 +786,16 @@ class NextChapterGeneratorWithDNA:
             "token_metrics": result.get("generation_metrics", {}),
             "quality_score": result.get("quality_metrics", {}).get("overall_score", 0),
             "success": result["success"],
-            "generation_method": "BESTSELLER"
+            "generation_method": "BESTSELLER_WITH_SUMMARIES",
+            "summaries_used": len(previous_chapter_summaries or [])
         }
 
 # Global instances
 next_chapter_generator_with_dna = NextChapterGeneratorWithDNA()
 bestseller_generator = BestsellerChapterGenerator()
+
+# Backward compatibility alias
+NextChapterGenerator = NextChapterGeneratorWithDNA
 
 # 🎯 CONVENIENCE FUNCTIONS
 def generate_next_chapter_with_dna(
