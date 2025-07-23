@@ -194,19 +194,19 @@ class EnhancedChapterGenerator:
         logger.info("🚀 EnhancedChapterGenerator initialized with CoT reasoning")
     
     def generate_chapter_from_outline(self, story_summary: str, chapter_data: Dict[str, Any], 
-                                    genre: str, tone: str, max_retries: int = 2) -> Dict[str, Any]:
+                                    genre: str, tone: str, max_retries: int = 0) -> Dict[str, Any]:
         """
-        Generate a chapter with CoT reasoning and quality validation.
+        Generate a chapter with CoT reasoning - SINGLE GENERATION for speed.
         
         Args:
             story_summary: Brief story summary for context
             chapter_data: Structured chapter information from outline
             genre: Story genre
             tone: Story tone
-            max_retries: Number of retry attempts for quality improvement
+            max_retries: Not used anymore - kept for compatibility
         """
         chapter_number = chapter_data.get('chapter_number', 1)
-        logger.info(f"📖 Generating Chapter {chapter_number} with CoT reasoning...")
+        logger.info(f"📖 Generating Chapter {chapter_number} - SINGLE ATTEMPT for speed...")
         
         # Create minimal context
         story_context = create_minimal_context(story_summary, chapter_data, genre, tone)
@@ -214,60 +214,40 @@ class EnhancedChapterGenerator:
         logger.info(f"📝 Context length: {len(story_context)} characters")
         logger.info(f"🎯 Target chapter: {chapter_data.get('title', 'Untitled')}")
         
-        best_result = None
-        best_quality_score = 0
-        
-        for attempt in range(max_retries + 1):
-            try:
-                logger.info(f"🔄 Generation attempt {attempt + 1}/{max_retries + 1}")
-                
-                # Generate chapter with CoT
-                result = self.chain.invoke({
-                    "story_context": story_context,
-                    "chapter_number": chapter_number
-                })
-                
-                logger.info(f"✅ Chapter {chapter_number} generated (attempt {attempt + 1})")
-                logger.info(f"📊 Generated content: {len(result.content)} characters")
-                
-                # Parse and validate response
-                parsed_result = self._parse_and_validate_response(result.content.strip(), chapter_number)
-                
-                if parsed_result["success"]:
-                    # Calculate quality score
-                    quality_score = self._calculate_quality_score(parsed_result)
-                    logger.info(f"📊 Quality score: {quality_score}/10")
-                    
-                    # Keep best result
-                    if quality_score > best_quality_score:
-                        best_result = parsed_result
-                        best_quality_score = quality_score
-                    
-                    # If quality is good enough, return immediately
-                    if quality_score >= 8.0:
-                        logger.info(f"✨ High quality achieved (score: {quality_score}), returning result")
-                        return parsed_result
-                
-            except Exception as e:
-                logger.error(f"❌ Attempt {attempt + 1} failed: {str(e)}")
-                if attempt == max_retries:
-                    return {
-                        "success": False,
-                        "chapter_content": f"Error generating Chapter {chapter_number}: {str(e)}",
-                        "choices": [],
-                        "error": str(e)
-                    }
-        
-        # Return best result if no high-quality result achieved
-        if best_result:
-            logger.info(f"📊 Returning best result with quality score: {best_quality_score}")
-            return best_result
-        else:
+        try:
+            logger.info(f"🚀 Generating Chapter {chapter_number} - single attempt")
+            
+            # Generate chapter with CoT - SINGLE ATTEMPT
+            result = self.chain.invoke({
+                "story_context": story_context,
+                "chapter_number": chapter_number
+            })
+            
+            logger.info(f"✅ Chapter {chapter_number} generated successfully")
+            logger.info(f"📊 Generated content: {len(result.content)} characters")
+            
+            # Parse and validate response
+            parsed_result = self._parse_and_validate_response(result.content.strip(), chapter_number)
+            
+            if parsed_result["success"]:
+                logger.info(f"✨ Chapter {chapter_number} ready - returning first result")
+                return parsed_result
+            else:
+                logger.error(f"❌ Failed to parse Chapter {chapter_number}")
+                return {
+                    "success": False,
+                    "chapter_content": f"Failed to parse Chapter {chapter_number}",
+                    "choices": [],
+                    "error": "Parsing failed"
+                }
+            
+        except Exception as e:
+            logger.error(f"❌ Chapter {chapter_number} generation failed: {str(e)}")
             return {
                 "success": False,
-                "chapter_content": f"Failed to generate Chapter {chapter_number} after {max_retries + 1} attempts",
+                "chapter_content": f"Error generating Chapter {chapter_number}: {str(e)}",
                 "choices": [],
-                "error": "Max retries exceeded"
+                "error": str(e)
             }
     
     def _parse_and_validate_response(self, response_content: str, chapter_number: int) -> Dict[str, Any]:

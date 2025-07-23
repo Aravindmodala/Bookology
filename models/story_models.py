@@ -60,6 +60,7 @@ class Chapter(BaseModel):
     title: Optional[str] = None
     content: str
     summary: Optional[str] = None
+    dna: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     source_table: str = "Chapters"
@@ -77,6 +78,7 @@ class Chapter(BaseModel):
             title=data.get("title"),
             content=data["content"],
             summary=data.get("summary"),
+            dna=data.get("dna"),
             created_at=data["created_at"],
             updated_at=data.get("updated_at"),
             source_table="Chapters"
@@ -92,6 +94,7 @@ class Chapter(BaseModel):
             title=data.get("title"),
             content=data["content"],
             summary=data.get("summary"),
+            dna=data.get("dna"),
             created_at=data["created_at"],
             updated_at=data.get("updated_at"),
             source_table="Chapters"

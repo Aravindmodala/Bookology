@@ -330,7 +330,7 @@ class OptimizedChapterService:
                 choice_records.append({
                     'story_id': story_id,                           # Required - int4
                     'chapter_number': chapter_number,               # Required - int4  
-                    'choice_id': f"choice_{chapter_number}_{i+1}",  # Required - text (unique ID)
+                    'choice_id': str(i+1),                          # Required - text (unique ID)
                     'title': choice['title'],                       # Required - text
                     'description': choice['description'],           # Required - text
                     'story_impact': choice['story_impact'],         # Required - text

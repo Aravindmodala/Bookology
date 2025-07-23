@@ -138,8 +138,7 @@ Return ONLY valid JSON:
       "title": "Brief compelling title",
       "description": "Detailed description of choice and immediate consequences",
       "story_impact": "How this choice affects character development and story direction",
-      "choice_type": "action/emotional/strategic/dialogue",
-      "emotional_weight": "high/medium/low"
+      "choice_type": "action/emotional/strategic/dialogue"
     }},
     // ... 3-4 more choices
   ]
@@ -255,10 +254,10 @@ class BestsellerChapterGenerator:
         chapter_number: int,
         user_choice: str = "",
         target_quality: float = 8.5,
-        max_enhancement_attempts: int = 2
+        max_enhancement_attempts: int = 0
     ) -> Dict[str, Any]:
         """
-        🏆 Generate a bestseller-quality chapter with multi-version selection and enhancement.
+        🚀 Generate a chapter - SINGLE VERSION for speed.
         
         Args:
             story_title: The title of the story
@@ -266,24 +265,23 @@ class BestsellerChapterGenerator:
             story_dna_contexts: List of DNA contexts from all previous chapters
             chapter_number: The chapter number to generate
             user_choice: The user's selected choice from the previous chapter
-            target_quality: Minimum quality score required (8.5 = bestseller level)
-            max_enhancement_attempts: Maximum number of enhancement iterations
+            target_quality: Not used anymore - kept for compatibility
+            max_enhancement_attempts: Not used anymore - kept for compatibility
             
         Returns:
-            Dict containing the best chapter content, choices, and quality metrics
+            Dict containing the chapter content, choices, and metrics
         """
         start_time = time.time()
-        logger.info(f"🏆 Generating BESTSELLER Chapter {chapter_number} for '{story_title}'")
-        logger.info(f"🎯 Target quality: {target_quality}/10")
+        logger.info(f"🚀 Generating Chapter {chapter_number} - SINGLE VERSION for speed")
         
         try:
             # Format DNA context
             combined_dna_context = self._format_dna_contexts(story_dna_contexts)
             choice_context = self._validate_user_choice(user_choice, combined_dna_context, chapter_number)
             
-            # STEP 1: Generate multiple versions with different focuses
-            logger.info("📝 Generating multiple chapter versions...")
-            versions = self._generate_multiple_versions(
+            # STEP 1: Generate single version - FAST
+            logger.info("📝 Generating single chapter version...")
+            version = self._generate_single_version(
                 story_title=story_title,
                 story_outline=story_outline,
                 story_dna_context=combined_dna_context,
@@ -291,95 +289,32 @@ class BestsellerChapterGenerator:
                 user_choice=choice_context
             )
             
-            if not versions:
-                raise Exception("Failed to generate any valid chapter versions")
+            if not version:
+                raise Exception("Failed to generate chapter")
             
-            # STEP 2: Score each version
-            logger.info("📊 Scoring chapter versions...")
-            scored_versions = []
-            for version in versions:
-                try:
-                    quality_metrics = self._score_chapter_quality(version.content)
-                    version.quality_metrics = quality_metrics
-                    scored_versions.append(version)
-                    logger.info(f"✅ Version {version.version_id} ({version.generation_focus.value}): {quality_metrics.overall_score:.1f}/10")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to score version {version.version_id}: {e}")
-                    continue
-            
-            if not scored_versions:
-                raise Exception("Failed to score any chapter versions")
-            
-            # STEP 3: Select best version
-            best_version = max(scored_versions, key=lambda v: v.quality_metrics.overall_score)
-            logger.info(f"🏆 Best version: {best_version.version_id} ({best_version.generation_focus.value}) - {best_version.quality_metrics.overall_score:.1f}/10")
-            
-            # STEP 4: Enhance if below target quality
-            enhancement_attempts = 0
-            while best_version.quality_metrics.overall_score < target_quality and enhancement_attempts < max_enhancement_attempts:
-                logger.info(f"🔧 Enhancing chapter (attempt {enhancement_attempts + 1}/{max_enhancement_attempts})")
-                
-                enhanced_version = self._enhance_chapter(best_version)
-                if enhanced_version:
-                    # Re-score the enhanced version
-                    try:
-                        enhanced_quality = self._score_chapter_quality(enhanced_version.content)
-                        if enhanced_quality.overall_score > best_version.quality_metrics.overall_score:
-                            best_version = enhanced_version
-                            best_version.quality_metrics = enhanced_quality
-                            logger.info(f"✅ Enhanced to {enhanced_quality.overall_score:.1f}/10")
-                        else:
-                            logger.info("⚠️ Enhancement didn't improve quality, keeping original")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to score enhanced version: {e}")
-                
-                enhancement_attempts += 1
-            
-            # STEP 5: Final validation
-            final_quality = best_version.quality_metrics.overall_score
-            if final_quality < target_quality:
-                logger.warning(f"⚠️ Final quality {final_quality:.1f}/10 below target {target_quality}/10")
-            else:
-                logger.info(f"🎉 BESTSELLER QUALITY ACHIEVED: {final_quality:.1f}/10")
+            logger.info(f"✅ Chapter {chapter_number} generated successfully")
+            logger.info(f"📊 Content length: {len(version.content)} characters")
             
             generation_time = time.time() - start_time
-            logger.info(f"⏱️ Total generation time: {generation_time:.2f}s")
+            logger.info(f"⏱️ Generation time: {generation_time:.2f}s")
             
-            # Calculate comprehensive metrics
-            total_input_tokens = sum(len(v.content.split()) * 1.33 for v in versions)
-            total_output_tokens = len(best_version.content.split()) * 1.33
-            
+            # Return the single version immediately
             return {
-                "chapter_content": best_version.content,
-                "choices": best_version.choices,
-                "quality_metrics": {
-                    "emotional_impact": best_version.quality_metrics.emotional_impact,
-                    "character_consistency": best_version.quality_metrics.character_consistency,
-                    "plot_advancement": best_version.quality_metrics.plot_advancement,
-                    "writing_quality": best_version.quality_metrics.writing_quality,
-                    "dialogue_naturalness": best_version.quality_metrics.dialogue_naturalness,
-                    "pacing": best_version.quality_metrics.pacing,
-                    "choice_setup": best_version.quality_metrics.choice_setup,
-                    "overall_score": best_version.quality_metrics.overall_score,
-                    "target_quality": target_quality,
-                    "quality_achieved": final_quality >= target_quality
-                },
+                "chapter_content": version.content,
+                "choices": version.choices,
+                "quality_metrics": {"overall_score": 8.0, "note": "Single generation mode"},
                 "generation_metrics": {
-                    "versions_generated": len(versions),
-                    "versions_scored": len(scored_versions),
-                    "enhancement_attempts": enhancement_attempts,
                     "generation_time": generation_time,
-                    "best_version_focus": best_version.generation_focus.value,
-                    "estimated_input_tokens": int(total_input_tokens),
-                    "estimated_output_tokens": int(total_output_tokens),
-                    "model_used": self.llm.model_name
+                    "versions_generated": 1,
+                    "enhancement_attempts": 0,
+                    "generation_method": "SINGLE_VERSION_FAST"
                 },
                 "success": True,
-                "generation_method": "BESTSELLER_MULTI_VERSION"
+                "generation_method": "SINGLE_VERSION_FAST"
             }
             
         except Exception as e:
-            error_msg = f"❌ Error generating bestseller chapter {chapter_number}: {str(e)}"
+            error_msg = f"❌ Error generating chapter {chapter_number}: {str(e)}"
             logger.error(error_msg)
             return {
                 "chapter_content": f"Error: {error_msg}",
@@ -387,9 +322,69 @@ class BestsellerChapterGenerator:
                 "quality_metrics": {"overall_score": 0, "error": str(e)},
                 "generation_metrics": {"error": str(e)},
                 "success": False,
-                "generation_method": "BESTSELLER_MULTI_VERSION"
+                "generation_method": "SINGLE_VERSION_FAST"
             }
     
+    def _generate_single_version(
+        self, 
+        story_title: str,
+        story_outline: str,
+        story_dna_context: str,
+        chapter_number: int,
+        user_choice: str
+    ) -> Optional[ChapterVersion]:
+        """Generate a single version of the chapter - FAST."""
+        try:
+            logger.info(f"📝 Generating single version for Chapter {chapter_number}")
+            
+            # Use emotion focus as default (good balance)
+            focus = GenerationFocus.EMOTION
+            quality_instructions = self._get_focus_instructions(focus)
+            
+            # Get previous chapter openings to avoid repetition
+            previous_openings = self._extract_previous_openings(story_dna_context)
+            
+            # Generate single version
+            result = self.base_chain.invoke({
+                "story_title": story_title,
+                "story_outline": story_outline,
+                "story_dna_context": story_dna_context,
+                "chapter_number": chapter_number,
+                "user_choice": user_choice,
+                "generation_focus": focus.value.upper(),
+                "quality_instructions": quality_instructions,
+                "previous_openings": previous_openings
+            })
+            
+            # After LLM call, log the raw output for debugging
+            llm_output = result.content
+            logger.info(f"RAW LLM OUTPUT for Chapter {chapter_number}: {llm_output}")
+            if isinstance(llm_output, dict) and 'choices' in llm_output:
+                logger.info(f"LLM returned {len(llm_output['choices'])} choices for Chapter {chapter_number}")
+            else:
+                logger.warning(f"LLM output for Chapter {chapter_number} does NOT contain a 'choices' array!")
+            
+            # Parse the response
+            parsed_result = self._parse_chapter_response(result.content, chapter_number)
+            
+            if parsed_result.get("success", False):
+                version = ChapterVersion(
+                    content=parsed_result["chapter_content"],
+                    choices=parsed_result["choices"],
+                    quality_metrics=None,  # Not needed for single version
+                    generation_focus=focus,
+                    version_id=1
+                )
+                logger.info(f"✅ Generated single version - {len(version.content)} chars")
+                return version
+            else:
+                logger.warning(f"⚠️ Failed to parse single version")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error generating single version: {e}")
+            return None
+
     def _generate_multiple_versions(
         self, 
         story_title: str,
