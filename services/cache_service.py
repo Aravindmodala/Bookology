@@ -100,19 +100,29 @@ class CacheService:
     
     def _set_memory_cache(self, key: str, value: Any, ttl: timedelta):
         """Set value in memory cache with LRU eviction."""
-        # LRU eviction
+        # Clean up expired items first
+        current_time = datetime.now()
+        expired_keys = [
+            k for k, v in self._memory_cache.items()
+            if current_time >= v["expires_at"]
+        ]
+        for expired_key in expired_keys:
+            del self._memory_cache[expired_key]
+        
+        # LRU eviction if still at capacity
         if len(self._memory_cache) >= self._max_memory_items:
             # Remove oldest item
-            oldest_key = min(
-                self._memory_cache.keys(),
-                key=lambda k: self._memory_cache[k]["created_at"]
-            )
-            del self._memory_cache[oldest_key]
+            if self._memory_cache:
+                oldest_key = min(
+                    self._memory_cache.keys(),
+                    key=lambda k: self._memory_cache[k]["created_at"]
+                )
+                del self._memory_cache[oldest_key]
         
         self._memory_cache[key] = {
             "value": value,
-            "created_at": datetime.now(),
-            "expires_at": datetime.now() + ttl
+            "created_at": current_time,
+            "expires_at": current_time + ttl
         }
         logger.debug(f"Cached in memory: {key}")
     
