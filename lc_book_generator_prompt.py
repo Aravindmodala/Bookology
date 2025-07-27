@@ -7,6 +7,9 @@ import json
 import time
 from typing import Dict, Any
 import dspy
+from logger_config import setup_logger
+
+logger = setup_logger(__name__)
 
 # Placeholder for loading examples (for future optimizer use)
 EXAMPLES_PATH = os.path.join(os.path.dirname(__file__), 'story_outline_examples.json')
@@ -44,22 +47,30 @@ class GenerateChapterBreakdown(dspy.Signature):
     4. Setting and atmosphere details
     5. Cliffhanger or transition to next chapter
     
-    Format as a JSON array where each chapter is an object with the following structure:
+    IMPORTANT: Also extract and return the main characters and key locations as simple arrays.
+    
+    Format as a JSON object with the following structure:
     {
-      "chapter_number": 1,
-      "title": "Chapter Title",
-      "key_events": ["Event 1", "Event 2", "Event 3"],
-      "character_development": "Description of character growth",
-      "setting": "Setting description and atmosphere",
-      "cliffhanger": "How the chapter ends with tension"
+      "chapters": [
+        {
+          "chapter_number": 1,
+          "title": "Chapter Title",
+          "key_events": ["Event 1", "Event 2", "Event 3"],
+          "character_development": "Description of character growth",
+          "setting": "Setting description and atmosphere",
+          "cliffhanger": "How the chapter ends with tension"
+        }
+      ],
+      "main_characters": [eg., "Alex", "Clara", "Maya"],
+      "key_locations": [eg., "Coffee Shop", "Library", "Office"]
     }
     
-    Return ONLY valid JSON array format, no additional text."""
+    Return ONLY valid JSON format, no additional text."""
     
     summary = dspy.InputField(desc="The story summary to break down")
     genre = dspy.InputField(desc="The story genre")
     tone = dspy.InputField(desc="The story tone")
-    chapter_breakdown = dspy.OutputField(desc="JSON array of structured chapter breakdowns")
+    chapter_breakdown = dspy.OutputField(desc="JSON object with chapters, main_characters array, and key_locations array")
 
 class ReflectOnStory(dspy.Signature):
     """You are a professional story editor. Review the following story summary for:
@@ -224,78 +235,61 @@ class OutlineGenerator(dspy.Module):
     def __init__(self):
         super().__init__()
         self.generate_story = dspy.ChainOfThought(GenerateStory)
+        self.extract_metadata = dspy.ChainOfThought(ExtractMetadata)
         self.generate_chapters = dspy.ChainOfThought(GenerateChapterBreakdown)
-        self.reflect_story = dspy.Predict(ReflectOnStory)
-        self.extract_metadata = dspy.Predict(ExtractMetadata)
+        self.reflect = dspy.ChainOfThought(ReflectOnStory)
         self.examples = load_examples()
         self.is_optimized = False
 
     def forward(self, idea, include_chapters=True):
-        try:
-            # Step 1: Generate story with chain-of-thought
-            story_result = self.generate_story(idea=idea)
-            
-            # Step 2: Reflect on the generated summary
-            reflection_result = self.reflect_story(summary=story_result.summary)
-            
-            # Step 3: If reflection says REVISE, try again
-            final_summary = story_result.summary
-            if reflection_result.verdict.startswith("REVISE"):
-                print(f"Revising story: {reflection_result.verdict}")
-                # Generate again with feedback context
-                revised_result = self.generate_story(
-                    idea=f"{idea}\n\nPrevious attempt feedback: {reflection_result.evaluation}"
-                )
-                final_summary = revised_result.summary
-                story_result = revised_result
-            
-            # Step 4: Extract metadata including book_title
-            metadata_result = self.extract_metadata(summary=final_summary)
-            
-            # Ensure book_title exists (fallback)
-            book_title = getattr(metadata_result, 'book_title', 'Untitled Story')
-            
-            # Step 5: Generate chapter breakdown if requested
-            chapter_breakdown = []
-            if include_chapters:
-                try:
-                    chapter_result = self.generate_chapters(
-                        summary=final_summary,
-                        genre=metadata_result.genre,
-                        tone=metadata_result.tone
-                    )
-                    # Try to parse JSON, fallback to text if parsing fails
-                    try:
-                        chapter_breakdown = json.loads(chapter_result.chapter_breakdown)
-                    except json.JSONDecodeError:
-                        # If not valid JSON, convert text to structured format
-                        chapter_breakdown = self._parse_text_to_chapters(chapter_result.chapter_breakdown)
-                except Exception as e:
-                    print(f"Error generating chapters: {e}")
-                    chapter_breakdown = []
-            
-            return dspy.Prediction(
-                summary=final_summary,
+        # Generate initial story summary
+        story_result = self.generate_story(idea=idea)
+        
+        # Extract metadata
+        metadata_result = self.extract_metadata(summary=story_result.summary)
+        
+        # Generate chapter breakdown with characters and locations
+        if include_chapters:
+            chapter_result = self.generate_chapters(
+                summary=story_result.summary,
                 genre=metadata_result.genre,
-                tone=metadata_result.tone,
-                book_title=book_title,  # Include book_title in response
-                reflection=reflection_result.evaluation,
-                analysis=story_result.analysis,
-                story_arcs=story_result.story_arcs,
-                selected_arc=story_result.selected_arc,
-                chapter_breakdown=chapter_breakdown
+                tone=metadata_result.tone
             )
             
-        except Exception as e:
-            print(f"Error generating outline: {e}")
-            return dspy.Prediction(
-                summary=f"Error generating story outline: {str(e)}",
-                genre="Unknown",
-                tone="Unknown",
-                book_title="Untitled Story",  # Include fallback book_title
-                reflection="Generation failed",
-                chapter_breakdown=[]
-            )
+            # Parse the JSON response
+            try:
+                import json
+                chapter_data = json.loads(chapter_result.chapter_breakdown)
+                
+                # Extract the components
+                chapters = chapter_data.get("chapters", [])
+                main_characters = chapter_data.get("main_characters", [])
+                key_locations = chapter_data.get("key_locations", [])
+                
+            except json.JSONDecodeError as e:
+                # Fallback if JSON parsing fails
+                print(f"Failed to parse chapter JSON: {e}")
+                chapters = []
+                main_characters = []
+                key_locations = []
+        else:
+            chapters = []
+            main_characters = []
+            key_locations = []
+        
+        # Reflect on the story
+        reflection_result = self.reflect(summary=story_result.summary)
+        
+        return dspy.Prediction(
+            summary=story_result.summary,
+            genre=metadata_result.genre,
+            tone=metadata_result.tone,
+            book_title=metadata_result.book_title,
+            reflection=reflection_result.evaluation,
+            chapter_breakdown=chapters,
+            main_characters=main_characters,  # NEW: Characters from LLM
+            key_locations=key_locations       # NEW: Locations from LLM
+        )
 
     def _parse_text_to_chapters(self, text_breakdown):
         """Convert unstructured text breakdown to structured format."""
@@ -434,8 +428,8 @@ def generate_book_outline_json(idea: str, use_optimized=True, save_result=False,
                 "genre": result.genre,
                 "tone": result.tone,
                 "chapters": result.chapter_breakdown,
-                "main_characters": [],  # Can be extracted from chapters if needed
-                "key_locations": [],    # Can be extracted from chapters if needed
+                "main_characters": result.main_characters,  # NEW: Characters from LLM
+                "key_locations": result.key_locations,       # NEW: Locations from LLM
                 "theme": result.tone,   # Use tone as theme for now
                 "style": result.genre,  # Use genre as style for now
                 "language": "English",
@@ -476,8 +470,8 @@ def generate_book_outline_json(idea: str, use_optimized=True, save_result=False,
                 "genre": "Unknown",
                 "tone": "Unknown",
                 "chapters": [],
-                "main_characters": [],
-                "key_locations": [],
+                "main_characters": [],  # Empty array for error case
+                "key_locations": [],    # Empty array for error case
                 "theme": "Unknown",
                 "style": "Unknown",
                 "language": "English",
@@ -597,3 +591,88 @@ def force_reoptimization():
     """Force immediate re-optimization with current examples."""
     generator = get_optimized_generator(force_reoptimize=True)
     return generator
+
+class RewriteTextSignature(dspy.Signature):
+    """You are an expert editor and writing coach specializing in improving narrative text.
+    
+    Your task is to rewrite the given text to improve clarity, flow, engagement, and emotional impact.
+    
+    Consider the story context provided (genre, characters, setting) to ensure the rewrite fits seamlessly.
+    
+    Improvements to focus on:
+    1. Clarity and conciseness
+    2. Emotional depth and engagement
+    3. Better word choice and sentence flow
+    4. Maintaining the author's voice and style
+    5. Genre-appropriate tone and atmosphere
+    
+    Keep the same length approximately, and maintain the core meaning and plot points."""
+    
+    original_text = dspy.InputField(desc="The original text to be rewritten")
+    story_context = dspy.InputField(desc="Story context including title, genre, characters, and setting")
+    analysis = dspy.OutputField(desc="Brief analysis of what needs improvement in the original text")
+    rewritten_text = dspy.OutputField(desc="The improved, rewritten version of the text")
+
+class RewriteTextModule(dspy.Module):
+    """Module for rewriting text with context awareness."""
+    
+    def __init__(self):
+        super().__init__()
+        self.rewrite = dspy.ChainOfThought(RewriteTextSignature)
+    
+    def forward(self, original_text: str, story_context: Dict[str, Any]):
+        # Format context for the AI
+        context_str = f"""
+        Story Title: {story_context.get('story_title', 'Unknown')}
+        Genre: {story_context.get('story_genre', 'Unknown')}
+        Current Chapter: {story_context.get('current_chapter', 'Unknown')}
+        Story Summary: {story_context.get('story_outline', 'No summary available')}
+        """.strip()
+        
+        return self.rewrite(
+            original_text=original_text,
+            story_context=context_str
+        )
+
+def rewrite_text_with_context(original_text: str, story_context: Dict[str, Any] = None) -> str:
+    """
+    Rewrite the given text using AI to improve clarity, flow, and engagement.
+    
+    Args:
+        original_text (str): The text to be rewritten
+        story_context (Dict[str, Any], optional): Context about the story for better rewrites
+        
+    Returns:
+        str: The rewritten, improved text
+    """
+    try:
+        logger.info(f"[REWRITE_FUNCTION] Starting rewrite for {len(original_text)} characters")
+        
+        # Initialize the rewrite module
+        rewriter = RewriteTextModule()
+        
+        # Use provided context or empty dict
+        context = story_context or {}
+        
+        # Call the rewrite function
+        logger.info("[REWRITE_FUNCTION] Calling DSPy rewrite module...")
+        result = rewriter.forward(original_text, context)
+        
+        if not result or not hasattr(result, 'rewritten_text'):
+            logger.error("[REWRITE_FUNCTION] No rewritten_text in result")
+            return original_text  # Return original if rewrite fails
+        
+        rewritten = result.rewritten_text.strip()
+        
+        if not rewritten:
+            logger.warning("[REWRITE_FUNCTION] Empty rewritten text, returning original")
+            return original_text
+        
+        logger.info(f"[REWRITE_FUNCTION] Successfully rewritten text: {len(original_text)} -> {len(rewritten)} characters")
+        
+        return rewritten
+        
+    except Exception as e:
+        logger.error(f"[REWRITE_FUNCTION] Error during rewrite: {str(e)}")
+        # Return original text if rewrite fails
+        return original_text

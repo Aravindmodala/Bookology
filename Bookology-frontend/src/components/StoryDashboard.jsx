@@ -14,12 +14,14 @@ import {
   MoreVertical,
   Edit3,
   Trash2,
-  Eye
+  Eye,
+  Palette
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { supabase, isSupabaseEnabled } from '../supabaseClient';
 import { createApiUrl, API_ENDPOINTS } from '../config';
 import { Menu, Transition } from '@headlessui/react';
+import { CacheService, CACHE_KEYS } from '../services/cacheService';
 
 const StoryDashboard = ({ onStartNewStory }) => {
   const [stories, setStories] = useState([]);
@@ -177,95 +179,230 @@ const StoryDashboard = ({ onStartNewStory }) => {
     }
   };
 
-  const StoryCard = ({ story }) => (
-    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group">
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex-1">
-          <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-blue-400 transition-colors">
-            {story.story_title || 'Untitled Story'}
-          </h3>
-          <p className="text-gray-400 text-sm line-clamp-2 mb-3">
-            {story.story_outline || 'No description available'}
-          </p>
-        </div>
-        <div className="flex items-center space-x-2 ml-4">
-          <button 
-            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all"
-            onClick={() => handleViewStory(story)}
-            title="View Story"
-          >
-            <Eye className="w-4 h-4" />
-          </button>
-          <button 
-            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all"
-            onClick={() => handleEditStory(story)}
-            title="Edit Story"
-          >
-            <Edit3 className="w-4 h-4" />
-          </button>
-          {/* Three dots menu */}
-          <Menu as="div" className="relative inline-block text-left">
-            <Menu.Button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all" title="More Options">
-              <MoreVertical className="w-4 h-4" />
-            </Menu.Button>
-            <Transition
-              as={React.Fragment}
-              enter="transition ease-out duration-100"
-              enterFrom="transform opacity-0 scale-95"
-              enterTo="transform opacity-100 scale-100"
-              leave="transition ease-in duration-75"
-              leaveFrom="transform opacity-100 scale-100"
-              leaveTo="transform opacity-0 scale-95"
+  const StoryCard = ({ story }) => {
+    const [coverImage, setCoverImage] = useState(null);
+    const [coverLoading, setCoverLoading] = useState(false);
+    const [showImageModal, setShowImageModal] = useState(false);
+
+    // Fetch cover image on component mount
+    useEffect(() => {
+      const fetchCoverImage = async () => {
+        if (!story.id || !session?.access_token) return;
+        
+        try {
+          const response = await fetch(
+            createApiUrl(API_ENDPOINTS.GET_COVER_STATUS.replace('{story_id}', story.id)),
+            {
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.cover_image_url) {
+              setCoverImage(data.cover_image_url);
+            }
+          }
+        } catch (err) {
+          console.log('No cover image found for story:', story.id);
+        }
+      };
+
+      fetchCoverImage();
+    }, [story.id, session]);
+
+    // Generate cover image
+    const handleGenerateCover = async () => {
+      if (!story.id || !session?.access_token || coverLoading) return;
+      
+      setCoverLoading(true);
+      try {
+        const response = await fetch(
+          createApiUrl(API_ENDPOINTS.GENERATE_COVER.replace('{story_id}', story.id)),
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.cover_image_url) {
+            setCoverImage(data.cover_image_url);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to generate cover:', err);
+      } finally {
+        setCoverLoading(false);
+      }
+    };
+
+    return (
+      <div className="bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group overflow-hidden">
+        {/* Cover Image Section */}
+        <div className="relative h-48 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 overflow-hidden">
+          {coverImage ? (
+            <img 
+              src={coverImage} 
+              alt={story.story_title || 'Story cover'}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer"
+              onClick={() => setShowImageModal(true)}
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-blue-600/20 via-purple-600/20 to-pink-600/20">
+              <BookOpen className="w-12 h-12 text-gray-400 mb-2" />
+              <span className="text-gray-400 text-sm mb-3">No cover image</span>
+              <button
+                onClick={handleGenerateCover}
+                disabled={coverLoading}
+                className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white text-xs rounded-lg transition-colors flex items-center space-x-1"
+              >
+                {coverLoading ? (
+                  <>
+                    <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Generating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Palette className="w-3 h-3" />
+                    <span>Generate Cover</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+          
+          {/* Overlay with action buttons */}
+          <div className="absolute top-2 right-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button 
+              className="p-1.5 bg-black/50 hover:bg-black/70 rounded-lg text-white transition-all"
+              onClick={() => handleViewStory(story)}
+              title="View Story"
             >
-              <Menu.Items className="absolute right-0 z-10 mt-2 w-36 origin-top-right rounded-md bg-gray-900 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
-                <div className="py-1">
-                  <Menu.Item>
-                    {({ active }) => (
-                      <button
-                        onClick={() => handleDeleteStory(story)}
-                        className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-red-600 text-white' : 'text-red-400'}`}
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" /> Delete
-                      </button>
+              <Eye className="w-3 h-3" />
+            </button>
+            <button 
+              className="p-1.5 bg-black/50 hover:bg-black/70 rounded-lg text-white transition-all"
+              onClick={() => handleEditStory(story)}
+              title="Edit Story"
+            >
+              <Edit3 className="w-3 h-3" />
+            </button>
+          </div>
+
+          {/* Status badge */}
+          <div className="absolute top-2 left-2">
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(story.status)}`}>
+              {story.status?.replace('_', ' ') || 'draft'}
+            </span>
+          </div>
+        </div>
+
+          {/* Content Section */}
+        <div className="p-4 relative z-0">
+          <div className="flex justify-between items-start mb-3">
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-white mb-2 group-hover:text-blue-400 transition-colors line-clamp-1">
+                {story.story_title || 'Untitled Story'}
+              </h3>
+              <p className="text-gray-400 text-sm line-clamp-2">
+                {story.story_outline || 'No description available'}
+              </p>
+            </div>
+          </div>          <div className="flex items-center justify-between mb-4 text-sm text-gray-400">
+            <div className="flex items-center space-x-3">
+              <span className="flex items-center">
+                <FileText className="w-3 h-3 mr-1" />
+                {story.total_chapters || 0}
+              </span>
+              <span className="flex items-center">
+                <Calendar className="w-3 h-3 mr-1" />
+                {formatDate(story.created_at)}
+              </span>
+            </div>
+            <span className="text-blue-400 font-medium text-xs">
+              {story.genre || 'Fiction'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <button 
+              className="flex items-center text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
+              onClick={() => handleContinueReading(story)}
+            >
+              Continue Reading
+              <ChevronRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
+            </button>
+            
+            {/* More options menu */}
+            <Menu as="div" className="relative inline-block">
+              <Menu.Button className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all">
+                <MoreVertical className="w-4 h-4" />
+              </Menu.Button>
+              <Transition
+                as={React.Fragment}
+                enter="transition ease-out duration-200"
+                enterFrom="transform opacity-0 scale-95"
+                enterTo="transform opacity-100 scale-100"
+                leave="transition ease-in duration-75"
+                leaveFrom="transform opacity-100 scale-100"
+                leaveTo="transform opacity-0 scale-95"
+              >
+                <Menu.Items className="absolute right-0 z-50 mt-2 w-36 origin-top-right rounded-md bg-gray-900 shadow-xl ring-1 ring-gray-700 focus:outline-none transform-gpu">
+                  <div className="py-1">
+                    {!coverImage && (
+                      <Menu.Item>
+                        {({ active }) => (
+                          <button
+                            onClick={handleGenerateCover}
+                            disabled={coverLoading}
+                            className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-blue-600 text-white' : 'text-blue-400'} disabled:opacity-50 transition-colors duration-200`}
+                          >
+                            <Palette className="w-4 h-4 mr-2" /> Generate Cover
+                          </button>
+                        )}
+                      </Menu.Item>
                     )}
-                  </Menu.Item>
-                </div>
-              </Menu.Items>
-            </Transition>
-          </Menu>
+                    <Menu.Item>
+                      {({ active }) => (
+                        <button
+                          onClick={() => handleDeleteStory(story)}
+                          className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-red-600 text-white' : 'text-red-400'} hover:bg-red-600 hover:text-white transition-colors duration-200`}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" /> Delete
+                        </button>
+                      )}
+                    </Menu.Item>
+                  </div>
+                </Menu.Items>
+              </Transition>
+            </Menu>
+          </div>
         </div>
-      </div>
 
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-4 text-sm text-gray-400">
-          <span className="flex items-center">
-            <FileText className="w-4 h-4 mr-1" />
-            {story.total_chapters || 0} chapters
-          </span>
-          <span className="flex items-center">
-            <Calendar className="w-4 h-4 mr-1" />
-            {formatDate(story.created_at)}
-          </span>
-        </div>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(story.status)}`}>
-          {story.status?.replace('_', ' ') || 'draft'}
-        </span>
+        {/* Cover Image Modal */}
+        {showImageModal && coverImage && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={() => setShowImageModal(false)}>
+            <div className="max-w-4xl max-h-[90vh] p-4">
+              <img 
+                src={coverImage} 
+                alt={story.story_title || 'Story cover'}
+                className="w-full h-full object-contain rounded-lg"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          </div>
+        )}
       </div>
-
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-blue-400 font-medium">
-          {story.genre || 'General Fiction'}
-        </span>
-        <button 
-          className="flex items-center text-sm text-gray-400 hover:text-white transition-colors group-hover:translate-x-1 transform duration-200"
-          onClick={() => handleContinueReading(story)}
-        >
-          Continue Reading
-          <ChevronRight className="w-4 h-4 ml-1" />
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   if (loading) {
     return (

@@ -59,7 +59,15 @@ class VectorSearchService:
         """Synchronous vector search"""
         try:
             with self.engine.connect() as conn:
-                # Search using cosine similarity
+                # SECURITY: Use parameterized queries to prevent SQL injection
+                # Validate inputs before query execution
+                if not isinstance(story_id, int) or story_id <= 0:
+                    raise ValueError("Invalid story_id: must be positive integer")
+                if not isinstance(top_k, int) or top_k <= 0 or top_k > 100:
+                    raise ValueError("Invalid top_k: must be positive integer <= 100")
+                if not isinstance(similarity_threshold, (int, float)) or similarity_threshold < 0 or similarity_threshold > 1:
+                    raise ValueError("Invalid similarity_threshold: must be between 0 and 1")
+                
                 results = conn.execute(
                     text("""
                         SELECT 

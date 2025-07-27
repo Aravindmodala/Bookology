@@ -1,286 +1,264 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
+  Eye, 
+  EyeOff, 
+  Save, 
+  Undo, 
+  Redo, 
   Bold, 
   Italic, 
   Underline, 
   List, 
-  ListOrdered, 
-  Quote, 
-  Undo, 
-  Redo, 
-  Save,
-  Search,
-  MessageSquare,
-  Settings,
-  Type,
-  Palette,
-  Heading1,
-  Heading2,
-  Heading3,
+  ListOrdered,
   AlignLeft,
   AlignCenter,
   AlignRight,
-  Link,
-  Image,
-  Table,
-  Minus,
-  MoreHorizontal
+  Sparkles,
+  Focus,
+  Target,
+  BarChart3,
+  Settings,
+  Zap,
+  Loader2,
+  Gamepad2
 } from 'lucide-react';
 
-const EditorToolbar = ({ 
-  onFormat, 
-  onSave, 
-  onUndo, 
-  onRedo, 
-  onToggleComments, 
-  showComments, 
-  wordCount, 
-  charCount 
+const EditorToolbar = ({
+  isSidebarCollapsed,
+  onToggleSidebar,
+  onToggleAIPanel,
+  isAIPanelOpen,
+  onToggleFocusMode,
+  isFocusMode,
+  onGenerateSuggestion,
+  isGeneratingSuggestion,
+  wordCount,
+  showWordCount,
+  onToggleWordCount,
+  gameMode,
+  onToggleGameMode
 }) => {
-  const [showFontMenu, setShowFontMenu] = useState(false);
-  const [showHeadingMenu, setShowHeadingMenu] = useState(false);
-  
-  const formatText = (command, value = null) => {
-    onFormat(command, value);
+  const handleFormat = (command) => {
+    document.execCommand(command, false, null);
   };
 
-  const headingOptions = [
-    { label: 'Normal Text', command: 'formatBlock', value: 'p' },
-    { label: 'Heading 1', command: 'formatBlock', value: 'h1' },
-    { label: 'Heading 2', command: 'formatBlock', value: 'h2' },
-    { label: 'Heading 3', command: 'formatBlock', value: 'h3' },
-  ];
+  const handleSave = () => {
+    // Auto-save functionality
+    console.log('Auto-saving...');
+  };
 
-  const fontSizes = ['12px', '14px', '16px', '18px', '20px', '24px', '28px', '32px'];
+  const handleUndo = () => {
+    document.execCommand('undo', false, null);
+  };
+
+  const handleRedo = () => {
+    document.execCommand('redo', false, null);
+  };
 
   return (
-    <div className="bg-gray-800 border-b border-gray-700 p-4">
-      <div className="flex items-center space-x-4">
-        {/* File Operations */}
-        <div className="flex items-center space-x-1 border-r border-gray-600 pr-4">
-          <button 
-            onClick={onSave}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105 group" 
-            title="Save (Ctrl+S)"
+    <div className="bg-gray-800 border-b border-gray-700 px-4 py-3">
+      <div className="flex items-center justify-between">
+        {/* Left Section */}
+        <div className="flex items-center space-x-4">
+          {/* Sidebar Toggle */}
+          <button
+            onClick={onToggleSidebar}
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+            title="Toggle Sidebar"
           >
-            <Save className="w-5 h-5 group-hover:text-green-400" />
+            <Eye className="w-4 h-4" />
           </button>
-          <button 
-            onClick={onUndo}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Undo (Ctrl+Z)"
+
+          {/* AI Panel Toggle */}
+          <button
+            onClick={onToggleAIPanel}
+            className={`p-2 rounded-lg transition-colors ${
+              isAIPanelOpen 
+                ? 'text-blue-400 bg-blue-900/30' 
+                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+            }`}
+            title="Toggle AI Assistant"
           >
-            <Undo className="w-5 h-5" />
+            <Sparkles className="w-4 h-4" />
           </button>
-          <button 
-            onClick={onRedo}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Redo (Ctrl+Y)"
+
+          {/* Focus Mode Toggle */}
+          <button
+            onClick={onToggleFocusMode}
+            className={`p-2 rounded-lg transition-colors ${
+              isFocusMode 
+                ? 'text-green-400 bg-green-900/30' 
+                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+            }`}
+            title="Toggle Focus Mode (Ctrl+Shift+F)"
           >
-            <Redo className="w-5 h-5" />
+            <Focus className="w-4 h-4" />
+          </button>
+
+          {/* Game Mode Toggle */}
+          <button
+            onClick={onToggleGameMode}
+            className={`p-2 rounded-lg transition-colors ${
+              gameMode 
+                ? 'text-purple-400 bg-purple-900/30' 
+                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+            }`}
+            title="Toggle Game Mode"
+          >
+            <Gamepad2 className="w-4 h-4" />
+          </button>
+
+          {/* AI Suggestion Button */}
+          <button
+            onClick={onGenerateSuggestion}
+            disabled={isGeneratingSuggestion}
+            className="flex items-center space-x-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white text-sm rounded-lg transition-colors disabled:cursor-not-allowed"
+            title="Generate AI Suggestion (Ctrl+Enter)"
+          >
+            {isGeneratingSuggestion ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Zap className="w-4 h-4" />
+            )}
+            <span>AI Suggestion</span>
           </button>
         </div>
 
-        {/* Text Style */}
-        <div className="flex items-center space-x-1 border-r border-gray-600 pr-4">
-          {/* Heading Dropdown */}
-          <div className="relative">
+        {/* Center Section - Formatting Tools */}
+        <div className="flex items-center space-x-1">
+          {/* Text Formatting */}
+          <div className="flex items-center space-x-1 bg-gray-700 rounded-lg p-1">
             <button
-              onClick={() => setShowHeadingMenu(!showHeadingMenu)}
-              className="px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors flex items-center"
+              onClick={() => handleFormat('bold')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Bold (Ctrl+B)"
             >
-              <Type className="w-4 h-4 mr-2" />
-              Normal
-              <svg className="w-3 h-3 ml-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
+              <Bold className="w-4 h-4" />
             </button>
-            {showHeadingMenu && (
-              <div className="absolute top-full left-0 mt-1 bg-gray-700 border border-gray-600 rounded-lg shadow-lg z-50 min-w-40">
-                {headingOptions.map((option, index) => (
-                  <button
-                    key={index}
-                    onClick={() => {
-                      formatText(option.command, option.value);
-                      setShowHeadingMenu(false);
-                    }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-600 first:rounded-t-lg last:rounded-b-lg"
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            )}
+            <button
+              onClick={() => handleFormat('italic')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Italic (Ctrl+I)"
+            >
+              <Italic className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleFormat('underline')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Underline (Ctrl+U)"
+            >
+              <Underline className="w-4 h-4" />
+            </button>
           </div>
 
-          {/* Font Size */}
-          <div className="relative">
+          {/* Alignment */}
+          <div className="flex items-center space-x-1 bg-gray-700 rounded-lg p-1 ml-2">
             <button
-              onClick={() => setShowFontMenu(!showFontMenu)}
-              className="px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+              onClick={() => handleFormat('justifyLeft')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Align Left"
             >
-              16px
+              <AlignLeft className="w-4 h-4" />
             </button>
-            {showFontMenu && (
-              <div className="absolute top-full left-0 mt-1 bg-gray-700 border border-gray-600 rounded-lg shadow-lg z-50">
-                {fontSizes.map((size) => (
-                  <button
-                    key={size}
-                    onClick={() => {
-                      formatText('fontSize', size);
-                      setShowFontMenu(false);
-                    }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-600 first:rounded-t-lg last:rounded-b-lg"
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-            )}
+            <button
+              onClick={() => handleFormat('justifyCenter')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Align Center"
+            >
+              <AlignCenter className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleFormat('justifyRight')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Align Right"
+            >
+              <AlignRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Lists */}
+          <div className="flex items-center space-x-1 bg-gray-700 rounded-lg p-1 ml-2">
+            <button
+              onClick={() => handleFormat('insertUnorderedList')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Bullet List"
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleFormat('insertOrderedList')}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Numbered List"
+            >
+              <ListOrdered className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        {/* Text Formatting */}
-        <div className="flex items-center space-x-1 border-r border-gray-600 pr-4">
-          <button 
-            onClick={() => formatText('bold')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105 group" 
-            title="Bold (Ctrl+B)"
+        {/* Right Section */}
+        <div className="flex items-center space-x-4">
+          {/* Word Count Toggle */}
+          <button
+            onClick={onToggleWordCount}
+            className={`p-2 rounded-lg transition-colors ${
+              showWordCount 
+                ? 'text-blue-400 bg-blue-900/30' 
+                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+            }`}
+            title="Toggle Word Count (Ctrl+Shift+W)"
           >
-            <Bold className="w-5 h-5 group-hover:text-blue-400" />
+            <BarChart3 className="w-4 h-4" />
           </button>
-          <button 
-            onClick={() => formatText('italic')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105 group" 
-            title="Italic (Ctrl+I)"
-          >
-            <Italic className="w-5 h-5 group-hover:text-blue-400" />
-          </button>
-          <button 
-            onClick={() => formatText('underline')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105 group" 
-            title="Underline (Ctrl+U)"
-          >
-            <Underline className="w-5 h-5 group-hover:text-blue-400" />
-          </button>
-        </div>
 
-        {/* Alignment */}
-        <div className="flex items-center space-x-1 border-r border-gray-600 pr-4">
-          <button 
-            onClick={() => formatText('justifyLeft')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Align Left"
-          >
-            <AlignLeft className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => formatText('justifyCenter')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Align Center"
-          >
-            <AlignCenter className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => formatText('justifyRight')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Align Right"
-          >
-            <AlignRight className="w-5 h-5" />
-          </button>
-        </div>
+          {/* Word Count Display */}
+          {showWordCount && (
+            <div className="flex items-center space-x-2 text-sm text-gray-300">
+              <span className="font-mono">{wordCount}</span>
+              <span className="text-gray-500">words</span>
+            </div>
+          )}
 
-        {/* Lists & Elements */}
-        <div className="flex items-center space-x-1 border-r border-gray-600 pr-4">
-          <button 
-            onClick={() => formatText('insertUnorderedList')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Bullet List"
-          >
-            <List className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => formatText('insertOrderedList')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Numbered List"
-          >
-            <ListOrdered className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => formatText('formatBlock', 'blockquote')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Quote"
-          >
-            <Quote className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={() => formatText('insertHorizontalRule')}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Horizontal Line"
-          >
-            <Minus className="w-5 h-5" />
-          </button>
-        </div>
+          {/* Undo/Redo */}
+          <div className="flex items-center space-x-1 bg-gray-700 rounded-lg p-1">
+            <button
+              onClick={handleUndo}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleRedo}
+              className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
+              title="Redo (Ctrl+Y)"
+            >
+              <Redo className="w-4 h-4" />
+            </button>
+          </div>
 
-        {/* Insert Elements */}
-        <div className="flex items-center space-x-1 border-r border-gray-600 pr-4">
-          <button 
-            onClick={() => {
-              const url = prompt('Enter URL:');
-              if (url) formatText('createLink', url);
-            }}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Insert Link"
-          >
-            <Link className="w-5 h-5" />
-          </button>
-          <button 
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Insert Image"
-          >
-            <Image className="w-5 h-5" />
-          </button>
-          <button 
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Insert Table"
-          >
-            <Table className="w-5 h-5" />
-          </button>
-        </div>
+          {/* Auto-save indicator */}
+          <div className="flex items-center space-x-2 text-xs text-gray-400">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span>Auto-saved</span>
+          </div>
 
-        {/* Tools */}
-        <div className="flex items-center space-x-1 border-r border-gray-600 pr-4">
-          <button 
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
-            title="Find & Replace (Ctrl+F)"
-          >
-            <Search className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={onToggleComments}
-            className={`p-2 rounded-lg transition-all duration-200 hover:scale-105 ${
-              showComments ? 'bg-blue-600 text-white' : 'hover:bg-gray-700'
-            }`} 
-            title="Comments"
-          >
-            <MessageSquare className="w-5 h-5" />
-          </button>
-          <button 
-            className="p-2 hover:bg-gray-700 rounded-lg transition-all duration-200 hover:scale-105" 
+          {/* Settings */}
+          <button
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
             title="Settings"
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-4 h-4" />
           </button>
         </div>
+      </div>
 
-        {/* Word Count - Always visible */}
-        <div className="ml-auto bg-gray-700 px-4 py-2 rounded-lg">
-          <div className="text-sm text-gray-300">
-            <span className="font-medium text-white">{wordCount.toLocaleString()}</span> words
-            <span className="mx-2 text-gray-500">•</span>
-            <span className="text-gray-400">{charCount.toLocaleString()} characters</span>
-          </div>
-        </div>
+      {/* Keyboard Shortcuts Help */}
+      <div className="mt-2 text-xs text-gray-500 flex items-center justify-center space-x-4">
+        <span>Ctrl+Enter: AI Suggestion</span>
+        <span>Ctrl+Shift+F: Focus Mode</span>
+        <span>Ctrl+Shift+W: Toggle Word Count</span>
+        <span>Ctrl+Z: Undo</span>
+        <span>Ctrl+Y: Redo</span>
       </div>
     </div>
   );

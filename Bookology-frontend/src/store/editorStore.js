@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { CacheService, CACHE_KEYS } from '../services/cacheService';
 
 export const useEditorStore = create(
   persist(
@@ -21,10 +22,28 @@ export const useEditorStore = create(
           cachedChoices: choices,
           lastUpdated: Date.now()
         });
+        // Also cache in localStorage for persistence
+        CacheService.set(
+          `editor_cache_${storyId}`,
+          { story, chapters, choices },
+          5 * 60 * 1000 // 5 min TTL
+        );
       },
       
       // Get cached data for a story
       getCachedData: (storyId) => {
+        // Try localStorage first for instant reloads
+        const cached = CacheService.get(`editor_cache_${storyId}`);
+        if (cached) {
+          return {
+            story: cached.story,
+            chapters: cached.chapters,
+            choices: cached.choices,
+            isCached: true,
+            isStale: false // TTL already checked by CacheService
+          };
+        }
+        // Fallback to in-memory state
         const state = get();
         if (state.cachedStoryId === storyId) {
           const cacheAge = Date.now() - (state.lastUpdated || 0);
@@ -196,6 +215,13 @@ export const useEditorStore = create(
         return state.cachedStoryId === storyId && 
                state.cachedStory && 
                state.cachedChapters.length > 0;
+      },
+
+      // Game Mode state
+      gameMode: true, // default to Game mode (true = Game, false = Normal)
+      setGameMode: (mode) => {
+        console.log('🎮 Game mode changed to:', mode ? 'Game' : 'Normal');
+        set({ gameMode: mode });
       }
     }),
     {
@@ -206,7 +232,8 @@ export const useEditorStore = create(
         cachedStory: state.cachedStory,
         cachedChapters: state.cachedChapters,
         cachedChoices: state.cachedChoices,
-        lastUpdated: state.lastUpdated
+        lastUpdated: state.lastUpdated,
+        gameMode: state.gameMode // persist game mode preference
       })
     }
   )

@@ -10,7 +10,7 @@ import ErrorBoundary from './ErrorBoundary';
 
 function HomeWrapper() {
   const navigate = useNavigate();
-  return <BookologyHome onStart={() => navigate('/stories')} />;
+  return <BookologyHome onStart={() => navigate('/create')} />;
 }
 
 function StoriesWrapper() {

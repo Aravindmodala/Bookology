@@ -38,5 +38,11 @@ export const API_ENDPOINTS = {
   SWITCH_CHAPTER_VERSION: '/story/{story_id}/chapter/{chapter_number}/switch_version',
   SAVE_PREVIEWED_CHAPTER: '/save_previewed_chapter', // New endpoint for saving previewed chapter
   // Chapter-specific choice endpoint
-  GET_CHAPTER_CHOICES: '/chapter/{chapter_id}/choices' // New endpoint for fetching choices by chapter_id
+  GET_CHAPTER_CHOICES: '/chapter/{chapter_id}/choices', // New endpoint for fetching choices by chapter_id
+  // Cover generation endpoints
+  GENERATE_COVER: '/story/{story_id}/generate_cover',
+  GET_COVER_STATUS: '/story/{story_id}/cover_status',
+  // Rewrite functionality
+  REWRITE_TEXT: '/rewrite_text',
+  SUGGEST_CONTINUE: '/suggest_continue'
 };

@@ -1,347 +1,409 @@
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from langchain.chains import LLMChain
+from langchain.prompts import ChatPromptTemplate
 from dotenv import load_dotenv
 import os
 import json
 import logging
-from typing import Dict, Any, Optional
+import time
+from typing import Dict, Any, Optional, List
 
 # Load environment variables from .env
 load_dotenv()
 
-# Set up logging for JSON output display
+# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize the LLM (OpenAI Chat model - Updated with higher token limit)
-llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o-mini', temperature=0.8, max_tokens=15000)
+# Initialize the LLM
+llm = ChatOpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"), 
+    model_name='gpt-4o-mini', 
+    temperature=0.8, 
+    max_tokens=15000
+)
 
-system_template = """🚨 ABSOLUTE PRIORITY: Your primary task is to write a FULL 2,500-3,000 word chapter. Even if other sections (reasoning, choices, metrics) need to be shorter to accommodate this, the chapter content is what matters most. The chapter is what readers will see - make it substantial and immersive.
+# FIXED: Updated System Template with Properly Escaped JSON
+system_template = """You are a master storyteller creating the FIRST CHAPTER of a story.
 
-You are a globally renowned, award-winning novelist, ghostwriter, and master storyteller known for creating bestselling novels that captivate readers deeply.
+CRITICAL REQUIREMENTS:
+- Write EXACTLY 1800-2000 words for the chapter content
+- Include 3 meaningful story choices at the end
+- Return ONLY valid JSON with NO additional text whatsoever
 
-🎭 ROLE & EXPERTISE:
-- Expert in character development, plot pacing, layered backstory, and emotional storytelling
-- Master of immersive world-building and atmospheric prose
-- Specialist in powerful chapter hooks, rising tension, and cliffhangers
-- Skilled at writing deeply human, layered prose that feels alive
-- Expert at creating meaningful, contextual story choices that impact narrative direction
-
-🧠 CHAIN-OF-THOUGHT REASONING:
-Before writing the chapter, you will think through the following steps systematically:
-
-STEP 1: STORY ANALYSIS
-- Analyze the genre, tone, and central conflict
-- Identify the protagonist's emotional state and motivations
-- Understand the story's trajectory and this chapter's role
-
-STEP 2: CHAPTER PLANNING
-- Map out the chapter's three-act structure
-- Plan key scenes, character moments, and emotional beats
-- Design the hook/cliffhanger that will end the chapter
-
-STEP 3: CHARACTER PSYCHOLOGY
-- Deep dive into each character's mindset in this chapter
-- Plan their dialogue, actions, and internal thoughts
-- Consider their relationships and dynamics
-
-STEP 4: SCENE CRAFTING
-- Visualize each scene with sensory details
-- Plan the pacing and tension escalation
-- Identify key decision moments within scenes
-
-STEP 5: CHOICE ANALYSIS & GENERATION
-- Analyze the chapter's ending moment and emotional stakes
-- Identify the protagonist's dilemma and available options
-- Consider each character's personality and motivations
-- Evaluate how each choice would impact story direction
-- Ensure choices represent different character development paths
-- Design choices that feel organic to the specific moment
-
-STEP 6: QUALITY CHECK
-- Ensure emotional resonance and character authenticity
-- Verify logical flow and compelling narrative arc
-- Confirm choices are meaningful and story-appropriate
-- Validate that chapter serves the larger story
-
-✍️ WRITING STANDARDS:
-- Format: Novel-style prose (not script or bullet points)
-- Perspective: Third-person limited (or first-person if the outline requires)
-- Voice: Masterful, human author quality with vivid, emotionally expressive language
-- Characters: Complex, with contradictions, depth, and vulnerability
-- Continuity: Logical, immersive world consistency
-
-🎯 CHAPTER 1 REQUIREMENTS:
-- Start in the protagonist's **ordinary world**, showing their current daily life, environment, and small details that reveal their personality and emotions.
-- Reveal the protagonist's **inner conflicts, longings, and emotional stakes**.
-- Use **layered sensory details** (smells, sounds, sights, textures) and **micro-emotions** to create immersion.
-- Transition naturally into the **inciting incident** that will propel the protagonist into the journey.
-- End with a **compelling hook**, signaling the change about to come.
-
-🎯 CHOICE GENERATION REQUIREMENTS:
-- Generate 3-4 contextual choices that naturally emerge from the chapter's ending moment
-- Use STEP 5 (Choice Analysis) to systematically think through each option
-- Each choice should represent a meaningful decision the protagonist could make
-- Choices should reflect different aspects of character personality and growth
-- Consider the emotional state of characters at the chapter's end
-- Ensure choices have clear consequences for future story development
-- Make choices specific to the exact situation and character dilemmas
-- Include a mix of action-oriented, emotional, and strategic choices
-- Each choice should feel authentic to the character's voice and motivations
-
-💡 Follow the provided outline precisely while expanding it into immersive, cinematic, and emotionally resonant prose.
-
-📌 OUTPUT FORMAT:
-Return ONLY a valid JSON object in this exact structure:
+You must return ONLY this exact JSON structure with NO markdown, NO explanations, NO extra text:
 
 {{
-  "reasoning": {{
-    "story_analysis": "Your analysis of the genre, tone, conflict, and protagonist",
-    "chapter_planning": "Your three-act structure plan and key scenes",
-    "character_psychology": "Deep dive into character mindsets and motivations", 
-    "scene_crafting": "Your visualization and pacing strategy",
-    "choice_analysis": "Your systematic analysis of the chapter's ending moment, character dilemmas, available options, and how each choice would impact story direction and character development",
-    "quality_assessment": "Your evaluation of emotional resonance, narrative flow, and choice meaningfulness"
-  }},
-  "chapter": "CRITICAL REQUIREMENT: Write a FULL novel chapter of AT LEAST 2,500 words, targeting 3,000 words. This is MANDATORY - do not write anything shorter. Include extensive character development, rich dialogue, detailed scene descriptions, and immersive atmosphere. Structure: Act 1 (900-1000 words): Deep exploration of ordinary world with extensive sensory details and character thoughts. Act 2 (900-1000 words): Detailed inciting incident with full scene development and character reactions. Act 3 (900-1000 words): Build tension to climactic hook with emotional depth and vivid descriptions. Write in full novel prose with detailed descriptions, meaningful dialogue, and rich character moments. Count your words and ensure you reach the 2,500-3,000 word target.",
+  "chapter": "Your complete 1800-2000 word chapter content goes here with vivid descriptions, character development, dialogue, and rich storytelling that establishes the setting, introduces main characters, creates an engaging hook, and sets up the central conflict of the story...",
   "choices": [
     {{
       "id": "choice_1",
-      "title": "Brief choice title (3-6 words)",
-      "description": "Detailed description of what this choice involves and its immediate implications",
-      "story_impact": "How this choice would affect the story direction and character development",
-      "choice_type": "action/emotional/strategic/dialogue"
+      "text": "First choice option that significantly impacts the story direction",
+      "consequence": "Clear description of what this choice will lead to"
     }},
     {{
       "id": "choice_2", 
-      "title": "Brief choice title (3-6 words)",
-      "description": "Detailed description of what this choice involves and its immediate implications",
-      "story_impact": "How this choice would affect the story direction and character development",
-      "choice_type": "action/emotional/strategic/dialogue"
+      "text": "Second choice option with different story implications",
+      "consequence": "Clear description of what this choice will lead to"
     }},
     {{
       "id": "choice_3",
-      "title": "Brief choice title (3-6 words)", 
-      "description": "Detailed description of what this choice involves and its immediate implications",
-      "story_impact": "How this choice would affect the story direction and character development",
-      "choice_type": "action/emotional/strategic/dialogue"
+      "text": "Third choice option offering another story path",
+      "consequence": "Clear description of what this choice will lead to"
     }}
+  ]
+}}
 
-🚫 DO NOT:
-- Explain or summarize the outline
-- Use phrases like "As per the outline…"
-- Return summaries instead of chapter content
-- Break character with meta-commentary
-- Add any text outside the JSON structure
-- Include markdown formatting or code blocks
+CRITICAL OUTPUT RULES:
+- Start your response with {{ and end with }}
+- Use ONLY double quotes for all strings
+- NO ```json or ``` markdown formatting
+- NO explanatory text before or after JSON
+- The chapter field must contain 1800-2000 words
+- Include rich descriptions, dialogue, character development
+- Create an engaging opening that hooks readers immediately
+- End with a compelling moment that leads to the choices"""
 
-Write so immersively that readers forget this was AI-generated and feel fully transported into the story. The choices should feel like natural decision points that emerge organically from the chapter's events."""
+human_template = """Story Title: {story_title}
+Story Outline: {story_outline}
+Genre: {genre}
+Tone: {tone}
 
-# Create user message template
-user_template = """Please write **Chapter {chapter_number}** using the story information below.
+Generate the FIRST CHAPTER following the system instructions exactly. Return ONLY the JSON object."""
 
-📘 STORY CONTEXT:
-{story_context}
-
-Follow your chain-of-thought reasoning process systematically, then write Chapter {chapter_number} with deep immersion, emotional authenticity, and compelling narrative flow."""
-
-# Create the chat prompt template
-system_message_prompt = SystemMessagePromptTemplate.from_template(system_template)
-human_message_prompt = HumanMessagePromptTemplate.from_template(user_template)
-
+# Create the prompt template
 prompt = ChatPromptTemplate.from_messages([
-    system_message_prompt,
-    human_message_prompt
+    ("system", system_template),
+    ("human", human_template)
 ])
 
-# Build the chain
+# FIXED: Use modern LangChain syntax
 chain = prompt | llm
 
-def create_minimal_context(story_summary: str, chapter_data: Dict[str, Any], genre: str, tone: str) -> str:
-    """Create minimal, focused context for chapter generation."""
-    
-    context = f"""
-STORY SUMMARY: {story_summary}
-
-GENRE: {genre}
-TONE: {tone}
-
-CHAPTER {chapter_data.get('chapter_number', 1)} DETAILS:
-- Title: {chapter_data.get('title', 'Chapter 1')}
-- Key Events: {', '.join(chapter_data.get('key_events', []))}
-- Character Development: {chapter_data.get('character_development', '')}
-- Setting: {chapter_data.get('setting', '')}
-- Chapter Ending: {chapter_data.get('cliffhanger', '')}
-
-FOCUS: Write this specific chapter with deep character immersion and emotional authenticity.
-"""
-    
-    return context.strip()
-
 class EnhancedChapterGenerator:
-    """Enhanced chapter generator with Chain-of-Thought reasoning and quality validation."""
+    """
+    Enhanced Chapter Generator for FIRST CHAPTER ONLY.
+    Generates 1800-2000 word chapters with proper JSON output.
+    """
     
     def __init__(self):
-        self.llm = llm
-        self.chain = chain
-        logger.info("🚀 EnhancedChapterGenerator initialized with CoT reasoning")
+        logger.info("🚀 EnhancedChapterGenerator initialized for FIRST CHAPTER generation")
     
-    def generate_chapter_from_outline(self, story_summary: str, chapter_data: Dict[str, Any], 
-                                    genre: str, tone: str, max_retries: int = 0) -> Dict[str, Any]:
+    def generate_chapter_from_outline(
+        self, 
+        story_title: str,
+        story_outline: str, 
+        genre: str = "General Fiction",
+        tone: str = "Dramatic",
+        max_retries: int = 3
+    ) -> Dict[str, Any]:
         """
-        Generate a chapter with CoT reasoning - SINGLE GENERATION for speed.
+        Generate the FIRST CHAPTER from story outline.
         
         Args:
-            story_summary: Brief story summary for context
-            chapter_data: Structured chapter information from outline
-            genre: Story genre
-            tone: Story tone
-            max_retries: Not used anymore - kept for compatibility
+            story_title: The title of the story
+            story_outline: The story outline
+            genre: The story genre
+            tone: The story tone
+            max_retries: Maximum retry attempts
+            
+        Returns:
+            Dict containing chapter content and choices
         """
-        chapter_number = chapter_data.get('chapter_number', 1)
-        logger.info(f"📖 Generating Chapter {chapter_number} - SINGLE ATTEMPT for speed...")
+        logger.info(f"🎯 Generating FIRST CHAPTER for: {story_title}")
+        logger.info(f"📝 Outline length: {len(story_outline)} characters")
+        logger.info(f"🎭 Genre: {genre}, Tone: {tone}")
         
-        # Create minimal context
-        story_context = create_minimal_context(story_summary, chapter_data, genre, tone)
+        for attempt in range(max_retries):
+            try:
+                start_time = time.time()
+                
+                # Generate chapter using modern LangChain syntax
+                result = chain.invoke({
+                    "story_title": story_title,
+                    "story_outline": story_outline,
+                    "genre": genre,
+                    "tone": tone
+                })
+                
+                # FIXED: Correct way to access LangChain response
+                if hasattr(result, 'content'):
+                    llm_output = result.content
+                elif isinstance(result, dict):
+                    llm_output = result.get('text', result.get('content', str(result)))
+                else:
+                    llm_output = str(result)
+                
+                # Debug logging
+                logger.info(f"🔍 RESULT TYPE: {type(result)}")
+                logger.info(f"🔍 LLM OUTPUT (first 300 chars): {llm_output[:300]}...")
+                logger.info(f"📏 Output length: {len(llm_output)} characters")
+                
+                # Parse and validate response
+                parsed_result = self._parse_and_validate_response(llm_output, attempt + 1)
+                
+                if parsed_result.get("success", False):
+                    generation_time = time.time() - start_time
+                    word_count = len(parsed_result["chapter"].split())
+                    
+                    logger.info(f"✅ FIRST CHAPTER generated successfully!")
+                    logger.info(f"📊 Word count: {word_count} words")
+                    logger.info(f"⏱️ Generation time: {generation_time:.2f}s")
+                    logger.info(f"🎮 Choices generated: {len(parsed_result.get('choices', []))}")
+                    
+                    return {
+                        "content": parsed_result["chapter"],
+                        "title": "Chapter 1",
+                        "choices": parsed_result.get("choices", []),
+                        "success": True,
+                        "word_count": word_count,
+                        "generation_time": generation_time,
+                        "attempt": attempt + 1
+                    }
+                else:
+                    error_msg = parsed_result.get('error', 'Unknown error')
+                    logger.error(f"❌ Attempt {attempt + 1} failed: {error_msg}")
+                    
+                    # Log raw response for debugging
+                    if 'raw_response' in parsed_result:
+                        logger.error(f"🔍 Raw response: {parsed_result['raw_response'][:500]}...")
+                    
+                    # Continue to next attempt unless this is the last one
+                    if attempt == max_retries - 1:
+                        return {
+                            "content": f"Error generating first chapter after {max_retries} attempts: {error_msg}",
+                            "title": "Chapter 1",
+                            "choices": [],
+                            "success": False,
+                            "error": error_msg,
+                            "raw_response": parsed_result.get('raw_response', '')
+                        }
+                        
+                    # Wait before retry with exponential backoff
+                    wait_time = 2 ** attempt
+                    logger.info(f"⏳ Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                    
+            except Exception as e:
+                logger.error(f"❌ Attempt {attempt + 1} failed with exception: {str(e)}")
+                if attempt == max_retries - 1:
+                    return {
+                        "content": f"Error generating first chapter: {str(e)}",
+                        "title": "Chapter 1",
+                        "choices": [],
+                        "success": False,
+                        "error": str(e)
+                    }
+                    
+                # Wait before retry
+                wait_time = 2 ** attempt
+                logger.info(f"⏳ Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
         
-        logger.info(f"📝 Context length: {len(story_context)} characters")
-        logger.info(f"🎯 Target chapter: {chapter_data.get('title', 'Untitled')}")
-        
+        return {
+            "content": "Failed to generate first chapter after all attempts",
+            "title": "Chapter 1", 
+            "choices": [],
+            "success": False,
+            "error": "Max retries exceeded"
+        }
+    
+    def _parse_and_validate_response(self, response_content: str, attempt_num: int) -> Dict[str, Any]:
+        """
+        Parse and validate the LLM response for first chapter generation.
+        FIXED: Simplified parsing with strict validation.
+        """
         try:
-            logger.info(f"🚀 Generating Chapter {chapter_number} - single attempt")
+            # Clean the response
+            cleaned_response = response_content.strip()
             
-            # Generate chapter with CoT - SINGLE ATTEMPT
-            result = self.chain.invoke({
-                "story_context": story_context,
-                "chapter_number": chapter_number
-            })
+            # Remove markdown code blocks if present (though they shouldn't be there)
+            if cleaned_response.startswith('```json'):
+                cleaned_response = cleaned_response[7:]
+                logger.warning("⚠️ Found ```json wrapper - LLM didn't follow instructions")
+            elif cleaned_response.startswith('```'):
+                cleaned_response = cleaned_response[3:]
+                logger.warning("⚠️ Found ``` wrapper - LLM didn't follow instructions")
             
-            logger.info(f"✅ Chapter {chapter_number} generated successfully")
-            logger.info(f"📊 Generated content: {len(result.content)} characters")
+            if cleaned_response.endswith('```'):
+                cleaned_response = cleaned_response[:-3]
             
-            # Parse and validate response
-            parsed_result = self._parse_and_validate_response(result.content.strip(), chapter_number)
+            cleaned_response = cleaned_response.strip()
             
-            if parsed_result["success"]:
-                logger.info(f"✨ Chapter {chapter_number} ready - returning first result")
-                return parsed_result
-            else:
-                logger.error(f"❌ Failed to parse Chapter {chapter_number}")
+            # Log cleaned response for debugging
+            logger.info(f"🧹 Cleaned response length: {len(cleaned_response)} characters")
+            logger.info(f"🔍 First 200 chars: {cleaned_response[:200]}...")
+            logger.info(f"🔍 Last 200 chars: ...{cleaned_response[-200:]}")
+            
+            # FIXED: Direct JSON parsing with better error handling
+            try:
+                parsed_data = json.loads(cleaned_response)
+                logger.info("✅ JSON parsed successfully")
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ JSON parsing failed on attempt {attempt_num}: {str(e)}")
+                logger.error(f"🔍 Error position: {e.pos if hasattr(e, 'pos') else 'unknown'}")
+                
+                # Try to find where the JSON might be malformed
+                lines = cleaned_response.split('\n')
+                for i, line in enumerate(lines[:10]):  # Show first 10 lines
+                    logger.error(f"Line {i+1}: {line}")
+                
                 return {
-                    "success": False,
-                    "chapter_content": f"Failed to parse Chapter {chapter_number}",
-                    "choices": [],
-                    "error": "Parsing failed"
+                    "success": False, 
+                    "error": f"Invalid JSON (attempt {attempt_num}): {str(e)}", 
+                    "raw_response": cleaned_response
                 }
             
-        except Exception as e:
-            logger.error(f"❌ Chapter {chapter_number} generation failed: {str(e)}")
-            return {
-                "success": False,
-                "chapter_content": f"Error generating Chapter {chapter_number}: {str(e)}",
-                "choices": [],
-                "error": str(e)
-            }
-    
-    def _parse_and_validate_response(self, response_content: str, chapter_number: int) -> Dict[str, Any]:
-        """Parse and validate the JSON response with enhanced error handling."""
-        import re
-        
-        try:
-            # Clean up the response
-            cleaned_text = response_content.strip()
+            # FIXED: Strict validation of required fields
+            if "chapter" not in parsed_data:
+                logger.error("❌ Missing 'chapter' field in response")
+                return {
+                    "success": False, 
+                    "error": "Missing 'chapter' field", 
+                    "raw_response": cleaned_response
+                }
             
-            # Remove markdown code blocks if present
-            if cleaned_text.startswith("```json"):
-                cleaned_text = cleaned_text[7:]
-            if cleaned_text.startswith("```"):
-                cleaned_text = cleaned_text[3:]
-            if cleaned_text.endswith("```"):
-                cleaned_text = cleaned_text[:-3]
+            chapter_content = parsed_data["chapter"]
+            if not isinstance(chapter_content, str):
+                logger.error(f"❌ Chapter content is not a string: {type(chapter_content)}")
+                return {
+                    "success": False, 
+                    "error": "Chapter content must be a string", 
+                    "raw_response": cleaned_response
+                }
             
-            # Remove any leading/trailing whitespace
-            cleaned_text = cleaned_text.strip()
+            if len(chapter_content.strip()) < 100:
+                logger.error(f"❌ Chapter content too short: {len(chapter_content)} characters")
+                return {
+                    "success": False, 
+                    "error": f"Chapter content too short: {len(chapter_content)} characters", 
+                    "raw_response": cleaned_response
+                }
             
-            # Handle trailing commas and other JSON formatting issues
-            cleaned_text = re.sub(r',(\s*[}\]])', r'\1', cleaned_text)
-            cleaned_text = re.sub(r',(\s*})', r'\1', cleaned_text)
-            cleaned_text = re.sub(r',(\s*])', r'\1', cleaned_text)
+            # Calculate word count for logging - NO VALIDATION, accept whatever LLM gives
+            word_count = len(chapter_content.split())
+            logger.info(f"📊 Chapter word count: {word_count} words (accepting any length)")
             
-            # Parse JSON
-            parsed_json = json.loads(cleaned_text)
+            # Validate choices
+            choices = parsed_data.get("choices", [])
+            if not isinstance(choices, list):
+                logger.error(f"❌ Choices must be a list, got: {type(choices)}")
+                return {
+                    "success": False, 
+                    "error": "Choices must be a list", 
+                    "raw_response": cleaned_response
+                }
             
-            # Validate required structure
-            required_fields = ["reasoning", "chapter", "choices", "quality_metrics"]
-            for field in required_fields:
-                if field not in parsed_json:
-                    logger.warning(f"⚠️ Missing required field: {field}")
+            # FIXED: Strict choice validation with integer IDs
+            valid_choices = []
+            for i, choice in enumerate(choices):
+                if not isinstance(choice, dict):
+                    logger.warning(f"⚠️ Choice {i+1} is not a dict: {choice}")
+                    continue
+                
+                if "text" not in choice:
+                    logger.warning(f"⚠️ Choice {i+1} missing 'text' field: {choice}")
+                    continue
+                
+                # Convert choice ID to integer format for database compatibility
+                raw_choice_id = choice.get("id", f"choice_{i+1}")
+                if isinstance(raw_choice_id, str) and raw_choice_id.startswith("choice_"):
+                    # Extract number from "choice_1", "choice_2", etc.
+                    try:
+                        choice_id = int(raw_choice_id.split("_")[1])
+                    except (ValueError, IndexError):
+                        choice_id = i + 1
+                elif isinstance(raw_choice_id, str) and raw_choice_id.isdigit():
+                    # Already a numeric string
+                    choice_id = int(raw_choice_id)
+                elif isinstance(raw_choice_id, int):
+                    # Already an integer
+                    choice_id = raw_choice_id
+                else:
+                    # Fallback to index + 1
+                    choice_id = i + 1
+                
+                choice_text = choice["text"]
+                choice_consequence = choice.get("consequence", "")
+                
+                if len(choice_text.strip()) < 10:
+                    logger.warning(f"⚠️ Choice {i+1} text too short: {choice_text}")
+                    continue
+                
+                valid_choices.append({
+                    "id": choice_id,
+                    "text": choice_text.strip(),
+                    "consequence": choice_consequence.strip()
+                })
             
-            # Basic content validation
-            chapter_content = parsed_json.get("chapter", "")
-            choices = parsed_json.get("choices", [])
+            if len(valid_choices) == 0:
+                logger.error("❌ No valid choices found")
+                return {
+                    "success": False, 
+                    "error": "No valid choices found", 
+                    "raw_response": cleaned_response
+                }
             
-            if len(chapter_content) < 2000:
-                logger.warning(f"⚠️ Chapter content seems short: {len(chapter_content)} characters")
-            
-            if len(choices) < 2:
-                logger.warning(f"⚠️ Limited choices generated: {len(choices)}")
-            
-            logger.info(f"✅ Successfully parsed JSON response with {len(choices)} choices")
+            logger.info(f"✅ Validation successful: {word_count} words, {len(valid_choices)} choices")
             
             return {
                 "success": True,
-                "chapter_content": chapter_content,
-                "choices": choices,
-                "chapter_number": chapter_number,
-                "reasoning": parsed_json.get("reasoning", {}),
-                "quality_metrics": parsed_json.get("quality_metrics", {})
+                "chapter": chapter_content,
+                "choices": valid_choices,
+                "word_count": word_count
             }
             
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ JSON parsing error: {e}")
-            
-            # Fallback: try to extract chapter content even if JSON is malformed
-            return {
-                "success": False,
-                "chapter_content": response_content,
-                "choices": [],
-                "error": f"JSON parsing failed: {str(e)}",
-                "raw_response": response_content[:500] + "..." if len(response_content) > 500 else response_content
-            }
-        
         except Exception as e:
-            logger.error(f"❌ Error validating response: {e}")
+            logger.error(f"❌ Unexpected parsing error: {str(e)}")
             return {
-                "success": False,
-                "chapter_content": response_content,
-                "choices": [],
-                "error": f"Validation error: {str(e)}"
+                "success": False, 
+                "error": f"Parsing error: {str(e)}", 
+                "raw_response": response_content
             }
-    
-    def _calculate_quality_score(self, result: Dict[str, Any]) -> float:
-        try:
-            chapter_content = result.get("chapter_content", "")
-            choices = result.get("choices", [])
-        
-        # Simple scoring based on content length and choices
-            word_count = len(chapter_content.split())
-            content_score = min(10, word_count / 250)  # 2500 words = 10 points
-            choice_score = min(10, len(choices) * 3)   # 3+ choices = 9-10 points
-        
-            average_score = (content_score + choice_score) / 2
-            return round(average_score, 1)
-        
-        except Exception as e:
-            logger.error(f"❌ Error calculating quality score: {e}")
-            return 5.0
 
-# Legacy compatibility function
-def generate_chapter_from_outline(outline: str):
-    """Legacy function for backward compatibility."""
-    try:
-        # This would need to be adapted based on your outline format
-        # For now, return a simple error message
-        return "❌ Please use the new EnhancedChapterGenerator.generate_chapter_from_outline() method"
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
+# Global instance
+enhanced_generator = EnhancedChapterGenerator()
+
+# FIXED: Convenience function with better error handling
+def generate_first_chapter_from_outline(
+    story_title: str,
+    story_outline: str,
+    genre: str = "General Fiction",
+    tone: str = "Dramatic"
+) -> Dict[str, Any]:
+    """
+    Generate the first chapter from story outline.
+    
+    Args:
+        story_title: The title of the story
+        story_outline: The story outline
+        genre: The story genre
+        tone: The story tone
+        
+    Returns:
+        Dict containing chapter content and choices
+    """
+    # Validate inputs
+    if not story_title or not story_title.strip():
+        return {
+            "content": "Error: Story title is required",
+            "title": "Chapter 1",
+            "choices": [],
+            "success": False,
+            "error": "Story title is required"
+        }
+    
+    if not story_outline or len(story_outline.strip()) < 50:
+        return {
+            "content": "Error: Story outline must be at least 50 characters",
+            "title": "Chapter 1",
+            "choices": [],
+            "success": False,
+            "error": "Story outline too short"
+        }
+    
+    return enhanced_generator.generate_chapter_from_outline(
+        story_title=story_title.strip(),
+        story_outline=story_outline.strip(),
+        genre=genre.strip(),
+        tone=tone.strip()
+    )

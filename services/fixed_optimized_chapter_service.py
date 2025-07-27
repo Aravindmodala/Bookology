@@ -105,7 +105,7 @@ class OptimizedChapterService:
             save_time = time.time() - start_time
             
             # Update metrics
-            self._update_metrics(save_time, summary_result)
+            self._update_metrics(save_time, summary_result, dna_result)
             
             logger.info(f"✅ Chapter {chapter_number} saved with summary, DNA, and choices in {save_time:.2f}s")
             
@@ -191,23 +191,42 @@ class OptimizedChapterService:
         return summary_result
 
     async def _extract_choices_async(self, choices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Extract and validate choices"""
-        if not choices:
+        """Extract and validate choices from enhanced chapter generator format"""
+        try:
+            valid_choices = []
+            for choice in choices:
+                # Handle enhanced chapter generator format: id, text, consequence
+                if isinstance(choice, dict):
+                    # Enhanced format: id, text, consequence
+                    if 'text' in choice:
+                        # Convert choice ID to string for database compatibility
+                        choice_id = choice.get('id', '1')
+                        if isinstance(choice_id, int):
+                            choice_id = str(choice_id)
+                        elif isinstance(choice_id, str) and choice_id.startswith('choice_'):
+                            # Extract number from "choice_1", "choice_2", etc.
+                            try:
+                                choice_id = choice_id.split('_')[1]
+                            except (ValueError, IndexError):
+                                choice_id = '1'
+                        
+                        valid_choice = {
+                            'title': choice.get('text', ''),
+                            'description': choice.get('consequence', ''),
+                            'story_impact': choice.get('consequence', ''),
+                            'choice_type': 'story_choice',
+                            'choice_id': choice_id  # Add the choice_id for database saving
+                        }
+                        valid_choices.append(valid_choice)
+                    # Legacy format: title, description, story_impact, choice_type
+                    elif 'title' in choice:
+                        valid_choices.append(choice)
+            
+            logger.info(f" ✅ Validated {len(valid_choices)} choices")
+            return valid_choices
+        except Exception as e:
+            logger.error(f"❌ Error validating choices: {e}")
             return []
-        
-        # Simple validation and formatting
-        validated_choices = []
-        for choice in choices:
-            if isinstance(choice, dict) and choice.get('title'):
-                validated_choices.append({
-                    'title': choice.get('title', ''),
-                    'description': choice.get('description', ''),
-                    'story_impact': choice.get('story_impact', 'medium'),
-                    'choice_type': choice.get('choice_type', 'narrative')
-                })
-        
-        logger.info(f"✅ Validated {len(validated_choices)} choices")
-        return validated_choices
 
     async def _get_previous_chapters_for_dna(
         self,
@@ -219,8 +238,9 @@ class OptimizedChapterService:
         logger.info("📚 Getting previous chapters for DNA context...")
         
         try:
+            # OPTIMIZATION: Only get essential fields for DNA context (not full content)
             response = supabase_client.table("Chapters").select(
-                "content, summary, dna, chapter_number"
+                "summary, dna, chapter_number"  # Removed 'content' for faster queries
             ).eq("story_id", story_id).eq("is_active", True).lt(
                 "chapter_number", current_chapter_number
             ).order("chapter_number").execute()
@@ -240,17 +260,16 @@ class OptimizedChapterService:
         previous_chapters: List[Dict[str, Any]],
         user_choice: str = ""
     ) -> Dict[str, Any]:
-        """Generate story DNA in background thread"""
-        logger.info("🧬 Generating DNA asynchronously...")
-        
+        logger.info(f"🧬 [DNA DEBUG] Generating DNA for Chapter {chapter_number}")
+        logger.info(f"🧬 [DNA DEBUG] Content length: {len(content)}")
+        logger.info(f"🧬 [DNA DEBUG] User choice: {user_choice}")
+        logger.info(f"🧬 [DNA DEBUG] Previous chapters count: {len(previous_chapters)}")
+        logger.info(f"🧬 [DNA DEBUG] Previous chapters DNA: {[ch.get('dna') for ch in previous_chapters]}")
         loop = asyncio.get_event_loop()
-        
         def generate_dna():
             try:
                 from story_dna_extractor import EnhancedLLMStoryDNAExtractor
                 dna_extractor = EnhancedLLMStoryDNAExtractor()
-                
-                # Extract previous DNA list
                 previous_dna_list = []
                 for chapter in previous_chapters:
                     if chapter.get('dna'):
@@ -259,11 +278,11 @@ class OptimizedChapterService:
                             import json
                             try:
                                 dna = json.loads(dna)
-                            except:
+                            except Exception as e:
+                                logger.error(f"🧬 [DNA DEBUG] Failed to parse previous DNA JSON: {e}")
                                 continue
                         previous_dna_list.append(dna)
-                
-                # Generate DNA for current chapter
+                logger.info(f"🧬 [DNA DEBUG] previous_dna_list for extractor: {previous_dna_list}")
                 dna_result = dna_extractor.extract_chapter_dna(
                     chapter_content=content,
                     chapter_number=chapter_number,
@@ -271,19 +290,16 @@ class OptimizedChapterService:
                     user_choice_made=user_choice,
                     choice_options=[]
                 )
-                
+                logger.info(f"🧬 [DNA DEBUG] DNA extractor result: {dna_result}")
                 return dna_result
-                
             except Exception as e:
-                logger.error(f"DNA generation failed: {e}")
+                logger.error(f"🧬 [DNA DEBUG] DNA generation failed: {e}")
                 return {"error": str(e), "fallback": True}
-        
         dna_result = await loop.run_in_executor(
             self.summary_executor,  # Reuse executor
             generate_dna
         )
-        
-        logger.info("✅ DNA generated")
+        logger.info(f"🧬 [DNA DEBUG] Final DNA result for Chapter {chapter_number}: {dna_result}")
         return dna_result
 
     async def _batch_update_chapter_with_dna(
@@ -297,73 +313,60 @@ class OptimizedChapterService:
         choices: List[Dict[str, Any]],
         supabase_client
     ):
-        """Update chapter with summary + DNA and save choices with correct schema"""
-        logger.info("📝 Updating chapter with summary, DNA, and saving choices...")
-        
-        # PART 1: UPDATE CHAPTERS TABLE
+        logger.info(f"📝 [DNA DEBUG] Updating chapter {chapter_id} with summary and DNA...")
         update_data = {}
-        
-        # Add summary if available
         if summary and summary.get('summary'):
             update_data['summary'] = summary['summary']
-            logger.info(f"✅ Adding summary: {len(summary['summary'])} chars")
-        
-        # Add DNA if available (store as JSON string)
+            logger.info(f"📝 [DNA DEBUG] Adding summary: {len(summary['summary'])} chars")
         if dna and not dna.get('error'):
             import json
             update_data['dna'] = json.dumps(dna)
-            logger.info(f"✅ Adding DNA: {len(json.dumps(dna))} chars")
-        
-        # Update chapter
+            logger.info(f"📝 [DNA DEBUG] Adding DNA: {len(json.dumps(dna))} chars")
+        else:
+            logger.warning(f"📝 [DNA DEBUG] DNA not saved for chapter {chapter_id}: {dna}")
         if update_data:
             supabase_client.table("Chapters").update(update_data).eq('id', chapter_id).execute()
-            logger.info(f"✅ Updated chapter with summary: {bool(summary)}, DNA: {bool(dna)}")
-        
-        # PART 2: SAVE CHOICES TO story_choices TABLE
+            logger.info(f"📝 [DNA DEBUG] Updated chapter {chapter_id} with summary: {bool(summary)}, DNA: {bool(dna and not dna.get('error'))}")
         if choices:
-            # Delete existing choices first
             supabase_client.table("story_choices").delete().eq('story_id', story_id).eq('chapter_number', chapter_number).execute()
-            
-            # Insert new choices with ALL required fields according to database schema
             choice_records = []
             for i, choice in enumerate(choices):
+                # Use choice_id from validated choice if available, otherwise use index + 1
+                choice_id = choice.get('choice_id', str(i+1))
                 choice_records.append({
-                    'story_id': story_id,                           # Required - int4
-                    'chapter_number': chapter_number,               # Required - int4  
-                    'choice_id': str(i+1),                          # Required - text (unique ID)
-                    'title': choice['title'],                       # Required - text
-                    'description': choice['description'],           # Required - text
-                    'story_impact': choice['story_impact'],         # Required - text
-                    'choice_type': choice['choice_type'],           # Required - text
-                    'user_id': user_id,                            # Required - uuid
-                    'chapter_id': chapter_id,                       # Optional but good practice - int8
-                    # Optional fields (can be NULL):
-                    # 'is_selected': None,        # boolean (can be NULL)
-                    # 'created_at': auto-generated timestamp
-                    # 'selected_at': None,        # timestamp (can be NULL)
-                    # 'branch_id': None           # uuid (can be NULL)
+                    'story_id': story_id,
+                    'chapter_number': chapter_number,
+                    'choice_id': choice_id,
+                    'title': choice['title'],
+                    'description': choice['description'],
+                    'story_impact': choice['story_impact'],
+                    'choice_type': choice['choice_type'],
+                    'user_id': user_id,
+                    'chapter_id': chapter_id,
                 })
-            
             if choice_records:
                 supabase_client.table("story_choices").insert(choice_records).execute()
-                logger.info(f"✅ Saved {len(choice_records)} choices with story_id={story_id}, chapter_number={chapter_number}")
-        
-        logger.info("✅ Chapter update completed successfully!")
+                logger.info(f"📝 [DNA DEBUG] Saved {len(choice_records)} choices for chapter {chapter_id}")
+        logger.info(f"📝 [DNA DEBUG] Chapter update completed for {chapter_id}")
 
-    def _update_metrics(self, save_time: float, summary_result: Any):
+    def _update_metrics(self, save_time: float, summary_result: Any, dna_result: Any = None):
         """Update performance metrics"""
         self.metrics['total_saves'] += 1
         self.metrics['avg_save_time'] = (
             (self.metrics['avg_save_time'] * (self.metrics['total_saves'] - 1) + save_time) 
             / self.metrics['total_saves']
         )
+        
+        # Track DNA extraction success
+        self.metrics['dna_extracted'] = bool(dna_result and not dna_result.get('error'))
 
     def _get_performance_metrics(self) -> Dict[str, Any]:
         """Get current performance metrics"""
         return {
             'total_saves': self.metrics['total_saves'],
             'avg_save_time': round(self.metrics['avg_save_time'], 2),
-            'embedding_status': 'disabled_for_reliability'
+            'embedding_status': 'disabled_for_reliability',
+            'dna_extracted': self.metrics.get('dna_extracted', False)
         }
 
 # Global instance for import compatibility

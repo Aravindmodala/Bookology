@@ -3,6 +3,7 @@ Optimized main.py with service layer architecture and async operations.
 """
 
 import asyncio
+import time
 from typing import Dict, Any, List, Union
 from contextlib import asynccontextmanager
 import json
@@ -40,6 +41,64 @@ from supabase import create_client, Client
 from typing import Optional
 
 from chapter_summary import generate_chapter_summary
+
+# Add this import at the top with other imports
+from services.cover_prompt_service import cover_prompt_service
+
+# Add this import with other service imports
+from services.leonardo_service import leonardo_service, LeonardoAPIError
+
+# --- ASYNC BACKGROUND TASKS FOR SUMMARY & DNA ---
+import traceback
+from chapter_summary import generate_chapter_summary
+from story_dna_extractor import extract_enhanced_chapter_dna
+
+def get_supabase_client():
+    from supabase import create_client
+    from config import settings
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+
+async def generate_and_update_summary_async(chapter_id: int, chapter_content: str, chapter_number: int, story_title: str, story_context: str):
+    try:
+        logger.info(f"[ASYNC] Generating summary for Chapter {chapter_number} (ID: {chapter_id})...")
+        summary_result = generate_chapter_summary(
+            chapter_content=chapter_content,
+            chapter_number=chapter_number,
+            story_title=story_title,
+            story_context=story_context
+        )
+        if summary_result.get("success"):
+            summary_text = summary_result["summary"]
+            supabase = get_supabase_client()
+            supabase.table("Chapters").update({"summary": summary_text}).eq("id", chapter_id).execute()
+            logger.info(f"[ASYNC] Summary updated for Chapter {chapter_id}")
+        else:
+            logger.error(f"[ASYNC] Summary generation failed for Chapter {chapter_id}: {summary_result.get('error')}")
+    except Exception as e:
+        logger.error(f"[ASYNC] Exception in summary async for Chapter {chapter_id}: {e}")
+        logger.error(traceback.format_exc())
+
+async def generate_and_update_dna_async(chapter_id: int, chapter_content: str, chapter_number: int, previous_dna_list, user_choice: str, choice_options):
+    try:
+        logger.info(f"[ASYNC] Generating DNA for Chapter {chapter_number} (ID: {chapter_id})...")
+        dna_result = extract_enhanced_chapter_dna(
+            chapter_content=chapter_content,
+            chapter_number=chapter_number,
+            previous_dna_list=previous_dna_list,
+            user_choice_made=user_choice,
+            choice_options=choice_options
+        )
+        import json
+        if dna_result and not dna_result.get("error"):
+            dna_json = json.dumps(dna_result)
+            supabase = get_supabase_client()
+            supabase.table("Chapters").update({"dna": dna_json}).eq("id", chapter_id).execute()
+            logger.info(f"[ASYNC] DNA updated for Chapter {chapter_id}")
+        else:
+            logger.error(f"[ASYNC] DNA generation failed for Chapter {chapter_id}: {dna_result}")
+    except Exception as e:
+        logger.error(f"[ASYNC] Exception in DNA async for Chapter {chapter_id}: {e}")
+        logger.error(traceback.format_exc())
 
 logger = setup_logger(__name__)
 
@@ -127,6 +186,18 @@ class StoryChatRequest(BaseModel):
     story_id: int = Field(..., gt=0, description="ID of the story to chat about")
     message: str = Field(..., min_length=1, max_length=1000, description="User message")
 
+class RewriteTextRequest(BaseModel):
+    """Input model for text rewriting functionality."""
+    selected_text: str = Field(..., min_length=1, max_length=2000, description="Text to be rewritten")
+    story_context: Optional[Dict[str, Any]] = Field(default=None, description="Story context for better rewrites")
+    
+    @field_validator('selected_text')
+    @classmethod
+    def validate_selected_text(cls, v):
+        if not v.strip():
+            raise ValueError("Selected text cannot be empty")
+        return v.strip()
+
 # Initialize chatbot (keep for compatibility) - DISABLED due to connection issues
 # story_chatbot = StoryChatbot()
 story_chatbot = None
@@ -136,24 +207,43 @@ supabase: Optional[Client] = None
 
 # Authentication dependency (keep original for compatibility)
 async def get_authenticated_user(token = Depends(auth_scheme)):
-    """Get authenticated user - optimized version."""
+    """Get authenticated user - optimized version with security enhancements."""
     try:
+        # SECURITY: Validate token format before processing
+        if not token or not token.credentials:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing authentication token"
+            )
+        
+        # SECURITY: Basic token format validation
+        token_str = token.credentials.strip()
+        if len(token_str) < 20 or len(token_str) > 2000:  # Reasonable token length bounds
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token format"
+            )
+        
         global supabase
         if not supabase:
             # Fallback: create client if global one not available
             from supabase import create_client
             supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
         
-        user_response = supabase.auth.get_user(token.credentials)
+        user_response = supabase.auth.get_user(token_str)
         user = user_response.user
         
         if not user:
             raise AuthorizationError("Invalid or expired token")
         
+        # SECURITY: Log authentication success (without sensitive data)
+        logger.info(f"User authenticated successfully: {user.id}")
         return user
         
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        logger.error(f"Authentication failed: {e}")
+        logger.error(f"Authentication failed: {type(e).__name__}")  # Don't log full error details
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed"
@@ -254,19 +344,29 @@ async def get_user_stories_optimized(user = Depends(get_authenticated_user)):
     try:
         Stories = await story_service.get_user_Stories(user.id)
         
-        # Convert to API format
+        # Convert to API format with consistent property names
         story_list = []
         for story in Stories:
-            story_list.append({
-                "id": story.id,
-                "title": story.title,  # Fixed: use 'title' instead of 'story_title'
-                "outline": story.outline or "",
-                "created_at": story.created_at.isoformat(),
-                "source_table": story.source_table,
-                "chapter_count": story.current_chapter or 0
-            })
+            try:
+                story_data = {
+                    "id": story.id,
+                    "title": story.title,
+                    "outline": story.outline or "",
+                    "created_at": story.created_at.isoformat(),
+                    "updated_at": story.updated_at.isoformat() if story.updated_at else None,
+                    "chapter_count": story.current_chapter or 0,
+                    "status": story.status or "draft",
+                    "genre": story.genre or "Fiction",
+                    # For backwards compatibility
+                    "story_title": story.title,
+                    "story_outline": story.outline or ""
+                }
+                story_list.append(story_data)
+            except Exception as e:
+                logger.error(f"Error formatting story {story.id}: {e}")
+                continue
         
-        return {"Stories": story_list}
+        return {"stories": story_list}
         
     except Exception as e:
         logger.error(f"Failed to fetch Stories for user {user.id}: {e}")
@@ -423,12 +523,32 @@ async def generate_outline_endpoint(story: StoryInput, user = Depends(get_authen
         logger.info(f"[OUTLINE] Generating outline for {user_info}, idea: {story.idea[:50]}...")
         result = generate_book_outline_json(story.idea)
         logger.info(f"[OUTLINE] Result from generate_book_outline_json: {result}")
+        
+        # 🔍 COMPREHENSIVE DEBUG LOGGING - LLM OUTPUT
+        logger.info("🔍 DEBUG: LLM OUTPUT ANALYSIS:")
+        logger.info(f"   result keys: {list(result.keys()) if result else 'None'}")
+        if result and result.get("outline_json"):
+            outline_json = result["outline_json"]
+            logger.info(f"   outline_json keys: {list(outline_json.keys())}")
+            logger.info(f"   outline_json main_characters: {outline_json.get('main_characters', 'NOT_FOUND')}")
+            logger.info(f"   outline_json key_locations: {outline_json.get('key_locations', 'NOT_FOUND')}")
+        
         if not result or not result.get("summary"):
             logger.error(f"[OUTLINE] No summary returned from outline generator.")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Outline generation failed: No summary returned."
             )
+        
+        # Extract characters and locations from outline_json
+        outline_json = result.get("outline_json", {})
+        main_characters = outline_json.get("main_characters", [])
+        key_locations = outline_json.get("key_locations", [])
+        
+        logger.info(f"🔍 EXTRACTED FOR FRONTEND:")
+        logger.info(f"   main_characters: {main_characters}")
+        logger.info(f"   key_locations: {key_locations}")
+        
         # Return only the new summary-based output
         logger.info(f"[OUTLINE] Returning summary, genre, tone for idea: {story.idea[:50]}")
         return {
@@ -437,9 +557,12 @@ async def generate_outline_endpoint(story: StoryInput, user = Depends(get_authen
             "genre": result["genre"],
             "tone": result["tone"],
             "title": result.get("book_title", ""),  # Include the generated title
-            "chapters": result["chapters"],  # â† This might be missing!
+            "chapters": result["chapters"],
             "reflection": result.get("reflection", ""),
             "is_optimized": result.get("is_optimized", False),
+            "main_characters": main_characters,  # 🔧 ADD MISSING FIELD
+            "key_locations": key_locations,      # 🔧 ADD MISSING FIELD
+            "outline_json": outline_json,        # 🔧 ADD FULL OUTLINE_JSON FOR FALLBACK
         }
     except Exception as e:
         logger.error(f"[OUTLINE] Outline generation failed: {e}")
@@ -447,6 +570,8 @@ async def generate_outline_endpoint(story: StoryInput, user = Depends(get_authen
         raise HTTPException(status_code=500, detail=str(e))
 
 # Helper functions to extract characters and locations from chapters
+# DEPRECATED: These functions are no longer used since we get characters and locations directly from LLM
+# Keeping for backward compatibility only
 def extract_characters_from_chapters(chapters):
     """Extract unique characters from chapter data."""
     characters = []
@@ -506,6 +631,10 @@ class SaveOutlineInput(BaseModel):
     reflection: Optional[str] = None
     is_optimized: Optional[bool] = False
     
+    # NEW: Explicitly include characters and locations
+    main_characters: List[str] = Field(default_factory=list, description="Main characters from LLM")
+    key_locations: List[str] = Field(default_factory=list, description="Key locations from LLM")
+    
     # Optional: Allow old format for backward compatibility
     outline_json: Optional[Dict[str, Any]] = None
     formatted_text: Optional[str] = None
@@ -519,12 +648,63 @@ async def save_outline_endpoint(
     try:
         logger.info(f"💾 Saving enhanced outline to database for user {user.id}...")
         
+        # 🔍 COMPREHENSIVE DEBUG LOGGING - INCOMING REQUEST
+        logger.info("🔍 DEBUG: INCOMING REQUEST DATA:")
+        logger.info(f"   summary: {outline_data.summary[:100] if outline_data.summary else 'None'}...")
+        logger.info(f"   genre: {outline_data.genre}")
+        logger.info(f"   tone: {outline_data.tone}")
+        logger.info(f"   title: {outline_data.title}")
+        logger.info(f"   chapters count: {len(outline_data.chapters) if outline_data.chapters else 0}")
+        logger.info(f"   reflection: {outline_data.reflection[:50] if outline_data.reflection else 'None'}...")
+        logger.info(f"   is_optimized: {outline_data.is_optimized}")
+        
+        # 🔍 CHECK DIRECT FIELDS (NEW)
+        logger.info(f"   DIRECT main_characters: {getattr(outline_data, 'main_characters', 'NOT_FOUND')}")
+        logger.info(f"   DIRECT key_locations: {getattr(outline_data, 'key_locations', 'NOT_FOUND')}")
+        
+        # 🔍 CHECK OUTLINE_JSON FIELD
+        logger.info(f"   outline_json exists: {outline_data.outline_json is not None}")
+        if outline_data.outline_json:
+            logger.info(f"   outline_json keys: {list(outline_data.outline_json.keys())}")
+            logger.info(f"   outline_json main_characters: {outline_data.outline_json.get('main_characters', 'NOT_FOUND')}")
+            logger.info(f"   outline_json key_locations: {outline_data.outline_json.get('key_locations', 'NOT_FOUND')}")
+        
         # Handle new format (enhanced outline generator)
         if outline_data.summary:
             logger.info("📝 Using new enhanced outline format")
             
             # Use user-provided title or create one from the summary
             story_title = outline_data.title if outline_data.title else outline_data.summary.split('.')[0][:50] + "..."
+            
+            # IMPROVED: Get characters and locations from multiple sources with fallbacks
+            main_characters = []
+            key_locations = []
+            
+            # Priority 1: Direct fields from input (NEW)
+            if hasattr(outline_data, 'main_characters') and outline_data.main_characters:
+                main_characters = outline_data.main_characters
+                logger.info(f"📊 Using direct main_characters: {main_characters}")
+            
+            if hasattr(outline_data, 'key_locations') and outline_data.key_locations:
+                key_locations = outline_data.key_locations
+                logger.info(f"📊 Using direct key_locations: {key_locations}")
+            
+            # Priority 2: Fallback to outline_json if direct fields are empty
+            if not main_characters or not key_locations:
+                outline_json = outline_data.outline_json or {}
+                if not main_characters:
+                    main_characters = outline_json.get("main_characters", [])
+                    logger.info(f"📊 Fallback to outline_json main_characters: {main_characters}")
+                if not key_locations:
+                    key_locations = outline_json.get("key_locations", [])
+                    logger.info(f"📊 Fallback to outline_json key_locations: {key_locations}")
+            
+            # Ensure they are always lists (never None)
+            main_characters = main_characters if isinstance(main_characters, list) else []
+            key_locations = key_locations if isinstance(key_locations, list) else []
+            
+            logger.info(f"📊 Final extracted {len(main_characters)} characters: {main_characters}")
+            logger.info(f"📊 Final extracted {len(key_locations)} locations: {key_locations}")
             
             # Prepare story data for database save - mapped to existing schema
             story_data = {
@@ -548,12 +728,14 @@ async def save_outline_endpoint(
                     "chapters": outline_data.chapters,
                     "reflection": outline_data.reflection,
                     "is_optimized": outline_data.is_optimized,
-                    "title": story_title
+                    "title": story_title,
+                    "main_characters": main_characters,  # Include in JSON too
+                    "key_locations": key_locations        # Include in JSON too
                 }),
                 
-                # Extract characters and locations from chapters
-                "main_characters": json.dumps(extract_characters_from_chapters(outline_data.chapters)),
-                "key_locations": json.dumps(extract_locations_from_chapters(outline_data.chapters)),
+                # CRITICAL: Always include these fields for jsonb columns (even if empty)
+                "main_characters": main_characters,  # Direct Python list for jsonb
+                "key_locations": key_locations,      # Direct Python list for jsonb
             }
             
         # Handle old format (backward compatibility)
@@ -566,7 +748,7 @@ async def save_outline_endpoint(
             from lc_book_generator_prompt import format_json_to_display_text
             formatted_text = format_json_to_display_text(outline_json)
             
-            logger.info(f"âœ… Regenerated formatted text with updated character names")
+            logger.info(f"✅ Regenerated formatted text with updated character names")
             
             # Prepare story data for database save - legacy format
             story_data = {
@@ -582,37 +764,81 @@ async def save_outline_endpoint(
                 "style": outline_json.get("style"),
                 "language": outline_json.get("language", "English"),
                 "tags": json.dumps(outline_json.get("tags", [])),  # Convert array to JSON string
-                "main_characters": json.dumps(outline_json.get("main_characters", [])),  # JSONB column - convert to JSON string
-                "key_locations": json.dumps(outline_json.get("key_locations", [])),  # JSONB column - convert to JSON string
+                
+                # FIXED: Pass arrays directly for jsonb columns (no json.dumps)
+                "main_characters": outline_json.get("main_characters", []),  # Direct Python list for jsonb
+                "key_locations": outline_json.get("key_locations", []),      # Direct Python list for jsonb
             }
         else:
             raise HTTPException(status_code=400, detail="Invalid outline data format")
         
-        # Remove None values to avoid database errors
-        story_data = {k: v for k, v in story_data.items() if v is not None and v != [] and v != ""}
+        # CRITICAL FIX: Remove None values but PRESERVE empty arrays for jsonb columns
+        # Empty arrays [] are valid for jsonb columns and should NOT be filtered out
+        filtered_story_data = {}
+        jsonb_columns = {'main_characters', 'key_locations'}  # These need empty arrays preserved
         
-        logger.info(f"Saving outline to database with fields: {list(story_data.keys())}")
+        for k, v in story_data.items():
+            if v is None:
+                continue  # Skip None values
+            elif v == "" and k not in jsonb_columns:
+                continue  # Skip empty strings (but not for jsonb columns)
+            elif v == [] and k not in jsonb_columns:
+                continue  # Skip empty arrays for non-jsonb columns
+            else:
+                filtered_story_data[k] = v  # Keep everything else, including empty arrays for jsonb
+        
+        logger.info(f"Saving outline to database with fields: {list(filtered_story_data.keys())}")
+        logger.info(f"Characters to save: {filtered_story_data.get('main_characters', 'MISSING!')}")
+        logger.info(f"Locations to save: {filtered_story_data.get('key_locations', 'MISSING!')}")
+        logger.info(f"Characters type: {type(filtered_story_data.get('main_characters', None))}")
+        logger.info(f"Locations type: {type(filtered_story_data.get('key_locations', None))}")
         
         try:
+            # Validate critical fields before saving
+            if 'main_characters' not in filtered_story_data:
+                logger.warning("⚠️ main_characters missing from filtered data - adding empty array")
+                filtered_story_data['main_characters'] = []
+            
+            if 'key_locations' not in filtered_story_data:
+                logger.warning("⚠️ key_locations missing from filtered data - adding empty array")
+                filtered_story_data['key_locations'] = []
+            
+            # Final validation log
+            logger.info("🔍 FINAL VALIDATION BEFORE DATABASE INSERT:")
+            logger.info(f"   main_characters: {filtered_story_data.get('main_characters')} (type: {type(filtered_story_data.get('main_characters'))})")
+            logger.info(f"   key_locations: {filtered_story_data.get('key_locations')} (type: {type(filtered_story_data.get('key_locations'))})")
+            
             # Try saving to database
-            story_response = supabase.table("Stories").insert(story_data).execute()
+            story_response = supabase.table("Stories").insert(filtered_story_data).execute()
             story_id = story_response.data[0]["id"]
-            logger.info(f"âœ… Outline saved successfully with story_id: {story_id}")
+            logger.info(f"✅ Outline saved successfully with story_id: {story_id}")
+            
+            # VERIFY: Read back the saved data to confirm it worked
+            verify_response = supabase.table("Stories").select("main_characters, key_locations").eq("id", story_id).execute()
+            if verify_response.data:
+                saved_data = verify_response.data[0]
+                logger.info(f"🔍 VERIFICATION - Data actually saved to DB:")
+                logger.info(f"   main_characters: {saved_data.get('main_characters')}")
+                logger.info(f"   key_locations: {saved_data.get('key_locations')}")
+            else:
+                logger.error("❌ Could not verify saved data!")
 
             # --- OUTLINE SAVED SUCCESSFULLY, BUT DON'T AUTO-GENERATE CHAPTER 1 ---
             # The user should explicitly click "Generate Chapter 1" to create chapters
-            logger.info(f"âœ… Outline saved successfully. User can now generate Chapter 1 manually.")
+            logger.info(f"✅ Outline saved successfully. User can now generate Chapter 1 manually.")
             
             return {
                 "success": True,
                 "message": "Outline saved successfully!",
                 "story_id": story_id,
                 "story_title": story_data.get("story_title", "Untitled Story"),
-                "updated_formatted_text": outline_data.summary if outline_data.summary else outline_data.formatted_text  # Return the summary/text for frontend
+                "updated_formatted_text": outline_data.summary if outline_data.summary else outline_data.formatted_text,  # Return the summary/text for frontend
+                "characters_extracted": len(story_data.get('main_characters', [])),
+                "locations_extracted": len(story_data.get('key_locations', []))
             }
             
         except Exception as save_error:
-            logger.error(f"âŒ Database save failed: {save_error}")
+            logger.error(f"❌ Database save failed: {save_error}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to save outline: {str(save_error)}"
@@ -694,6 +920,11 @@ Each choice should lead to different story directions and consequences.
             }
         ]
         
+        # CLEANUP: Delete any existing choices for this chapter to prevent accumulation
+        logger.info("🧹 Cleaning up old choices for story {} chapter {}...".format(choice_input.story_id, choice_input.current_chapter_num))
+        cleanup_response = supabase.table("story_choices").delete().eq("story_id", choice_input.story_id).eq("chapter_number", choice_input.current_chapter_num).eq("user_id", user.id).execute()
+        logger.info("✅ Cleaned up {} old choices".format(len(cleanup_response.data) if cleanup_response.data else 0))
+        
         # Save choices to database FIRST to get real database IDs
         choice_records = []
         for i, choice in enumerate(choices, 1):
@@ -757,6 +988,16 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
     logger.info("Request choice_id value: '{}'".format(request.choice_id))
     
     try:
+        # SECURITY: Validate request inputs
+        if not isinstance(request.story_id, int) or request.story_id <= 0:
+            raise HTTPException(status_code=400, detail="Invalid story_id: must be positive integer")
+        
+        if not isinstance(request.next_chapter_num, int) or request.next_chapter_num <= 0 or request.next_chapter_num > 1000:
+            raise HTTPException(status_code=400, detail="Invalid next_chapter_num: must be positive integer <= 1000")
+        
+        if not request.choice_id or len(str(request.choice_id)) > 50:
+            raise HTTPException(status_code=400, detail="Invalid choice_id format")
+        
         # User is already authenticated via dependency injection
         user_id = user.id
         logger.info("User authenticated: {}".format(user_id))
@@ -773,12 +1014,25 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
             logger.info("Choice {}: id={}, choice_id={}, title='{}'".format(i+1, choice.get('id'), choice.get('choice_id'), choice.get('choice_title', 'No title')))
             logger.info("Choice {} types: id type={}, choice_id type={}".format(i+1, type(choice.get('id')), type(choice.get('choice_id'))))
 
+        # ──────────────────────────────────────────────────────────────
+        # NORMALISE the incoming choice-id so that
+        #   • 738  • "738"  • "choice_738"  • "choice_1"  → all match
+        # ──────────────────────────────────────────────────────────────
+        raw_choice_id = str(request.choice_id)
+        possible_ids = {raw_choice_id}
+        if raw_choice_id.startswith("choice_"):
+            possible_ids.add(raw_choice_id.split("choice_", 1)[1])
+        if raw_choice_id.isdigit():
+            possible_ids.add(f"choice_{raw_choice_id}")
+        
+        logger.info("🔍 CHOICE MATCHING: raw_choice_id='{}', possible_ids={}".format(raw_choice_id, possible_ids))
+
         # Try to find the selected choice by matching with both id and choice_id fields
         selected_choice = None
         
         # First try to match with 'id' field (database primary key)
         for choice in available_choices:
-            if str(choice.get('id')) == str(request.choice_id):
+            if str(choice.get('id')) in possible_ids:
                 selected_choice = choice
                 logger.info("Found choice by 'id' field: {}".format(choice))
                 break
@@ -786,7 +1040,7 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
         # If not found, try to match with 'choice_id' field (user-facing identifier)
         if not selected_choice:
             for choice in available_choices:
-                if str(choice.get('choice_id')) == str(request.choice_id):
+                if str(choice.get('choice_id')) in possible_ids:
                     selected_choice = choice
                     logger.info("Found choice by 'choice_id' field: {}".format(choice))
                     break
@@ -807,16 +1061,31 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
             'selected_at': datetime.utcnow().isoformat()
         }).eq('id', selected_choice['id']).execute()
 
-        # Get the story details
-        logger.info("Fetching story details for story_id={}".format(request.story_id))
-        story_response = supabase.table('Stories').select('*').eq('id', request.story_id).eq('user_id', user_id).single().execute()
-        story = story_response.data
-        logger.info("Story retrieved: title='{}'".format(story.get('story_title', 'No title')))
+        # OPTIMIZATION: Cache story details to avoid repeated database queries
+        from services.simple_cache import cache
+        cache_key = f"story_{request.story_id}_{user_id}"
+        story = cache.get(cache_key)
+        
+        if story is None:
+            logger.info("Fetching story details for story_id={}".format(request.story_id))
+            story_response = supabase.table('Stories').select('*').eq('id', request.story_id).eq('user_id', user_id).single().execute()
+            story = story_response.data
+            cache.set(cache_key, story, ttl=600)  # Cache for 10 minutes
+            logger.info("Story retrieved and cached: title='{}'".format(story.get('story_title', 'No title')))
+        else:
+            logger.info("Story retrieved from cache: title='{}'".format(story.get('story_title', 'No title')))
 
-        # Get only ACTIVE chapters up to the previous chapter (exclude current chapter versions)
+        # OPTIMIZATION: Get only essential fields for previous chapters (not full content)
         max_context_chapter = request.next_chapter_num - 1
         logger.info("Fetching ACTIVE chapters up to chapter {} for story_id={}".format(max_context_chapter, request.story_id))
-        Chapters_response = supabase.table('Chapters').select('*').eq('story_id', request.story_id).eq('is_active', True).lte('chapter_number', max_context_chapter).order('chapter_number').execute()
+        
+        # PERFORMANCE BOOST: Use index-optimized query with LIMIT for faster retrieval
+        Chapters_response = supabase.table('Chapters').select(
+            'id, chapter_number, summary, dna, title'
+        ).eq('story_id', request.story_id).eq('is_active', True).lte(
+            'chapter_number', max_context_chapter
+        ).order('chapter_number').limit(10).execute()  # Limit to last 10 chapters for performance
+        
         previous_Chapters = Chapters_response.data
         logger.info("Active previous chapters count: {} (chapters 1-{})".format(len(previous_Chapters), max_context_chapter))
 
@@ -844,112 +1113,79 @@ async def generate_chapter_with_choice_endpoint(request: SelectChoiceInput, user
 
         logger.info("Chapter generation process completed successfully")
 
-        # --- SAVE GENERATED CHAPTER TO DATABASE ---
+        # --- ENHANCED SAVE: CHAPTER + DNA + SUMMARY + CHOICES ---
         try:
-            logger.info("Saving generated chapter {} to database...".format(request.next_chapter_num))
+            logger.info("🚀 ENHANCED SAVE: Saving chapter {} with DNA and summary generation...".format(request.next_chapter_num))
             
-            # Get the next version number for this chapter
-            next_version_number = await get_next_chapter_version_number(request.story_id, request.next_chapter_num, supabase)
+            # Use the optimized service that generates DNA and summaries
+            from services.fixed_optimized_chapter_service import fixed_optimized_chapter_service
             
-            # Deactivate previous versions of this chapter
-            await deactivate_previous_chapter_versions(request.story_id, request.next_chapter_num, supabase)
-            
-            # Use the correct key for chapter content
+            # Prepare chapter data for optimized save
             chapter_text = next_chapter_result.get("chapter_content") or next_chapter_result.get("chapter") or next_chapter_result.get("content", "")
-            chapter_insert_data = {
+            chapter_dict = {
                 "story_id": request.story_id,
                 "chapter_number": request.next_chapter_num,
-                "title": next_chapter_result.get("title") or f"Chapter {request.next_chapter_num}",
                 "content": chapter_text,
-                "word_count": len(chapter_text.split()),
-                "version_number": next_version_number,  # Add proper versioning
-                "is_active": True,  # Mark this version as active
-                # No summary at this stage; can be added later
-                # Token tracking fields (optional, if available)
-                "token_count_prompt": next_chapter_result.get("token_count_prompt"),
-                "token_count_completion": next_chapter_result.get("token_count_completion"),
-                "token_count_total": next_chapter_result.get("token_count_total"),
-                "temperature_used": next_chapter_result.get("temperature_used"),
+                "title": next_chapter_result.get("title") or "Chapter {}".format(request.next_chapter_num),
+                "choices": next_chapter_result.get("choices", []),
+                "user_choice": selected_choice.get('title', '') + ': ' + selected_choice.get('description', '')
             }
-            chapter_response = supabase.table("Chapters").insert(chapter_insert_data).execute()
-            if not chapter_response.data:
-                logger.error("âŒ DATABASE ERROR: Insert returned no data")
-                raise HTTPException(status_code=500, detail="Failed to save generated chapter")
-            chapter_id = chapter_response.data[0]["id"]
-            logger.info("âœ… Chapter saved with ID: {}".format(chapter_id))
-            # --- GENERATE AND SAVE CHAPTER SUMMARY ---
+            # Save with full optimization (DNA + summaries + choices in parallel)
+            save_result = await fixed_optimized_chapter_service.save_chapter_optimized(
+                chapter_data=chapter_dict,
+                user_id=user_id,
+                supabase_client=supabase
+            )
+            chapter_id = save_result.chapter_id
+            logger.info("✅ ENHANCED SAVE COMPLETE: Chapter {} saved with DNA generation!".format(request.next_chapter_num))
+            logger.info("📊 Save time: {:.2f}s".format(save_result.save_time))
+            logger.info("📝 Summary: '{}'".format('generated' if save_result.summary else 'failed'))
+            logger.info("🧬 DNA: '{}'".format('extracted' if save_result.performance_metrics.get('dna_extracted') else 'failed'))
+            logger.info("🎯 Choices: {} saved".format(len(save_result.choices) if save_result.choices else 0))
+            # Summary and DNA generation handled by optimized service above
             
-            try:
-                from chapter_summary import generate_chapter_summary
-                story_outline = story.get("story_outline", "") if 'story' in locals() else ""
-
-                summary_result = generate_chapter_summary(
-                    chapter_content=chapter_text,
-                    chapter_number=request.next_chapter_num,
-                    story_context=story_outline,
-                    story_title=story.get("story_title", "Untitled Story") if 'story' in locals() else "Untitled Story"
-                )
-
-                if summary_result["success"]:
-                    summary_text = summary_result["summary"]
-                    
-                    update_response = supabase.table("Chapters").update({"summary": summary_text}).eq("id", chapter_id).execute()
-                    
-                    # Verify the update worked
-                    verify_response = supabase.table("Chapters").select("summary").eq("id", chapter_id).execute()
-                    if verify_response.data and verify_response.data[0].get("summary"):
-                        logger.info("âœ… Chapter {} summary saved and verified in database".format(request.next_chapter_num))
-                    else:
-                        logger.error("âŒ Chapter {} summary update may have failed".format(request.next_chapter_num))
-                else:
-                    logger.error("âŒ Failed to generate summary for chapter {}".format(request.next_chapter_num))
-            except Exception as summary_error:
-                import traceback
         except Exception as db_error:
-            logger.error("âŒ DATABASE INSERT FAILED: {}".format(str(db_error)))
-            raise HTTPException(status_code=500, detail="Database insert failed: {}".format(str(db_error)))
-
-        # --- SAVE GENERATED CHOICES FOR THE NEW CHAPTER ---
-        try:
-            choices = next_chapter_result.get("choices", [])
-            if choices:
-                await save_choices_for_chapter(
-                    story_id=request.story_id,
-                    chapter_id=chapter_id,
-                    chapter_number=request.next_chapter_num,
-                    choices=choices,
-                    user_id=user_id,
-                    supabase=supabase
-                )
-        except Exception as choice_error:
-            logger.error("âŒ Failed to save choices: {}".format(str(choice_error)))
-            # Continue anyway - don't break the user experience
-        
+            logger.error("❌ ENHANCED SAVE FAILED: {}".format(str(db_error)))
+            import traceback
+            logger.error("Full traceback: {}".format(traceback.format_exc()))
+            raise HTTPException(status_code=500, detail="Enhanced chapter save failed: {}".format(str(db_error)))
         # Update story's current_chapter
         supabase.table("Stories").update({"current_chapter": request.next_chapter_num}).eq("id", request.story_id).execute()
         
         response_payload = {
             "success": True,
-            "message": "Next chapter generated and saved successfully",
+            "message": "Next chapter generated and saved successfully with DNA",
             "chapter_content": chapter_text,  # Frontend expects this field
             "chapter_number": next_chapter_result.get("chapter_number", request.next_chapter_num),
             "story_id": request.story_id,  # Include story_id for verification
             "chapter": next_chapter_result,  # Keep full chapter data
             "selected_choice": selected_choice,
-            "choices": next_chapter_result.get("choices", [])  # Include any new choices generated
+            "choices": save_result.choices if save_result.choices else next_chapter_result.get("choices", []),  # Use optimized choices
+            "enhanced_features": {
+                "dna_extracted": save_result.performance_metrics.get('dna_extracted', False),
+                "summary_generated": bool(save_result.summary),
+                "async_pipeline": True
+            }
         }
-        logger.info("Returning response to frontend: success={}, chapter_number={}, choices_count={}".format(response_payload.get('success'), response_payload.get('chapter_number'), len(response_payload.get('choices', []))))
+        logger.info("Returning response to frontend: success={}, chapter_number={}, choices_count={}, dna_extracted={}".format(
+            response_payload.get('success'), 
+            response_payload.get('chapter_number'), 
+            len(response_payload.get('choices', [])),
+            response_payload.get('enhanced_features', {}).get('dna_extracted', False)
+        ))
         return response_payload
 
     except HTTPException:
-        logger.error("âŒ HTTP Exception occurred, re-raising")
+        logger.error("âŒ HTTP Exception occurred, re-raising")
         raise
     except Exception as e:
-        logger.error("âŒ Unexpected error in generate_chapter_with_choice: {}".format(str(e)))
+        logger.error("âŒ Unexpected error in generate_chapter_with_choice: {}".format(str(e)))
         logger.error("Error type: {}".format(type(e)))
         import traceback
-        logger.error("âŒ Full traceback: {}".format(traceback.format_exc()))
+        logger.error("âŒ Full traceback: {}".format(traceback.format_exc()))
         raise HTTPException(status_code=500, detail=str(e))
+
+# ✅ Enhanced chapter generation with DNA and summaries is now complete!
 
 @app.get("/story/{story_id}/choice_history")
 async def get_choice_history_endpoint(
@@ -982,41 +1218,148 @@ async def get_choice_history_endpoint(
                     "selected_choice": None
                 }
             
-            choice_data = {
-                "id": choice["id"],  # CRITICAL: Include database ID
+            choice_info = {
+                "id": choice["id"],
                 "choice_id": choice["choice_id"],
-                "title": choice["title"],
-                "description": choice["description"],
-                "story_impact": choice["story_impact"],
-                "choice_type": choice["choice_type"],
-                "is_selected": choice["is_selected"],
-                "selected_at": choice.get("selected_at"),  # Include selected_at timestamp
-                "created_at": choice["created_at"]
+                "title": choice.get("title", "Untitled Choice"),
+                "description": choice.get("description", ""),
+                "story_impact": choice.get("story_impact", ""),
+                "choice_type": choice.get("choice_type", "unknown"),
+                "is_selected": choice.get("is_selected", False),
+                "selected_at": choice.get("selected_at")
             }
             
-            choice_history[chapter_num]["choices"].append(choice_data)
+            choice_history[chapter_num]["choices"].append(choice_info)
             
-            if choice["is_selected"]:
-                choice_history[chapter_num]["selected_choice"] = choice_data
+            if choice.get("is_selected"):
+                choice_history[chapter_num]["selected_choice"] = choice_info
         
         # Convert to list and sort by chapter number
-        history_list = list(choice_history.values())
-        history_list.sort(key=lambda x: x["chapter_number"])
-        
-        logger.info("Retrieved choice history for {} Chapters".format(len(history_list)))
+        choice_history_list = list(choice_history.values())
+        choice_history_list.sort(key=lambda x: x["chapter_number"])
         
         return {
             "success": True,
             "story_id": story_id,
-            "choice_history": history_list,
-            "total_chapters_with_choices": len(history_list)
+            "choice_history": choice_history_list,
+            "total_chapters_with_choices": len(choice_history_list)
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error("Get choice history failed: {}".format(e))
-        raise HTTPException(status_code=500, detail="Failed to get choice history: {}".format(str(e)))
+        logger.error("Error fetching choice history for story {}: {}".format(story_id, str(e)))
+        raise HTTPException(status_code=500, detail="Failed to fetch choice history: {}".format(str(e)))
+
+@app.get("/story/{story_id}/tree")
+async def get_story_tree_endpoint(
+    story_id: int,
+    user = Depends(get_authenticated_user)
+):
+    """Get story structure as tree with choice paths for visualization - OPTIMIZED"""
+    try:
+        start_time = time.time()
+        logger.info("🌳 Getting optimized story tree for story {}".format(story_id))
+        
+        # OPTIMIZATION 1: Single query for all active chapters
+        chapters_response = supabase.table("Chapters").select("*").eq("story_id", story_id).eq("is_active", True).order("chapter_number").execute()
+        chapters = chapters_response.data
+        
+        if not chapters:
+            return {
+                "success": True,
+                "story_id": story_id,
+                "tree": [],
+                "message": "No chapters found for this story",
+                "performance": {"query_time": round(time.time() - start_time, 3)}
+            }
+        
+        # OPTIMIZATION 2: Single query for ALL choices for this story
+        all_choices_response = supabase.table("story_choices").select("*").eq("story_id", story_id).eq("user_id", user.id).execute()
+        all_choices = all_choices_response.data or []
+        
+        # OPTIMIZATION 3: Group choices by chapter_number for O(1) lookup
+        choices_by_chapter = {}
+        for choice in all_choices:
+            chapter_num = choice.get("chapter_number")
+            if chapter_num not in choices_by_chapter:
+                choices_by_chapter[chapter_num] = []
+            choices_by_chapter[chapter_num].append(choice)
+        
+        # OPTIMIZATION 4: Build tree structure with efficient lookups
+        tree_data = []
+        chapter_numbers = [ch["chapter_number"] for ch in chapters]
+        max_chapter = max(chapter_numbers) if chapter_numbers else 0
+        
+        for chapter in chapters:
+            chapter_num = chapter["chapter_number"]
+            choices = choices_by_chapter.get(chapter_num, [])
+            
+            # Determine selected choice and next chapter existence
+            selected_choice_id = None
+            selected_choices = [c for c in choices if c.get("is_selected", False)]
+            
+            if selected_choices:
+                selected_choice_id = selected_choices[0]["id"]
+                for choice in choices:
+                    choice["selected"] = choice["id"] == selected_choice_id
+            elif choices and chapter_num < max_chapter:
+                # Fallback: mark first choice as selected if next chapter exists
+                choices[0]["selected"] = True
+                selected_choice_id = choices[0]["id"]
+                for i, choice in enumerate(choices):
+                    choice["selected"] = (i == 0)
+            else:
+                # No choices or last chapter
+                for choice in choices:
+                    choice["selected"] = False
+            
+            # Calculate word count efficiently
+            content = chapter.get("content", "")
+            word_count = len(content.split()) if content else 0
+            
+            tree_data.append({
+                "chapter": {
+                    "id": chapter["id"],
+                    "chapter_number": chapter_num,
+                    "title": chapter.get("title", f"Chapter {chapter_num}"),
+                    "content": content,
+                    "created_at": chapter.get("created_at"),
+                    "word_count": word_count
+                },
+                "choices": choices,
+                "selected_choice_id": selected_choice_id,
+                "has_next_chapter": chapter_num < max_chapter,
+                "is_current_chapter": chapter_num == max_chapter,
+                "choice_stats": {
+                    "total": len(choices),
+                    "selected": len([c for c in choices if c.get("selected", False)]),
+                    "unselected": len([c for c in choices if not c.get("selected", False)])
+                }
+            })
+        
+        total_choices = sum(len(node["choices"]) for node in tree_data)
+        query_time = round(time.time() - start_time, 3)
+        
+        logger.info("✅ Optimized story tree built: {} chapters, {} choices in {}s".format(
+            len(tree_data), total_choices, query_time
+        ))
+        
+        return {
+            "success": True,
+            "story_id": story_id,
+            "tree": tree_data,
+            "total_chapters": len(tree_data),
+            "total_choices": total_choices,
+            "performance": {
+                "query_time": query_time,
+                "chapters_fetched": len(chapters),
+                "choices_fetched": len(all_choices),
+                "optimization": "single_query_approach"
+            }
+        }
+        
+    except Exception as e:
+        logger.error("❌ Error fetching optimized story tree for story {}: {}".format(story_id, str(e)))
+        raise HTTPException(status_code=500, detail="Failed to fetch story tree: {}".format(str(e)))
 
 @app.get("/chapter/{chapter_id}/choices")
 async def get_choices_for_chapter_endpoint(
@@ -1105,8 +1448,8 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
             
             # Generate with enhanced CoT system
             result = generator.generate_chapter_from_outline(
-                story_summary=story_summary,
-                chapter_data=target_chapter,
+                story_title=target_chapter.get('title', f"Chapter {chapter.chapter_number}"),
+                story_outline=story_summary,
                 genre=genre,
                 tone=tone
             )
@@ -1129,8 +1472,8 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
             story_summary = chapter.outline[:200] + "..." if len(chapter.outline) > 200 else chapter.outline
             
             result = generator.generate_chapter_from_outline(
-                story_summary=story_summary,
-                chapter_data=chapter_data,
+                story_title=f"Chapter {chapter.chapter_number}",
+                story_outline=chapter.outline,
                 genre="General Fiction",
                 tone="Engaging"
             )
@@ -1139,7 +1482,7 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
         
         # Handle new enhanced response structure
         if result.get("success"):
-            chapter_content = result.get("chapter_content", "")
+            chapter_content = result.get("content", "")  # Use "content" field from enhanced generator
             choices = result.get("choices", [])
             # reasoning = result.get("reasoning", {})  # No longer returned
             # quality_metrics = result.get("quality_metrics", {})  # No longer returned
@@ -1229,19 +1572,11 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
                     "optimized_save": bool(chapter_id)
                 }
             }
-        
         else:
-            # For chapters other than 1, just return the generated content
-            return {
-                "chapter_1": chapter_content,
-                "chapter": chapter_content,
-                "choices": choices,
-                "metadata": {
-                    "chapter_number": chapter.chapter_number,
-                    "word_count": len(chapter_content.split()),
-                    "choices_count": len(choices)
-                }
-            }
+            # Handle generation failure
+            error_msg = result.get("error", "Chapter generation failed")
+            logger.error("❌ Chapter generation failed: {}".format(error_msg))
+            raise HTTPException(status_code=500, detail="Chapter generation failed: {}".format(error_msg))
             
     except Exception as e:
         logger.error("❌ Chapter generation failed: {}".format(str(e)))
@@ -1284,8 +1619,8 @@ async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
         
         # Generate with enhanced system
         result = generator.generate_chapter_from_outline(
-            story_summary=story_summary,
-            chapter_data=target_chapter,
+            story_title=target_chapter.get('title', f"Chapter {chapter.chapter_number}"),
+            story_outline=story_summary,
             genre=genre,
             tone=tone
         )
@@ -1294,7 +1629,7 @@ async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
         
         # Handle enhanced response
         if result.get("success"):
-            chapter_content = result.get("chapter_content", "")
+            chapter_content = result.get("content", "")  # Use "content" field from enhanced generator
             choices = result.get("choices", [])
             reasoning = result.get("reasoning", {})
             quality_metrics = result.get("quality_metrics", {})
@@ -2415,120 +2750,162 @@ async def get_chapter_save_performance():
 @app.post("/generate_next_chapter")
 async def generate_next_chapter_endpoint(
     chapter_input: GenerateNextChapterInput,
+    background_tasks: BackgroundTasks,  # <-- Add background_tasks
     user = Depends(get_authenticated_user)
 ):
     """
     ENHANCED Generate next chapter with DNA tracking, summaries, and vector context.
-    
-    Features:
-    - Story DNA continuity tracking
-    - Chapter summary context
-    - Vector-based scene relevance
-    - Plot thread preservation
-    - Character consistency validation
+    Now saves chapter to DB and triggers async summary/DNA enrichment.
     """
     try:
         logger.info("ENHANCED Chapter Generation: Chapter {} for story {}".format(chapter_input.chapter_number, chapter_input.story_id))
-        
         # Verify story belongs to user
         story_response = supabase.table("Stories").select("*").eq("id", chapter_input.story_id).eq("user_id", user.id).execute()
         if not story_response.data:
             raise HTTPException(status_code=404, detail="Story not found or access denied")
-        
         story = story_response.data[0]
         story_title = story.get("story_title", "Untitled Story")
         story_outline = story.get("story_outline", chapter_input.story_outline)
-        
         # Get previous chapters with ALL context (content, summary, DNA)
         max_context_chapter = chapter_input.chapter_number - 1
         previous_chapters_response = supabase.table("Chapters").select(
-            "content, summary, dna, chapter_number, title"
+            "id, content, summary, dna, chapter_number, title"
         ).eq("story_id", chapter_input.story_id).eq("is_active", True).lte(
             "chapter_number", max_context_chapter
         ).order("chapter_number").execute()
-        
         previous_chapters = previous_chapters_response.data if previous_chapters_response.data else []
-        
         logger.info("Retrieved {} previous chapters with DNA and summaries".format(len(previous_chapters)))
-        
         # Get user's choice that led to this chapter
         user_choice = getattr(chapter_input, 'user_choice', "")
         choice_options = []
-        
         if chapter_input.chapter_number > 1 and not user_choice:
-            # Try to get the choice from the previous chapter
             prev_chapter_id = None
             if previous_chapters:
-                # Find the previous chapter ID
                 for chapter in previous_chapters:
                     if chapter.get('chapter_number') == chapter_input.chapter_number - 1:
                         prev_chapter_id = chapter.get('id')
                         break
-            
             if prev_chapter_id:
                 choice_response = supabase.table("story_choices").select("*").eq("chapter_id", prev_chapter_id).execute()
                 if choice_response.data:
                     choice_options = choice_response.data
-                    # Find the selected choice
                     for choice in choice_options:
                         if choice.get("is_selected"):
                             user_choice = "{}: {}".format(choice.get('title', ''), choice.get('description', ''))
                             break
-        
         logger.info("User choice context: {}...".format(user_choice[:100]) if user_choice else "No specific user choice")
-        
         # Use enhanced chapter generator with DNA and summaries
-        from services.enhanced_chapter_generator import enhanced_chapter_generator
+        # Use original lc_next_chapter_generator system for subsequent chapters
+        from lc_next_chapter_generator import generate_next_chapter_with_dna
         
-        generation_result = await enhanced_chapter_generator.generate_next_chapter_enhanced(
-            story_id=chapter_input.story_id,
+        # Determine if this is game mode based on user choice
+        is_game_mode = bool(user_choice)
+        logger.info(f"🎮 Game Mode: {is_game_mode}")
+        
+        # Extract DNA contexts from previous chapters
+        story_dna_contexts = []
+        previous_chapter_summaries = []
+        
+        for chapter in previous_chapters:
+            if chapter.get("dna"):
+                try:
+                    dna_data = json.loads(chapter["dna"]) if isinstance(chapter["dna"], str) else chapter["dna"]
+                    story_dna_contexts.append(str(dna_data))
+                except:
+                    pass
+            if chapter.get("summary"):
+                previous_chapter_summaries.append(chapter["summary"])
+        
+        # Generate chapter using original system
+        generation_result = generate_next_chapter_with_dna(
             story_title=story_title,
             story_outline=story_outline,
-            current_chapter_number=chapter_input.chapter_number,
+            story_dna_contexts=story_dna_contexts,
+            chapter_number=chapter_input.chapter_number,
             user_choice=user_choice,
-            previous_chapters=previous_chapters,
-            choice_options=choice_options
+            is_game_mode=is_game_mode,
+            previous_chapter_summaries=previous_chapter_summaries  # Pass summaries
         )
-        
         logger.info("âœ… ENHANCED Chapter {} generated successfully!".format(chapter_input.chapter_number))
-        logger.info("Generation time: {:.2f}s".format(generation_result['metrics']['generation_time']))
-        logger.info("DNA components used: {}".format(generation_result['metrics']['context_components_used']['dna_components']))
-        logger.info("Summary components used: {}".format(generation_result['metrics']['context_components_used']['summary_components']))
-        logger.info("Continuity score: {:.2f}".format(generation_result['metrics']['continuity_score']))
+        logger.info("📊 Word count: {} words".format(len(generation_result['chapter_content'].split())))
+        logger.info("🎮 Choices generated: {} (Game Mode: {})".format(len(generation_result.get('choices', [])), is_game_mode))
+        # --- SAVE CHAPTER TO DB IMMEDIATELY ---
+        chapter_data = {
+            "story_id": chapter_input.story_id,
+            "chapter_number": chapter_input.chapter_number,
+            "content": generation_result["chapter_content"],
+            "title": generation_result.get("title", f"Chapter {chapter_input.chapter_number}"),
+            "is_active": True,
+            "created_at": datetime.utcnow().isoformat()
+        }
+        # Deactivate previous version if exists
+        supabase.table("Chapters").update({"is_active": False}).eq("story_id", chapter_input.story_id).eq("chapter_number", chapter_input.chapter_number).eq("is_active", True).execute()
+        # Insert new chapter
+        insert_response = supabase.table("Chapters").insert(chapter_data).execute()
+        if not insert_response.data:
+            raise HTTPException(status_code=500, detail="Failed to save chapter to database")
+        chapter_id = insert_response.data[0]["id"]
+        logger.info(f"Chapter {chapter_id} saved to DB for story {chapter_input.story_id}")
         
+        # --- SAVE CHOICES TO story_choices TABLE USING EXISTING FUNCTION ---
+        if generation_result.get("choices"):
+            await save_choices_for_chapter(
+                story_id=chapter_input.story_id,
+                chapter_id=chapter_id,
+                chapter_number=chapter_input.chapter_number,
+                choices=generation_result["choices"],
+                user_id=user.id,
+                supabase=supabase
+            )
+            logger.info(f"Choices saved to story_choices table for chapter {chapter_id}")
+        
+        # --- TRIGGER ASYNC SUMMARY & DNA GENERATION ---
+        previous_dna_list = [json.loads(chap["dna"]) for chap in previous_chapters if chap.get("dna")] if previous_chapters else []
+        background_tasks.add_task(
+            generate_and_update_summary_async,
+            chapter_id,
+            generation_result["chapter_content"],
+            chapter_input.chapter_number,
+            story_title,
+            story_outline
+        )
+        background_tasks.add_task(
+            generate_and_update_dna_async,
+            chapter_id,
+            generation_result["chapter_content"],
+            chapter_input.chapter_number,
+            previous_dna_list,
+            user_choice,
+            choice_options
+        )
         return {
-            "chapter": generation_result["content"],
-            "title": generation_result["title"],
-            "choices": generation_result["choices"],
+            "chapter": generation_result["chapter_content"],
+            "title": generation_result.get("title", f"Chapter {chapter_input.chapter_number}"),
+            "choices": generation_result.get("choices", []),
             "metadata": {
                 "chapter_number": chapter_input.chapter_number,
                 "story_id": chapter_input.story_id,
-                "word_count": len(generation_result["content"].split()),
-                "character_count": len(generation_result["content"]),
+                "word_count": len(generation_result["chapter_content"].split()),
+                "character_count": len(generation_result["chapter_content"]),
                 "previous_chapters_used": len(previous_chapters),
                 "generation_success": True,
-                "user_choice_provided": bool(user_choice)
-            },
-            "continuity_features": {
-                "dna": generation_result.get("dna"),
-                "summary": generation_result.get("summary"),
-                "continuity_score": generation_result["metrics"]["continuity_score"],
-                "context_components_used": generation_result["metrics"]["context_components_used"],
-                "enhanced_features": generation_result["enhanced_features"]
+                "user_choice_provided": bool(user_choice),
+                "chapter_id": chapter_id,
+                "is_game_mode": is_game_mode
             },
             "performance_metrics": {
-                "generation_time": generation_result["metrics"]["generation_time"],
-                "context_length": generation_result["metrics"]["context_components_used"]["total_context_length"]
+                "generation_method": "ORIGINAL_LC_SYSTEM",
+                "word_count": len(generation_result["chapter_content"].split()),
+                "choices_count": len(generation_result.get("choices", []))
             }
         }
-        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error in ENHANCED chapter generation: {}".format(str(e)))
+        logger.error("Error in chapter generation: {}".format(str(e)))
         import traceback
         logger.error("Traceback: {}".format(traceback.format_exc()))
-        raise HTTPException(status_code=500, detail="Failed to generate enhanced chapter: {}".format(str(e)))
+        raise HTTPException(status_code=500, detail="Failed to generate chapter: {}".format(str(e)))
 
 
 
@@ -2555,7 +2932,9 @@ async def generate_and_save_chapter_endpoint(
         story_outline = story.get('story_outline', chapter_input.story_outline)
         
         # STEP 1: Generate chapter using enhanced generator
-        from services.enhanced_chapter_generator import enhanced_chapter_generator
+        from enhanced_chapter_generator import EnhancedChapterGenerator
+        
+        enhanced_generator = EnhancedChapterGenerator()
         
         # Get previous chapters for context (with DNA and summaries)
         previous_chapters_response = supabase.table('Chapters').select(
@@ -2569,7 +2948,7 @@ async def generate_and_save_chapter_endpoint(
         logger.info(' Using {} previous chapters for enhanced generation'.format(len(previous_chapters)))
         
         # Generate chapter with enhanced context (DNA + summaries + vectors)
-        generation_result = await enhanced_chapter_generator.generate_next_chapter_enhanced(
+        generation_result = await enhanced_generator.generate_next_chapter_enhanced(
             story_id=chapter_input.story_id,
             story_title=story_title,
             story_outline=story_outline,
@@ -2750,10 +3129,18 @@ async def branch_from_choice_endpoint(
         if not available_choices:
             raise HTTPException(status_code=404, detail="No choices found for chapter {}".format(request.chapter_number))
         
+        # NORMALISE the incoming choice-id for consistent matching
+        raw_choice_id = str(request.choice_id)
+        possible_ids = {raw_choice_id}
+        if raw_choice_id.startswith("choice_"):
+            possible_ids.add(raw_choice_id.split("choice_", 1)[1])
+        if raw_choice_id.isdigit():
+            possible_ids.add(f"choice_{raw_choice_id}")
+
         # Find the selected choice
         selected_choice = None
         for choice in available_choices:
-            if str(choice.get('id')) == str(request.choice_id) or str(choice.get('choice_id')) == str(request.choice_id):
+            if str(choice.get('id')) in possible_ids or str(choice.get('choice_id')) in possible_ids:
                 selected_choice = choice
                 break
         
@@ -2948,10 +3335,18 @@ async def branch_preview_endpoint(
             if not available_choices:
                 raise HTTPException(status_code=404, detail="No choices found for chapter {}".format(request.chapter_number))
         
+        # NORMALISE the incoming choice-id for consistent matching
+        raw_choice_id = str(request.choice_id)
+        possible_ids = {raw_choice_id}
+        if raw_choice_id.startswith("choice_"):
+            possible_ids.add(raw_choice_id.split("choice_", 1)[1])
+        if raw_choice_id.isdigit():
+            possible_ids.add(f"choice_{raw_choice_id}")
+
         # Find the selected choice
         selected_choice = None
         for choice in available_choices:
-            if str(choice.get('id')) == str(request.choice_id) or str(choice.get('choice_id')) == str(request.choice_id):
+            if str(choice.get('id')) in possible_ids or str(choice.get('choice_id')) in possible_ids:
                 selected_choice = choice
                 break
         
@@ -3092,10 +3487,18 @@ async def create_branch_endpoint(
         if not available_choices:
             raise HTTPException(status_code=404, detail="No choices found for chapter {}".format(request.chapter_number))
         
+        # NORMALISE the incoming choice-id for consistent matching
+        raw_choice_id = str(request.choice_id)
+        possible_ids = {raw_choice_id}
+        if raw_choice_id.startswith("choice_"):
+            possible_ids.add(raw_choice_id.split("choice_", 1)[1])
+        if raw_choice_id.isdigit():
+            possible_ids.add(f"choice_{raw_choice_id}")
+
         # Find the selected choice
         selected_choice = None
         for choice in available_choices:
-            if str(choice.get('id')) == str(request.choice_id) or str(choice.get('choice_id')) == str(request.choice_id):
+            if str(choice.get('id')) in possible_ids or str(choice.get('choice_id')) in possible_ids:
                 selected_choice = choice
                 break
         
@@ -3229,8 +3632,8 @@ async def get_story_branches_endpoint(
         if Chapters_response.data:
             for chapter in Chapters_response.data:
                 Chapters_info.append({
-                    "id": chapter["id"],
-                    "chapter_number": chapter["chapter_number"],
+                "id": chapter["id"],
+                "chapter_number": chapter["chapter_number"],
                     "title": chapter.get("title", "Untitled"),
                     "content_length": len(chapter.get("content", "")),
                     "content_preview": chapter.get("content", "")[:100] + "..." if len(chapter.get("content", "")) > 100 else chapter.get("content", ""),
@@ -3274,9 +3677,9 @@ async def save_choices_for_chapter(story_id, chapter_id, chapter_number, choices
     """Save choices to the story_choices table for any chapter."""
     for i, choice in enumerate(choices, 1):
         choice_record = {
-            "story_id": story_id,
-            "chapter_id": chapter_id,
-            "chapter_number": chapter_number,
+                "story_id": story_id,
+                "chapter_id": chapter_id,
+                "chapter_number": chapter_number,
             "choice_id": choice.get("id", f"choice_{i}"),
             "title": choice.get("title", ""),
             "description": choice.get("description", ""),
@@ -3286,3 +3689,411 @@ async def save_choices_for_chapter(story_id, chapter_id, chapter_number, choices
             "is_selected": False
         }
         supabase.table("story_choices").insert(choice_record).execute()
+
+# Add this endpoint near the end of the file, before the last endpoints
+@app.get("/story/{story_id}/cover_prompt_test")
+async def test_cover_prompt_endpoint(
+    story_id: int,
+    user = Depends(get_authenticated_user)
+):
+    """
+    TEST ENDPOINT: Generate and return a cover prompt for a story without actually creating an image.
+    This allows us to test and refine prompt quality before implementing Leonardo.ai integration.
+    """
+    try:
+        logger.info(f"🧪 Testing cover prompt generation for story {story_id}")
+        
+        # Fetch story data from database
+        story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
+        
+        if not story_response.data:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        story = story_response.data[0]
+        
+        # Extract story data
+        title = story.get("story_title", "Untitled Story")
+        genre = story.get("genre", "contemporary")
+        tone = story.get("tone", "")
+        
+        # Parse JSON fields (they might be stored as strings)
+        import json
+        main_characters = story.get("main_characters", [])
+        key_locations = story.get("key_locations", [])
+        
+        # Handle if they're stored as JSON strings
+        if isinstance(main_characters, str):
+            try:
+                main_characters = json.loads(main_characters)
+            except:
+                main_characters = []
+        
+        if isinstance(key_locations, str):
+            try:
+                key_locations = json.loads(key_locations)
+            except:
+                key_locations = []
+        
+        logger.info(f"📊 Story data for prompt generation:")
+        logger.info(f"   Title: {title}")
+        logger.info(f"   Genre: {genre}")
+        logger.info(f"   Characters: {main_characters}")
+        logger.info(f"   Locations: {key_locations}")
+        
+        # Generate the prompt using our smart service
+        prompt_result = cover_prompt_service.generate_cover_prompt(
+            title=title,
+            genre=genre,
+            main_characters=main_characters,
+            key_locations=key_locations,
+            tone=tone
+        )
+        
+        logger.info(f"✅ Generated cover prompt for '{title}'")
+        logger.info(f"📝 Prompt: {prompt_result['prompt'][:100]}...")
+        
+        return {
+            "success": True,
+            "story_id": story_id,
+            "story_data": {
+                "title": title,
+                "genre": genre,
+                "tone": tone,
+                "main_characters": main_characters,
+                "key_locations": key_locations
+            },
+            "prompt_result": prompt_result,
+            "message": "Cover prompt generated successfully! Review the prompt quality before implementing image generation."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error testing cover prompt for story {story_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate cover prompt: {str(e)}")
+
+@app.post("/story/{story_id}/generate_cover")
+async def generate_cover_endpoint(
+    story_id: int,
+    user = Depends(get_authenticated_user)
+):
+    """
+    Generate an AI-powered book cover for a story using Leonardo.ai.
+    
+    This endpoint:
+    1. Fetches story data from database
+    2. Generates an intelligent prompt using story context
+    3. Calls Leonardo.ai API to generate the cover image
+    4. Saves the image URL and metadata to database
+    """
+    try:
+        logger.info(f"🎨 Starting cover generation for story {story_id}")
+        
+        # Step 1: Fetch and validate story data
+        story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
+        
+        if not story_response.data:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        story = story_response.data[0]
+        
+        # Check if cover is already being generated
+        current_status = story.get("cover_generation_status", "none")
+        if current_status == "generating":
+            return {
+                "success": False,
+                "message": "Cover generation is already in progress for this story",
+                "status": "generating"
+            }
+        
+        # Step 2: Update status to generating
+        supabase.table("Stories").update({
+            "cover_generation_status": "generating"
+        }).eq("id", story_id).eq("user_id", user.id).execute()
+        
+        try:
+            # Step 3: Extract story data
+            title = story.get("story_title", "Untitled Story")
+            genre = story.get("genre", "contemporary")
+            tone = story.get("tone", "")
+            
+            # Parse JSON fields safely
+            import json
+            main_characters = story.get("main_characters", [])
+            key_locations = story.get("key_locations", [])
+            
+            # Handle if they're stored as JSON strings
+            if isinstance(main_characters, str):
+                try:
+                    main_characters = json.loads(main_characters)
+                except:
+                    main_characters = []
+            
+            if isinstance(key_locations, str):
+                try:
+                    key_locations = json.loads(key_locations)
+                except:
+                    key_locations = []
+            
+            logger.info(f"📊 Generating cover for '{title}' ({genre})")
+            logger.info(f"   Characters: {main_characters}")
+            logger.info(f"   Locations: {key_locations}")
+            
+            # Step 4: Generate intelligent prompt
+            prompt_result = cover_prompt_service.generate_cover_prompt(
+                title=title,
+                genre=genre,
+                main_characters=main_characters,
+                key_locations=key_locations,
+                tone=tone
+            )
+            
+            prompt = prompt_result["prompt"]
+            logger.info(f"📝 Generated prompt: {prompt[:100]}...")
+            
+            # Step 5: Generate image using Leonardo.ai
+            logger.info(f"🚀 Calling Leonardo.ai API for image generation")
+            leonardo_result = await leonardo_service.generate_image(prompt)
+            
+            primary_image_url = leonardo_result["primary_image_url"]
+            generation_id = leonardo_result["generation_id"]
+            image_width = leonardo_result.get("image_width", 832)
+            image_height = leonardo_result.get("image_height", 1216)
+            aspect_ratio = leonardo_result.get("aspect_ratio", 0.68)
+            
+            # Step 6: Update database with successful result including dimensions
+            update_data = {
+                "cover_image_url": primary_image_url,
+                "cover_generation_status": "completed",
+                "cover_generated_at": "now()",
+                "cover_prompt": prompt,
+                "cover_image_width": image_width,
+                "cover_image_height": image_height,
+                "cover_aspect_ratio": aspect_ratio
+            }
+            
+            supabase.table("Stories").update(update_data).eq("id", story_id).eq("user_id", user.id).execute()
+            
+            logger.info(f"✅ Cover generated successfully for story {story_id}")
+            logger.info(f"🖼️ Image URL: {primary_image_url}")
+            
+            return {
+                "success": True,
+                "story_id": story_id,
+                "cover_image_url": primary_image_url,
+                "image_width": image_width,
+                "image_height": image_height,
+                "aspect_ratio": aspect_ratio,
+                "generation_id": generation_id,
+                "prompt": prompt,
+                "prompt_reasoning": prompt_result["reasoning"],
+                "leonardo_result": leonardo_result,
+                "message": "Cover generated successfully!"
+            }
+            
+        except LeonardoAPIError as e:
+            # Handle Leonardo-specific errors
+            logger.error(f"❌ Leonardo.ai API error for story {story_id}: {str(e)}")
+            
+            # Update status to failed
+            supabase.table("Stories").update({
+                "cover_generation_status": "failed"
+            }).eq("id", story_id).eq("user_id", user.id).execute()
+            
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Image generation service error: {str(e)}"
+            )
+            
+        except Exception as e:
+            # Handle other errors
+            logger.error(f"❌ Unexpected error during cover generation for story {story_id}: {str(e)}")
+            
+            # Update status to failed
+            supabase.table("Stories").update({
+                "cover_generation_status": "failed"
+            }).eq("id", story_id).eq("user_id", user.id).execute()
+            
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Cover generation failed: {str(e)}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Critical error in cover generation endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/story/{story_id}/cover_status")
+async def get_cover_status_endpoint(
+    story_id: int,
+    user = Depends(get_authenticated_user)
+):
+    """
+    Get the current cover generation status for a story.
+    
+    Returns status and cover URL if available.
+    """
+    try:
+        story_response = supabase.table("Stories").select(
+            "cover_image_url, cover_generation_status, cover_generated_at, cover_image_width, cover_image_height, cover_aspect_ratio"
+        ).eq("id", story_id).eq("user_id", user.id).execute()
+        
+        if not story_response.data:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        story = story_response.data[0]
+        
+        return {
+            "success": True,
+            "story_id": story_id,
+            "cover_image_url": story.get("cover_image_url"),
+            "image_width": story.get("cover_image_width"),
+            "image_height": story.get("cover_image_height"),
+            "aspect_ratio": story.get("cover_aspect_ratio"),
+            "status": story.get("cover_generation_status", "none"),
+            "generated_at": story.get("cover_generated_at")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error getting cover status for story {story_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get cover status")
+
+@app.post("/rewrite_text")
+async def rewrite_text_endpoint(request: RewriteTextRequest, user = Depends(get_authenticated_user_optional)):
+    """Rewrite selected text using AI for improved clarity, flow, and engagement."""
+    import traceback
+    try:
+        logger.info(f"[REWRITE] Received request from {'authenticated' if user else 'anonymous'} user")
+        logger.info(f"[REWRITE] Selected text length: {len(request.selected_text)} characters")
+        
+        # Get story context for better rewrites
+        story_context = request.story_context or {}
+        context_info = f"Story: {story_context.get('title', 'Unknown')}, Genre: {story_context.get('genre', 'Unknown')}"
+        logger.info(f"[REWRITE] Context: {context_info}")
+        
+        # Import the rewrite function
+        from lc_book_generator_prompt import rewrite_text_with_context
+        
+        # Prepare context for AI
+        rewrite_context = {
+            "story_title": story_context.get("title", ""),
+            "story_genre": story_context.get("genre", ""),
+            "story_outline": story_context.get("outline", ""),
+            "current_chapter": story_context.get("currentChapter", ""),
+            "chapter_content": story_context.get("chapterContent", "")
+        }
+        
+        # Call the AI rewrite function
+        logger.info("[REWRITE] Calling AI rewrite function...")
+        rewritten_text = rewrite_text_with_context(request.selected_text, rewrite_context)
+        
+        if not rewritten_text:
+            logger.error("[REWRITE] No rewritten text returned from AI")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Rewrite failed: No text returned from AI"
+            )
+        
+        logger.info(f"[REWRITE] Successfully rewritten text, new length: {len(rewritten_text)} characters")
+        
+        return {
+            "success": True,
+            "rewritten_text": rewritten_text,
+            "original_length": len(request.selected_text),
+            "rewritten_length": len(rewritten_text),
+            "improvement_ratio": len(rewritten_text) / len(request.selected_text) if len(request.selected_text) > 0 else 1.0
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error in rewrite endpoint: {str(e)}")
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Rewrite failed: {str(e)}"
+        )
+
+# Add this after the RewriteTextRequest class (around line 137)
+
+class SuggestContinueRequest(BaseModel):
+    """Input model for AI writing suggestions."""
+    current_content: str = Field(..., min_length=10, max_length=10000, description="Current story content")
+    story_title: Optional[str] = Field(default="Untitled Story", description="Title of the story")
+    story_genre: Optional[str] = Field(default="Fiction", description="Genre of the story")
+    chapter_title: Optional[str] = Field(default="", description="Current chapter title")
+
+    @field_validator('current_content')
+    @classmethod
+    def validate_current_content(cls, v):
+        if len(v.strip()) < 10:
+            raise ValueError('Content must be at least 10 characters long')
+        return v
+
+# Add this endpoint after the rewrite_text_endpoint (around line 3932)
+
+@app.post("/suggest_continue")
+async def suggest_continue_endpoint(request: SuggestContinueRequest, user = Depends(get_authenticated_user_optional)):
+    """
+    Generate AI-powered writing suggestions to continue the story.
+    Similar to GitHub Copilot but for creative writing.
+    """
+    try:
+        logger.info(f"Generating AI suggestion for user {user.get('id', 'anonymous')}")
+        
+        # Create a prompt for continuing the story
+        prompt = f"""
+        You are an AI writing assistant helping to continue a story. 
+        
+        Story Title: {request.story_title}
+        Genre: {request.story_genre}
+        Chapter: {request.chapter_title or 'Current Chapter'}
+        
+        Current Content:
+        {request.current_content}
+        
+        Please provide a natural continuation of the story. The suggestion should:
+        1. Flow naturally from the current content
+        2. Maintain the established tone and style
+        3. Be 2-4 sentences long
+        4. Be engaging and move the story forward
+        5. Not repeat what's already written
+        
+        Write only the continuation, no explanations or meta-commentary.
+        """
+        
+        # Use the same LLM service as other endpoints
+        from services.story_service_with_dna import StoryService
+        story_service = StoryService()
+        
+        # Generate the suggestion
+        suggestion = await story_service.generate_text(
+            prompt=prompt,
+            max_tokens=150,
+            temperature=0.7,
+            system_prompt="You are a creative writing assistant. Provide natural, engaging story continuations."
+        )
+        
+        # Clean up the suggestion
+        suggestion = suggestion.strip()
+        if suggestion.startswith('"') and suggestion.endswith('"'):
+            suggestion = suggestion[1:-1]
+        
+        logger.info(f"Generated suggestion: {suggestion[:100]}...")
+        
+        return {
+            "suggestion": suggestion,
+            "success": True,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating AI suggestion: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate AI suggestion: {str(e)}"
+        )
