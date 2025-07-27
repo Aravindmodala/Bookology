@@ -325,7 +325,8 @@ class OptimizedChapterService:
                             import json
                             try:
                                 dna = json.loads(dna)
-                            except:
+                            except (json.JSONDecodeError, ValueError) as e:
+                                logger.warning(f"Failed to parse DNA JSON: {e}")
                                 continue
                         previous_dna_list.append(dna)
                 

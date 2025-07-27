@@ -120,12 +120,12 @@ class DatabaseService:
         with self.get_sync_connection() as conn:
             with conn.cursor() as cur:
                 # Try Stories table first
-                query = 'SELECT * FROM "Stories" WHERE id = %s'
-                params = [story_id]
-                
                 if user_id:
-                    query += ' AND user_id = %s'
-                    params.append(user_id)
+                    query = 'SELECT * FROM "Stories" WHERE id = %s AND user_id = %s'
+                    params = [story_id, user_id]
+                else:
+                    query = 'SELECT * FROM "Stories" WHERE id = %s'
+                    params = [story_id]
                 
                 try:
                     cur.execute(query, params)
@@ -137,13 +137,13 @@ class DatabaseService:
                 except Exception as e:
                     logger.warning(f"Could not query Stories table: {e}")
                 
-                # Try Stories table
-                query = 'SELECT * FROM Stories WHERE id = %s'
-                params = [story_id]
-                
+                # Try Stories table (lowercase)
                 if user_id:
-                    query += ' AND user_id = %s'
-                    params.append(user_id)
+                    query = 'SELECT * FROM Stories WHERE id = %s AND user_id = %s'
+                    params = [story_id, user_id]
+                else:
+                    query = 'SELECT * FROM Stories WHERE id = %s'
+                    params = [story_id]
                 
                 try:
                     cur.execute(query, params)
