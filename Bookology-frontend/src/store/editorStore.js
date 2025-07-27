@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { CacheService, CACHE_KEYS } from '../services/cacheService';
+import { cacheService, CACHE_KEYS } from '../services/cacheService';
 
 export const useEditorStore = create(
   persist(
@@ -23,7 +23,7 @@ export const useEditorStore = create(
           lastUpdated: Date.now()
         });
         // Also cache in localStorage for persistence
-        CacheService.set(
+        cacheService.set(
           `editor_cache_${storyId}`,
           { story, chapters, choices },
           5 * 60 * 1000 // 5 min TTL
@@ -33,7 +33,7 @@ export const useEditorStore = create(
       // Get cached data for a story
       getCachedData: (storyId) => {
         // Try localStorage first for instant reloads
-        const cached = CacheService.get(`editor_cache_${storyId}`);
+        const cached = cacheService.get(`editor_cache_${storyId}`);
         if (cached) {
           return {
             story: cached.story,

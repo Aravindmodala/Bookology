@@ -21,7 +21,6 @@ import { useAuth } from '../AuthContext';
 import { supabase, isSupabaseEnabled } from '../supabaseClient';
 import { createApiUrl, API_ENDPOINTS } from '../config';
 import { Menu, Transition } from '@headlessui/react';
-import { CacheService, CACHE_KEYS } from '../services/cacheService';
 
 const StoryDashboard = ({ onStartNewStory }) => {
   const [stories, setStories] = useState([]);
@@ -305,8 +304,8 @@ const StoryDashboard = ({ onStartNewStory }) => {
           </div>
         </div>
 
-          {/* Content Section */}
-        <div className="p-4 relative z-0">
+        {/* Content Section */}
+        <div className="p-4">
           <div className="flex justify-between items-start mb-3">
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-white mb-2 group-hover:text-blue-400 transition-colors line-clamp-1">
@@ -316,7 +315,9 @@ const StoryDashboard = ({ onStartNewStory }) => {
                 {story.story_outline || 'No description available'}
               </p>
             </div>
-          </div>          <div className="flex items-center justify-between mb-4 text-sm text-gray-400">
+          </div>
+
+          <div className="flex items-center justify-between mb-4 text-sm text-gray-400">
             <div className="flex items-center space-x-3">
               <span className="flex items-center">
                 <FileText className="w-3 h-3 mr-1" />
@@ -342,20 +343,20 @@ const StoryDashboard = ({ onStartNewStory }) => {
             </button>
             
             {/* More options menu */}
-            <Menu as="div" className="relative inline-block">
-              <Menu.Button className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all">
+            <Menu as="div" className="relative">
+              <Menu.Button className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-all">
                 <MoreVertical className="w-4 h-4" />
               </Menu.Button>
               <Transition
                 as={React.Fragment}
-                enter="transition ease-out duration-200"
+                enter="transition ease-out duration-100"
                 enterFrom="transform opacity-0 scale-95"
                 enterTo="transform opacity-100 scale-100"
                 leave="transition ease-in duration-75"
                 leaveFrom="transform opacity-100 scale-100"
                 leaveTo="transform opacity-0 scale-95"
               >
-                <Menu.Items className="absolute right-0 z-50 mt-2 w-36 origin-top-right rounded-md bg-gray-900 shadow-xl ring-1 ring-gray-700 focus:outline-none transform-gpu">
+                <Menu.Items className="absolute right-0 z-10 mt-2 w-36 origin-top-right rounded-md bg-gray-900 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
                   <div className="py-1">
                     {!coverImage && (
                       <Menu.Item>
@@ -363,7 +364,7 @@ const StoryDashboard = ({ onStartNewStory }) => {
                           <button
                             onClick={handleGenerateCover}
                             disabled={coverLoading}
-                            className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-blue-600 text-white' : 'text-blue-400'} disabled:opacity-50 transition-colors duration-200`}
+                            className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-blue-600 text-white' : 'text-blue-400'} disabled:opacity-50`}
                           >
                             <Palette className="w-4 h-4 mr-2" /> Generate Cover
                           </button>
@@ -374,7 +375,7 @@ const StoryDashboard = ({ onStartNewStory }) => {
                       {({ active }) => (
                         <button
                           onClick={() => handleDeleteStory(story)}
-                          className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-red-600 text-white' : 'text-red-400'} hover:bg-red-600 hover:text-white transition-colors duration-200`}
+                          className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-red-600 text-white' : 'text-red-400'}`}
                         >
                           <Trash2 className="w-4 h-4 mr-2" /> Delete
                         </button>

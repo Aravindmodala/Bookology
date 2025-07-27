@@ -4,6 +4,15 @@ import { supabase } from './supabaseClient';
 import { useAuth } from './AuthContext';
 import { createApiUrl, API_ENDPOINTS } from './config';
 import { useEditorStore } from './store/editorStore';
+
+// Simple debounce utility function
+const debounce = (func, delay) => {
+  let timeoutId;
+  return function (...args) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func.apply(this, args), delay);
+  };
+};
 // OPTIMIZATION: Import icons more efficiently to reduce bundle size
 import { 
   Eye,
@@ -35,7 +44,7 @@ const StoryEditor = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, session } = useAuth();
-  
+
   // Get story data from either URL params or route state (from dashboard OR StoryCreator)
   const urlStoryId = searchParams.get('story');
   const routeStoryData = location.state?.story;
@@ -76,7 +85,7 @@ const StoryEditor = () => {
     gameMode,
     setGameMode
   } = useEditorStore();
-  
+
   const [content, setContent] = useState('');
   const [selectedText, setSelectedText] = useState('');
   const [selectedTextRange, setSelectedTextRange] = useState(null); // Store selection range for replacement
@@ -95,6 +104,8 @@ const StoryEditor = () => {
   // Debounced update refs
   const debounceTimeoutRef = useRef(null);
   const lastContentRef = useRef('');
+  const lastTypingTimeRef = useRef(Date.now());
+  const isUserTypingRef = useRef(false);
 
   // Real data from Supabase
   const [loading, setLoading] = useState(true);
@@ -125,6 +136,14 @@ const StoryEditor = () => {
       notes: { title: 'Author\'s Notes', content: '' }
     }
   });
+
+  // 1. Add a new state to block editor input during generation/saving
+  const [editorBlocked, setEditorBlocked] = useState(false);
+  const editorBlockTimeoutRef = useRef(null);
+
+  // Basic state for core functionality
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // FIXED: Utility function to convert text with \n\n to HTML paragraphs
   const convertTextToHtml = useCallback((text) => {
@@ -264,7 +283,7 @@ const StoryEditor = () => {
 
       setStoryData(story);
       setChapters(chapters);
-
+      
       // Build story structure
       const chaptersObject = {};
       chapters.forEach(chapter => {
@@ -384,7 +403,13 @@ const StoryEditor = () => {
         const htmlContent = convertTextToHtml(chapterContent);
         setContent(htmlContent); // Set HTML content in state
         if (editorRef.current) {
-          safeUpdateEditorContent(htmlContent);
+          try {
+            safeUpdateEditorContent(htmlContent, true); // Force update for new content
+          } catch (error) {
+            console.error('Failed to update editor content:', error);
+            // Fallback: direct update
+            editorRef.current.innerHTML = htmlContent;
+          }
         }
         
         // Create Chapter 1 in story structure
@@ -631,7 +656,7 @@ const StoryEditor = () => {
     }
   }, [
     creationMode, 
-    routeStoryData, 
+    routeStoryData,
     chapter1GenerationComplete, 
     isGeneratingChapter1, 
     storyStructure.chapters, 
@@ -643,14 +668,14 @@ const StoryEditor = () => {
   const handleChoiceSelection = async (choiceId, choice, fromChapterNumber) => {
     if (!storyData || !session?.access_token) {
       setChoicesError('Please log in to continue the story.');
+      autoClearError();
       return;
     }
-
     setGenerateWithChoiceLoading(true);
+    setEditorBlocked(true);
     setChoicesError('');
-    setGenerationError(''); // CLEAR ANY PREVIOUS GENERATION ERRORS
-    setError(''); // CLEAR ANY GENERAL ERRORS
-
+    setGenerationError('');
+    setError('');
     try {
       // The next chapter number is always fromChapterNumber + 1
       const nextChapterNumber = fromChapterNumber + 1;
@@ -739,7 +764,13 @@ const StoryEditor = () => {
         
         // Update editor content immediately
         if (editorRef.current && data.chapter_content) {
-          safeUpdateEditorContent(htmlContent);
+          try {
+            safeUpdateEditorContent(htmlContent, true); // Force update for new content
+          } catch (error) {
+            console.error('Failed to update editor content:', error);
+            // Fallback: direct update
+            editorRef.current.innerHTML = htmlContent;
+          }
         }
         
         // Clear choice selection
@@ -796,10 +827,12 @@ const StoryEditor = () => {
         };
       });
       setChoicesError('Error connecting to server');
+      autoClearError();
     } finally {
       setGenerateWithChoiceLoading(false);
       setGeneratingChapter(null);
       setPendingChapter(null);
+      setEditorBlocked(false);
     }
   };
 
@@ -899,26 +932,72 @@ const StoryEditor = () => {
     }
   };
 
-  // FIXED: Helper function to safely update editor content while preserving text selection
-  const safeUpdateEditorContent = useCallback((newHtmlContent) => {
-    if (!editorRef.current) return;
+  // FIXED: Enhanced function to safely update editor content with proper cursor and selection preservation
+  const safeUpdateEditorContent = useCallback((newHtmlContent, forceUpdate = false) => {
+    if (!editorRef.current) return false;
+    
+    // Check if user is currently typing (has focus and recent activity)
+    const isUserTyping = editorRef.current === document.activeElement && 
+                        Date.now() - lastTypingTimeRef.current < 2000; // Increased to 2 seconds
     
     // Check if there's an active text selection
     const selection = window.getSelection();
-    const hasActiveSelection = selection && selection.toString().trim().length > 0;
+    const hasActiveSelection = selection && 
+                              selection.rangeCount > 0 && 
+                              selection.toString().trim().length > 0;
     
-    if (hasActiveSelection) {
-      console.log('🔒 Preserving text selection - skipping content update');
-      return false; // Indicate that update was skipped
+    // Don't update if user is typing or has selection (unless forced)
+    if (!forceUpdate && (isUserTyping || hasActiveSelection)) {
+      console.log('🔒 Preserving user input - skipping content update', {
+        isUserTyping,
+        hasActiveSelection,
+        selectionText: hasActiveSelection ? selection.toString().substring(0, 50) : ''
+      });
+      return false;
     }
     
-    // Safe to update content
-    editorRef.current.innerHTML = newHtmlContent;
-    lastContentRef.current = newHtmlContent;
-    return true; // Indicate that update was successful
+    // Save current cursor position using a more reliable method
+    let savedPosition = null;
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      savedPosition = {
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        startContainer: range.startContainer,
+        endContainer: range.endContainer
+      };
+    }
+    
+    // Update content
+    const wasContentChanged = editorRef.current.innerHTML !== newHtmlContent;
+    if (wasContentChanged) {
+      editorRef.current.innerHTML = newHtmlContent;
+      lastContentRef.current = newHtmlContent;
+      
+      // Try to restore cursor position using a more robust method
+      if (savedPosition && !hasActiveSelection) {
+        try {
+          // Wait a bit for DOM to settle
+          setTimeout(() => {
+            const newSelection = window.getSelection();
+            if (newSelection && savedPosition.startContainer && savedPosition.startContainer.parentNode) {
+              const newRange = document.createRange();
+              newRange.setStart(savedPosition.startContainer, savedPosition.startOffset);
+              newRange.setEnd(savedPosition.endContainer, savedPosition.endOffset);
+              newSelection.removeAllRanges();
+              newSelection.addRange(newRange);
+            }
+          }, 10);
+        } catch (error) {
+          console.warn('Failed to restore cursor position:', error);
+        }
+      }
+    }
+    
+    return wasContentChanged;
   }, []);
 
-  // FIX 5: Improve editor content update effect with better dependency management
+  // FIXED: Improved editor content update effect with proper user input preservation
   useEffect(() => {
     if (editorRef.current && activeChapter && storyStructure.chapters[activeChapter]) {
       const chapterData = storyStructure.chapters[activeChapter];
@@ -927,9 +1006,24 @@ const StoryEditor = () => {
       // CRITICAL FIX: If content contains error message, fetch fresh data from backend
       if (newContent.includes('Error') || newContent.includes('Failed to generate') || newContent === 'Generating chapter...') {
         console.log('🔄 Detected stale/error content, fetching fresh chapter data...');
-        
-        // Don't update with stale content immediately, let loadStoryData handle it
-        // REMOVED: loadStoryData() call from here to prevent infinite loops
+        return;
+      }
+      
+      // Check if user is currently typing or has selection
+      const selection = window.getSelection();
+      const hasActiveSelection = selection && 
+                                selection.rangeCount > 0 && 
+                                selection.toString().trim().length > 0;
+      const isUserTyping = editorRef.current === document.activeElement && 
+                          Date.now() - lastTypingTimeRef.current < 1000;
+      
+      // Don't update content if user is actively typing or has selection
+      if (isUserTyping || hasActiveSelection) {
+        console.log('🔒 Skipping content update - user is typing or has selection', {
+          isUserTyping,
+          hasActiveSelection,
+          timeSinceLastTyping: Date.now() - lastTypingTimeRef.current
+        });
         return;
       }
       
@@ -937,7 +1031,7 @@ const StoryEditor = () => {
       if (editorRef.current.innerHTML !== newContent) {
         // FIXED: Convert text to proper HTML paragraphs
         const htmlContent = convertTextToHtml(newContent);
-        const wasUpdated = safeUpdateEditorContent(htmlContent);
+        const wasUpdated = safeUpdateEditorContent(htmlContent, false); // Don't force update
         
         if (wasUpdated) {
           setContent(htmlContent);
@@ -950,13 +1044,17 @@ const StoryEditor = () => {
         }
       }
     }
-  }, [activeChapter, storyStructure.chapters, convertTextToHtml, safeUpdateEditorContent]); // ADD safeUpdateEditorContent to dependencies
+  }, [activeChapter, storyStructure.chapters, convertTextToHtml, safeUpdateEditorContent]);
 
-  // Enhanced content update handler with cache sync and debouncing
+  // FIXED: Enhanced content update handler with proper typing state management
   const handleContentChange = useCallback((newContent) => {
     // Don't update if content hasn't actually changed
     if (newContent === lastContentRef.current) return;
     lastContentRef.current = newContent;
+
+    // Update typing state
+    lastTypingTimeRef.current = Date.now();
+    isUserTypingRef.current = true;
 
     // Update word and character counts immediately for UI responsiveness
     const text = newContent.replace(/<[^>]*>/g, ''); // Strip HTML for counting
@@ -991,14 +1089,21 @@ const StoryEditor = () => {
           }
         }));
       }
+      
+      // Mark typing as finished after debounce
+      setTimeout(() => {
+        isUserTypingRef.current = false;
+      }, 100);
     }, 300); // 300ms debounce
   }, [activeChapter, storyStructure.chapters, updateChapterContent]);
 
-  // Handle editor input with improved event handling
+  // FIXED: Enhanced editor input handler with proper user activity tracking
   const handleEditorInput = useCallback((e) => {
-    if (storyStructure.chapters[activeChapter]?.isGenerating) return;
+    if (editorBlocked || storyStructure.chapters[activeChapter]?.isGenerating) return;
+    lastTypingTimeRef.current = Date.now();
+    isUserTypingRef.current = true;
     handleContentChange(e.target.innerHTML);
-  }, [activeChapter, storyStructure, handleContentChange]);
+  }, [activeChapter, storyStructure, handleContentChange, editorBlocked]);
 
   // Handle text selection for rewrite functionality
   const handleTextSelection = useCallback(() => {
@@ -1009,7 +1114,7 @@ const StoryEditor = () => {
       // Store the selected text and range for replacement
       setSelectedText(selectedContent);
       
-      // Store selection range for accurate replacement
+      // Store selection range for accurate replacement - use more reliable method
       if (selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
         // Store range information for replacement
@@ -1018,7 +1123,8 @@ const StoryEditor = () => {
           endContainer: range.endContainer,
           startOffset: range.startOffset,
           endOffset: range.endOffset,
-          range: range.cloneRange() // Clone to preserve original
+          // Don't clone the range - it can become stale
+          // Instead, we'll recreate it when needed
         });
       }
     } else {
@@ -1096,10 +1202,14 @@ const StoryEditor = () => {
 
     try {
       // Create a new range from stored range data
-      const range = selectedTextRange.range;
+      const range = document.createRange();
+      
+      // Set the range using stored positions
+      range.setStart(selectedTextRange.startContainer, selectedTextRange.startOffset);
+      range.setEnd(selectedTextRange.endContainer, selectedTextRange.endOffset);
       
       // Verify range is still valid
-      if (range && range.startContainer && range.endContainer) {
+      if (range.startContainer && range.startContainer.parentNode) {
         // Remove the selected content
         range.deleteContents();
         
@@ -1119,6 +1229,10 @@ const StoryEditor = () => {
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
+        
+        // Clear the stored selection
+        setSelectedText('');
+        setSelectedTextRange(null);
       }
     } catch (err) {
       console.error('❌ Failed to replace text:', err);
@@ -1128,15 +1242,14 @@ const StoryEditor = () => {
 
   // Handle editor paste to clean up formatting
   const handleEditorPaste = useCallback((e) => {
-    if (storyStructure.chapters[activeChapter]?.isGenerating) {
+    if (editorBlocked || storyStructure.chapters[activeChapter]?.isGenerating) {
       e.preventDefault();
       return;
     }
-    
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
     document.execCommand('insertText', false, text);
-  }, [activeChapter, storyStructure]);
+  }, [activeChapter, storyStructure, editorBlocked]);
 
   // Cleanup debounce timeout on unmount
   useEffect(() => {
@@ -1160,7 +1273,7 @@ const StoryEditor = () => {
     }
   }, [activeChapter, storyStructure]);
 
-  // Mock story structure for new blank stories
+  // FIXED: Mock story structure for new blank stories with proper IDs
   const defaultStoryStructure = {
     frontMatter: {
       dedication: { title: 'Dedication', content: '' },
@@ -1168,9 +1281,11 @@ const StoryEditor = () => {
     },
     chapters: {
       'chapter-1': { 
+        id: 'temp-chapter-1', // FIXED: Added missing ID
         title: 'Chapter 1: The Grand Beginning', 
         content: 'Start writing your story here...',
-        wordCount: 0
+        wordCount: 0,
+        chapterNumber: 1
       }
     },
     backMatter: {
@@ -1198,6 +1313,16 @@ const StoryEditor = () => {
     setCharCount(chars);
   }, [content]);
 
+  // FIXED: Cleanup effect to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Clear any pending debounce timeouts on unmount
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Set default active chapter for new stories
   useEffect(() => {
     if (!storyId && !activeChapter) {
@@ -1213,25 +1338,23 @@ const StoryEditor = () => {
 
   const handleSave = async () => {
     if (!activeChapter || !content || !storyId || !session?.access_token) {
-      setError('Cannot save: Missing story data or authentication');
+      showNotification('error', 'Cannot save: Missing story data or authentication');
       return;
     }
-    
-    // Don't save if already saving
     if (saveInProgress) {
       console.log('Save already in progress, skipping...');
       return;
     }
-
     const chapterData = currentStoryStructure.chapters[activeChapter];
     if (!chapterData) {
-      setError('Cannot save: Chapter data not found');
+      showNotification('error', 'Cannot save: Chapter data not found');
       return;
     }
-
     try {
       setSaveInProgress(true);
-      setError(''); // Clear any previous errors
+      setEditorBlocked(true);
+      setIsSaving(true);
+      setError('');
       
       console.log('💾 Saving chapter to database...', {
         chapterId: chapterData.id,
@@ -1299,15 +1422,19 @@ const StoryEditor = () => {
       // Update chapters state
       setChapters(updatedChapters);
 
-      // Show success feedback
-      setChapterGenerationSuccess('Chapter saved successfully!');
-      setTimeout(() => setChapterGenerationSuccess(''), 3000); // Clear after 3 seconds
+      // Update UI state
+      setHasUnsavedChanges(false);
+      setIsSaving(false);
+      
+      showNotification('success', 'Chapter saved successfully!');
 
     } catch (err) {
       console.error('❌ Error saving chapter:', err);
-      setError(`Failed to save chapter: ${err.message}`);
+      setIsSaving(false);
+      showNotification('error', `Failed to save chapter: ${err.message}`);
     } finally {
       setSaveInProgress(false);
+      setEditorBlocked(false);
     }
   };
 
@@ -1362,36 +1489,36 @@ const StoryEditor = () => {
     }));
   };
 
-  // NEW: Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Ctrl+Enter: Generate AI suggestion
-      if (e.ctrlKey && e.key === 'Enter') {
-        e.preventDefault();
-        handleGenerateAISuggestion();
-      }
-      
-      // Ctrl+Shift+F: Toggle focus mode
-      if (e.ctrlKey && e.shiftKey && e.key === 'F') {
-        e.preventDefault();
-        setIsFocusMode(!isFocusMode);
-      }
-      
-      // Ctrl+Shift+W: Toggle word count
-      if (e.ctrlKey && e.shiftKey && e.key === 'W') {
-        e.preventDefault();
-        setShowWordCount(!showWordCount);
-      }
-      
-      // Escape: Exit focus mode
-      if (e.key === 'Escape' && isFocusMode) {
-        setIsFocusMode(false);
-      }
-    };
+  // FIXED: Keyboard shortcuts with proper memoization to prevent memory leaks
+  const handleKeyDown = useCallback((e) => {
+    // Ctrl+Enter: Generate AI suggestion
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      handleGenerateAISuggestion();
+    }
+    
+    // Ctrl+Shift+F: Toggle focus mode
+    if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+      e.preventDefault();
+      setIsFocusMode(prev => !prev);
+    }
+    
+    // Ctrl+Shift+W: Toggle word count
+    if (e.ctrlKey && e.shiftKey && e.key === 'W') {
+      e.preventDefault();
+      setShowWordCount(prev => !prev);
+    }
+    
+    // Escape: Exit focus mode
+    if (e.key === 'Escape' && isFocusMode) {
+      setIsFocusMode(false);
+    }
+  }, [isFocusMode]);
 
+  useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isFocusMode, showWordCount]);
+  }, [handleKeyDown]);
 
   // NEW: Generate AI suggestion
   const handleGenerateAISuggestion = async () => {
@@ -1438,14 +1565,20 @@ const StoryEditor = () => {
     }
   };
 
-  // NEW: Accept AI suggestion
+  // FIXED: Accept AI suggestion with proper error handling
   const handleAcceptSuggestion = () => {
     if (aiSuggestion) {
       const newContent = content + '\n\n' + aiSuggestion;
       const htmlContent = convertTextToHtml(newContent);
       setContent(htmlContent);
       if (editorRef.current) {
-        safeUpdateEditorContent(htmlContent);
+        try {
+          safeUpdateEditorContent(htmlContent, true); // Force update for new content
+        } catch (error) {
+          console.error('Failed to update editor content:', error);
+          // Fallback: direct update
+          editorRef.current.innerHTML = htmlContent;
+        }
       }
       setAiSuggestion('');
     }
@@ -1460,7 +1593,7 @@ const StoryEditor = () => {
   const FocusModeOverlay = () => {
     if (!isFocusMode) return null;
 
-    return (
+  return (
       <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center">
         <div className="w-full max-w-4xl mx-4">
           <div className="bg-gray-900 rounded-xl p-8 border border-gray-700">
@@ -1498,7 +1631,6 @@ const StoryEditor = () => {
                 contentEditable
                 className="w-full h-96 bg-transparent text-white text-lg leading-relaxed focus:outline-none resize-none overflow-y-auto"
                 onInput={(e) => setContent(e.target.innerHTML)}
-                onSelect={handleTextSelection}
                 dangerouslySetInnerHTML={{ __html: content }}
               />
             </div>
@@ -1534,12 +1666,78 @@ const StoryEditor = () => {
     );
   };
 
+  // Add autoClearError helper
+  const autoClearError = useCallback(() => {
+    if (editorBlockTimeoutRef.current) clearTimeout(editorBlockTimeoutRef.current);
+    editorBlockTimeoutRef.current = setTimeout(() => {
+      setError('');
+      setGenerationError('');
+      setChoicesError('');
+    }, 4000);
+  }, []);
+
+  // Simple notification helper
+  const showNotification = useCallback((type, message) => {
+    console.log(`${type.toUpperCase()}: ${message}`);
+    // For now, just log to console. Can be enhanced later.
+  }, []);
+
+  // Simple content change tracking
+  const handleContentChangeWithTracking = useCallback((newContent) => {
+    handleContentChange(newContent);
+    
+    // Track for unsaved changes
+    if (newContent !== lastContentRef.current) {
+      setHasUnsavedChanges(true);
+      lastContentRef.current = newContent;
+    }
+  }, [handleContentChange]);
+
+  // Debounced content change handler to prevent cursor jumping
+  const debouncedContentChange = useCallback(
+    debounce((newContent) => {
+      handleContentChangeWithTracking(newContent);
+      lastTypingTimeRef.current = Date.now();
+    }, 300), // 300ms debounce
+    [handleContentChangeWithTracking]
+  );
+
+  // Debounce Cleanup useEffect
+  useEffect(() => {
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+      // Cancel any pending debounced calls
+      if (debouncedContentChange.cancel) {
+        debouncedContentChange.cancel();
+      }
+    };
+  }, [debouncedContentChange]);
+
+  // Handle immediate content changes for UI responsiveness
+  const handleImmediateContentChange = useCallback((newContent) => {
+    setContent(newContent);
+    lastTypingTimeRef.current = Date.now();
+    
+    // Update word count immediately for UI responsiveness
+    const text = newContent.replace(/<[^>]*>/g, '');
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    setWordCount(words);
+    setCharCount(text.length);
+    
+    // Debounce the actual content processing
+    debouncedContentChange(newContent);
+  }, [debouncedContentChange]);
+
+
+
   return (
     <div className="h-screen bg-gray-900 text-white flex">
       {/* Focus Mode Overlay */}
       <FocusModeOverlay />
       
-      {/* Loading State */}
+      {/* Basic Loading State */}
       {loading && (
         <div className="fixed inset-0 bg-gray-900 flex items-center justify-center z-50">
           <div className="text-center">
@@ -1549,7 +1747,7 @@ const StoryEditor = () => {
         </div>
       )}
 
-      {/* Error State */}
+      {/* Basic Error State */}
       {(error || generationError) && (
         <div className="fixed top-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg z-50">
           {error || generationError}
@@ -1561,6 +1759,12 @@ const StoryEditor = () => {
             className="ml-2 text-red-200 hover:text-white"
           >
             ×
+          </button>
+          <button
+            onClick={() => window.location.reload()}
+            className="ml-2 px-2 py-1 bg-white/10 rounded text-white border border-white/20 hover:bg-white/20"
+          >
+            Retry
           </button>
         </div>
       )}
@@ -1617,38 +1821,56 @@ const StoryEditor = () => {
         </div>
       )}
 
-      {/* Sidebar - Story Structure */}
-      <div className={`${isSidebarCollapsed ? 'w-12' : 'w-56'} bg-gray-800 border-r border-gray-700 transition-all duration-300 flex flex-col`}>
-        {/* Sidebar Header */}
+      {/* Basic Sidebar - Story Structure */}
+      <div className={`${isSidebarCollapsed ? 'w-12' : 'w-64'} bg-gray-800 border-r border-gray-700 transition-all duration-300 flex flex-col`}>
+        {/* Basic Sidebar Header */}
         <div className="p-4 border-b border-gray-700 flex items-center justify-between">
           {!isSidebarCollapsed && (
             <div className="flex-1">
               <div className="flex items-center space-x-2">
-                {/* NEW: Back to Stories button */}
                 <button
                   onClick={() => navigate('/stories')}
-                  className="p-1 hover:bg-gray-700 rounded transition-colors"
+                  className="p-1 hover:bg-gray-700 rounded transition-colors group"
                   title="Back to Stories"
+                  aria-label="Back to Stories"
                 >
-                  <ArrowLeft className="w-4 h-4 text-gray-400" />
+                  <ArrowLeft className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
                 </button>
-                <div>
-                  <h2 className="text-lg font-semibold text-white">{storyTitle}</h2>
-                  <p className="text-sm text-gray-400">{storyGenre}</p>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg font-semibold text-white truncate" title={storyTitle}>
+                    {storyTitle}
+                  </h2>
+                  <p className="text-sm text-gray-400 truncate" title={storyGenre}>
+                    {storyGenre}
+                  </p>
                 </div>
               </div>
-              {/* NEW: Generation status indicator */}
-              {isGeneratingChapter1 && (
-                <div className="mt-2 flex items-center space-x-2 text-yellow-400">
-                  <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
-                  <span className="text-xs">Generating Chapter 1...</span>
-                </div>
-              )}
+              
+              {/* Basic Status Indicators */}
+              <div className="mt-2 space-y-1">
+                {isGeneratingChapter1 && (
+                  <div className="flex items-center space-x-2 text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded text-xs">
+                    <div className="w-2 h-2 border border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                    <span>Generating Chapter 1...</span>
+                  </div>
+                )}
+                
+                {hasUnsavedChanges && (
+                  <div className="flex items-center space-x-2 text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded text-xs">
+                    <span>•</span>
+                    <span>Unsaved changes</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
+          
+          {/* Basic Sidebar Toggle */}
           <button
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+            className="p-2 hover:bg-gray-700 rounded-lg transition-colors group"
+            title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+            aria-label={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           >
             <BookOpen className="w-5 h-5" />
           </button>
@@ -1663,7 +1885,7 @@ const StoryEditor = () => {
                   storyId={storyData.id} 
                   storyTitle={storyData.story_title || storyData.title || "Untitled Story"} 
                 />
-              </React.Suspense>
+    </React.Suspense>
             )}
             
             {/* Outline Option */}
@@ -1875,32 +2097,148 @@ const StoryEditor = () => {
 
       {/* Main Editor Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Editor Toolbar */}
-        <EditorToolbar
-          isSidebarCollapsed={isSidebarCollapsed}
-          onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          onToggleAIPanel={() => setIsAIPanelOpen(!isAIPanelOpen)}
-          isAIPanelOpen={isAIPanelOpen}
-          onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
-          isFocusMode={isFocusMode}
-          onGenerateSuggestion={handleGenerateAISuggestion}
-          isGeneratingSuggestion={isGeneratingSuggestion}
-          wordCount={wordCount}
-          showWordCount={showWordCount}
-          onToggleWordCount={() => setShowWordCount(!showWordCount)}
-          gameMode={gameMode}
-          onToggleGameMode={() => setGameMode(!gameMode)}
-        />
-
-        {/* Progress Bar */}
-        {showProgressBar && (
-          <div className="h-1 bg-gray-700">
-            <div 
-              className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
-              style={{ width: `${Math.min((wordCount / 1000) * 100, 100)}%` }}
-            />
+        {/* Basic Editor Toolbar */}
+        <div className="bg-gray-800 border-b border-gray-700 p-4">
+          <div className="flex items-center justify-between">
+            {/* Left Section - Navigation & Basic Controls */}
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+                title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                aria-label={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+              >
+                <BookOpen className="w-5 h-5" />
+              </button>
+              
+              <button
+                onClick={() => setIsAIPanelOpen(!isAIPanelOpen)}
+                className={`p-2 rounded-lg transition-colors ${
+                  isAIPanelOpen ? 'bg-blue-600 text-white' : 'hover:bg-gray-700 text-gray-300'
+                }`}
+                title="Toggle AI Assistant"
+                aria-label="Toggle AI Assistant"
+              >
+                <Sparkles className="w-5 h-5" />
+              </button>
+              
+              <div className="h-6 w-px bg-gray-600"></div>
+              
+              <button
+                onClick={() => setIsFocusMode(!isFocusMode)}
+                className={`p-2 rounded-lg transition-colors ${
+                  isFocusMode ? 'bg-purple-600 text-white' : 'hover:bg-gray-700 text-gray-300'
+                }`}
+                title="Focus Mode"
+                aria-label="Toggle Focus Mode"
+              >
+                <Target className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {/* Center Section - Writing Stats */}
+            <div className="flex items-center space-x-6">
+              {showWordCount && (
+                <div className="flex items-center space-x-4 text-sm">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-gray-400">Words:</span>
+                    <span className="font-medium text-white">{wordCount}</span>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <span className="text-gray-400">Chars:</span>
+                    <span className="font-medium text-white">{charCount}</span>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <span className="text-gray-400">Read:</span>
+                    <span className="font-medium text-white">{Math.ceil(wordCount / 200)}m</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Right Section - Advanced Controls */}
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setShowWordCount(!showWordCount)}
+                className={`p-2 rounded-lg transition-colors ${
+                  showWordCount ? 'bg-gray-600 text-white' : 'hover:bg-gray-700 text-gray-300'
+                }`}
+                title="Toggle Word Count"
+                aria-label="Toggle Word Count"
+              >
+                <FileText className="w-5 h-5" />
+              </button>
+              
+              <button
+                onClick={() => setGameMode(!gameMode)}
+                className={`p-2 rounded-lg transition-colors ${
+                  gameMode ? 'bg-purple-600 text-white' : 'hover:bg-gray-700 text-gray-300'
+                }`}
+                title="Game Mode"
+                aria-label="Toggle Game Mode"
+              >
+                <Users className="w-5 h-5" />
+              </button>
+              
+              <div className="h-6 w-px bg-gray-600"></div>
+              
+              <button
+                onClick={handleGenerateAISuggestion}
+                disabled={isGeneratingSuggestion}
+                className={`p-2 rounded-lg transition-colors ${
+                  isGeneratingSuggestion 
+                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
+                    : 'hover:bg-gray-700 text-gray-300'
+                }`}
+                title="Generate AI Suggestion"
+                aria-label="Generate AI Suggestion"
+              >
+                {isGeneratingSuggestion ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Zap className="w-5 h-5" />
+                )}
+              </button>
+              
+              <button
+                onClick={handleSave}
+                disabled={isSaving || !hasUnsavedChanges}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  isSaving
+                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : hasUnsavedChanges
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                }`}
+                title="Save Story"
+                aria-label="Save Story"
+              >
+                {isSaving ? (
+                  <div className="flex items-center space-x-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </div>
+                ) : (
+                  <span>Save</span>
+                )}
+              </button>
+            </div>
           </div>
-        )}
+          
+          {/* Basic Progress Bar */}
+          {showProgressBar && (
+            <div className="mt-4 h-1 bg-gray-700 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
+                style={{ width: `${Math.min((wordCount / 1000) * 100, 100)}%` }}
+              />
+            </div>
+          )}
+        </div>
+
+
 
         {/* Editor Content */}
         <div className="flex-1 flex overflow-hidden">
@@ -1921,15 +2259,40 @@ const StoryEditor = () => {
                 </div>
               </div>
 
-              {/* Editor */}
+              {/* Basic Editor */}
               <div className="relative">
                 <div
                   ref={editorRef}
-                  contentEditable
+                  contentEditable={!editorBlocked && !storyStructure.chapters[activeChapter]?.isGenerating}
                   className="w-full min-h-[700px] bg-gray-800 border border-gray-700 rounded-lg p-8 text-white text-lg leading-relaxed focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-all duration-200"
-                  onInput={(e) => setContent(e.target.innerHTML)}
+                  onInput={(e) => handleImmediateContentChange(e.target.innerHTML)}
                   onSelect={handleTextSelection}
+                  onKeyDown={(e) => {
+                    // Basic keyboard shortcuts
+                    if (e.ctrlKey || e.metaKey) {
+                      switch (e.key) {
+                        case 's':
+                          e.preventDefault();
+                          handleSave();
+                          break;
+                        case 'Enter':
+                          e.preventDefault();
+                          handleGenerateAISuggestion();
+                          break;
+                        case 'f':
+                          if (e.shiftKey) {
+                            e.preventDefault();
+                            setIsFocusMode(!isFocusMode);
+                          }
+                          break;
+                      }
+                    }
+                  }}
                   dangerouslySetInnerHTML={{ __html: content }}
+                  aria-label="Story editor content area"
+                  role="textbox"
+                  aria-multiline="true"
+                  spellCheck={true}
                 />
                 
                 {/* AI Suggestion Overlay */}
@@ -1957,6 +2320,8 @@ const StoryEditor = () => {
                     </div>
                   </div>
                 )}
+
+
               </div>
 
               {/* Writing Stats */}

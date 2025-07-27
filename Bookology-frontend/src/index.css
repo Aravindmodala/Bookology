@@ -304,5 +304,380 @@ a:hover {
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.3s ease-out;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+/* PHASE 3: Notification Animations */
+@keyframes slideInFromRight {
+  0% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutToRight {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInFromRight 0.3s ease-out;
+}
+
+.animate-slide-out-right {
+  animation: slideOutToRight 0.3s ease-in;
+}
+
+/* PHASE 3: Accessibility Styles */
+.high-contrast {
+  --color-gray-900: #000000;
+  --color-gray-800: #111111;
+  --color-gray-700: #222222;
+  --color-gray-600: #333333;
+  --color-gray-500: #444444;
+  --color-gray-400: #555555;
+  --color-gray-300: #666666;
+  --color-gray-200: #777777;
+  --color-gray-100: #888888;
+  --color-white: #ffffff;
+}
+
+.large-text {
+  font-size: 1.2em;
+}
+
+.large-text h1 { font-size: 2.5em; }
+.large-text h2 { font-size: 2em; }
+.large-text h3 { font-size: 1.75em; }
+.large-text h4 { font-size: 1.5em; }
+.large-text h5 { font-size: 1.25em; }
+.large-text h6 { font-size: 1.1em; }
+
+.reduced-motion * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* PHASE 3: Focus Management */
+.focus-visible {
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: 2px !important;
+}
+
+/* PHASE 3: Mobile Responsive Enhancements */
+@media (max-width: 768px) {
+  .mobile-hidden {
+    display: none !important;
+  }
+  
+  .mobile-full-width {
+    width: 100% !important;
+  }
+  
+  .mobile-text-sm {
+    font-size: 0.875rem !important;
+  }
+  
+  .mobile-p-2 {
+    padding: 0.5rem !important;
+  }
+}
+
+/* PHASE 3: Writing Progress Indicators */
+.writing-progress {
+  background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+  transition: width 0.3s ease-in-out;
+}
+
+.writing-streak {
+  background: linear-gradient(45deg, #f59e0b, #ef4444);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* PHASE 3: Enhanced Button States */
+.btn-enhanced {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.btn-enhanced::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  transition: left 0.5s;
+}
+
+.btn-enhanced:hover::before {
+  left: 100%;
+}
+
+/* PHASE 3: Loading States */
+.loading-shimmer {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* PHASE 3: Notification Styles */
+.notification-enter {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.notification-enter-active {
+  transform: translateX(0);
+  opacity: 1;
+  transition: all 0.3s ease-out;
+}
+
+.notification-exit {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.notification-exit-active {
+  transform: translateX(100%);
+  opacity: 0;
+  transition: all 0.3s ease-in;
+}
+
+/* PHASE 3: Editor Enhancements */
+.editor-enhanced {
+  position: relative;
+}
+
+.editor-enhanced::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.editor-enhanced:focus-within::before {
+  opacity: 1;
+}
+
+/* PHASE 3: Sidebar Enhancements */
+.sidebar-enhanced {
+  backdrop-filter: blur(10px);
+  background: rgba(26, 26, 26, 0.95);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* PHASE 3: Toolbar Enhancements */
+.toolbar-enhanced {
+  backdrop-filter: blur(10px);
+  background: rgba(26, 26, 26, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* PHASE 3: Focus Mode Styles */
+.focus-mode {
+  background: linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%);
+}
+
+.focus-mode .editor-content {
+  max-width: 800px;
+  margin: 0 auto;
+  font-size: 1.2em;
+  line-height: 1.8;
+}
+
+/* PHASE 3: Distraction Free Mode */
+.distraction-free {
+  background: #000000;
+}
+
+.distraction-free * {
+  color: #ffffff !important;
+}
+
+.distraction-free .editor-content {
+  font-size: 1.4em;
+  line-height: 2;
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+/* PHASE 3: Game Mode Enhancements */
+.game-mode-active {
+  background: linear-gradient(135deg, #1a1a1a 0%, #2d1b69 100%);
+}
+
+.game-mode-active .choices-container {
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+/* PHASE 3: Success States */
+.success-glow {
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+  animation: successPulse 2s ease-in-out;
+}
+
+@keyframes successPulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(34, 197, 94, 0.6);
+  }
+}
+
+/* PHASE 3: Error States */
+.error-shake {
+  animation: errorShake 0.5s ease-in-out;
+}
+
+@keyframes errorShake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+/* PHASE 3: Auto-save Indicator */
+.auto-save-indicator {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  background: rgba(59, 130, 246, 0.9);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  backdrop-filter: blur(10px);
+  z-index: 1000;
+  animation: slideInFromBottom 0.3s ease-out;
+}
+
+/* PHASE 3: Writing Stats */
+.writing-stats {
+  background: rgba(26, 26, 26, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1rem;
+  backdrop-filter: blur(10px);
+}
+
+.writing-stats .stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.writing-stats .stat-item:last-child {
+  border-bottom: none;
+}
+
+/* PHASE 3: Keyboard Shortcuts */
+.kbd {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  color: #ffffff;
+}
+
+/* PHASE 3: Help Modal */
+.help-modal {
+  background: rgba(26, 26, 26, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.help-modal .help-section {
+  border-left: 3px solid #3b82f6;
+  padding-left: 1rem;
+  margin: 1rem 0;
+}
+
+/* PHASE 3: Responsive Design */
+@media (max-width: 1024px) {
+  .lg-hidden {
+    display: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .sm-hidden {
+    display: none !important;
+  }
+  
+  .mobile-stack {
+    flex-direction: column !important;
+  }
+  
+  .mobile-center {
+    text-align: center !important;
+  }
+}
+
+/* PHASE 3: Print Styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+  
+  body {
+    background: white !important;
+    color: black !important;
+  }
 }

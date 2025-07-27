@@ -26,7 +26,6 @@ function Header() {
         <Link to="/" className="hover:text-white">Home</Link>
         <Link to="/stories" className="hover:text-white">Explore</Link>
         <Link to="/create" className="hover:text-white">Create</Link>
-        <a href="#community" className="hover:text-white">Community</a>
         <a href="#about" className="hover:text-white">About</a>
         <a href="#contact" className="hover:text-white">Contact</a>
       </nav>
@@ -49,7 +48,7 @@ function HeroSection({ onStart }) {
         Every great story begins with a whisper…
       </motion.h1>
       <p className="text-xl md:text-2xl text-white/80 mb-8 max-w-2xl mx-auto">
-        Join a vibrant community of storytellers. Write, share, and collaborate on books that inspire the world.
+        Create, write, and bring your stories to life with powerful AI-assisted tools.
       </p>
       <div className="flex gap-4 justify-center">
         <button
@@ -75,19 +74,19 @@ function FeaturesSection() {
       icon: "✍️",
     },
     {
-      title: "Share & Collaborate",
-      desc: "Invite others to read, remix, and contribute to your books.",
-      icon: "🤝",
+      title: "AI Assistance",
+      desc: "Get intelligent suggestions and help with your writing process.",
+      icon: "🤖",
     },
     {
-      title: "Discover & Remix",
-      desc: "Explore trending books and remix stories in new directions.",
-      icon: "🔀",
+      title: "Discover & Explore",
+      desc: "Explore trending books and find inspiration for your next story.",
+      icon: "🔍",
     },
     {
-      title: "Community Driven",
-      desc: "Connect with passionate readers and writers worldwide.",
-      icon: "🌍",
+      title: "Personal Library",
+      desc: "Build your own collection of stories and track your progress.",
+      icon: "📚",
     },
   ];
   return (
@@ -106,45 +105,7 @@ function FeaturesSection() {
   );
 }
 
-// 4. Community Highlights (placeholder data)
-function CommunityHighlights() {
-  const trendingBooks = [
-    { title: "The Lost Pages", author: "Jane Doe" },
-    { title: "Echoes of Tomorrow", author: "John Smith" },
-    { title: "Remix: The Forest Path", author: "Ava Lin" },
-  ];
-  const topAuthors = ["Jane Doe", "John Smith", "Ava Lin", "Samir Patel"];
-  return (
-    <section id="community" className="py-16 bg-gradient-to-br from-black via-purple-950 to-black">
-      <h2 className="text-3xl md:text-4xl font-bold text-center text-white mb-10">Community Highlights</h2>
-      <div className="flex flex-col md:flex-row gap-12 max-w-6xl mx-auto px-4">
-        <div className="flex-1">
-          <h3 className="text-xl font-semibold text-white mb-4">Trending Books</h3>
-          <ul className="space-y-4">
-            {trendingBooks.map((b, i) => (
-              <li key={i} className="bg-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between border border-white/10">
-                <span className="font-bold text-white">{b.title}</span>
-                <span className="text-white/60 text-sm">by {b.author}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="flex-1">
-          <h3 className="text-xl font-semibold text-white mb-4">Top Authors</h3>
-          <ul className="flex flex-wrap gap-4">
-            {topAuthors.map((a, i) => (
-              <li key={i} className="bg-white/10 rounded-full px-6 py-2 text-white font-medium border border-white/10">
-                {a}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// 5. Join Prompt
+// 4. Join Prompt
 function JoinPrompt() {
   return (
     <section className="py-12 bg-black/95 flex flex-col items-center justify-center text-center">
@@ -156,7 +117,7 @@ function JoinPrompt() {
   );
 }
 
-// 6. Footer
+// 5. Footer
 function Footer() {
   return (
     <footer className="bg-black border-t border-white/10 py-6 flex flex-col md:flex-row items-center justify-between px-8 text-white/60">
@@ -258,7 +219,6 @@ export default function BookologyHome({ onStart }) {
       <HeroSection onStart={onStart} />
       <FeaturesSection />
       <YourBooksSection user={user} session={session} />
-      <CommunityHighlights />
       <JoinPrompt />
       <Footer />
     </div>
