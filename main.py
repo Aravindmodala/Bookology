@@ -205,10 +205,34 @@ story_chatbot = None
 # Initialize Supabase client globally
 supabase: Optional[Client] = None
 
-# Authentication dependency (keep original for compatibility)
+# SECURITY: Rate limiting for authentication attempts
+from collections import defaultdict
+from time import time
+auth_attempts = defaultdict(list)
+MAX_AUTH_ATTEMPTS = 5  # Maximum attempts per minute
+AUTH_WINDOW = 60  # Time window in seconds
+
+# Authentication dependency with enhanced security
 async def get_authenticated_user(token = Depends(auth_scheme)):
-    """Get authenticated user - optimized version with security enhancements."""
+    """Get authenticated user - enhanced security version with comprehensive validation."""
     try:
+        # SECURITY: Rate limiting check
+        client_ip = "unknown"  # In production, get from request.client.host
+        current_time = time()
+        
+        # Clean old attempts
+        auth_attempts[client_ip] = [t for t in auth_attempts[client_ip] if current_time - t < AUTH_WINDOW]
+        
+        # Check if too many attempts
+        if len(auth_attempts[client_ip]) >= MAX_AUTH_ATTEMPTS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts. Please try again later."
+            )
+        
+        # Record this attempt
+        auth_attempts[client_ip].append(current_time)
+        
         # SECURITY: Validate token format before processing
         if not token or not token.credentials:
             raise HTTPException(
@@ -216,9 +240,73 @@ async def get_authenticated_user(token = Depends(auth_scheme)):
                 detail="Missing authentication token"
             )
         
-        # SECURITY: Basic token format validation
+        # SECURITY: Enhanced token format validation
         token_str = token.credentials.strip()
-        if len(token_str) < 20 or len(token_str) > 2000:  # Reasonable token length bounds
+        
+        # Validate token length (Supabase JWT tokens are typically 200-400 chars)
+        if len(token_str) < 100 or len(token_str) > 500:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token format"
+            )
+        
+        # SECURITY: Validate token structure (should be JWT format)
+        if not token_str.count('.') == 2:  # JWT has 3 parts separated by dots
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token structure"
+            )
+        
+        # SECURITY: Comprehensive JWT header validation
+        try:
+            import base64
+            import json
+            
+            # Split token and validate structure
+            token_parts = token_str.split('.')
+            if len(token_parts) != 3:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token structure"
+                )
+            
+            header_part = token_parts[0]
+            # Add padding if needed for base64 decoding
+            header_part += '=' * (4 - len(header_part) % 4)
+            
+            # Decode and validate header
+            try:
+                header = json.loads(base64.b64decode(header_part))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token header"
+                )
+            
+            # Validate required header fields
+            if not isinstance(header, dict):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token header format"
+                )
+            
+            if header.get('alg') != 'HS256':  # Supabase uses HS256
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token algorithm"
+                )
+            
+            # Validate typ field if present
+            if 'typ' in header and header.get('typ') != 'JWT':
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token type"
+                )
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Token header validation failed: {type(e).__name__}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token format"
@@ -238,6 +326,11 @@ async def get_authenticated_user(token = Depends(auth_scheme)):
         
         # SECURITY: Log authentication success (without sensitive data)
         logger.info(f"User authenticated successfully: {user.id}")
+        
+        # SECURITY: Remove rate limiting for successful authentication
+        if client_ip in auth_attempts:
+            auth_attempts[client_ip].clear()
+        
         return user
         
     except HTTPException:

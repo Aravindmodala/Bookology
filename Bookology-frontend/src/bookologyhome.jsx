@@ -10,13 +10,42 @@
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useAuth } from "./AuthContext";
-import Navbar from "./Navbar";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase, isSupabaseEnabled } from "./supabaseClient";
-import { FileText, Calendar, BookOpen, Palette } from "lucide-react";
+import { FileText, Calendar, BookOpen, User, Settings, LogOut, LayoutDashboard } from "lucide-react";
 
-// 1. Header (with Bookology as logo)
-function Header() {
+// 1. Header (with Bookology as logo and user dropdown)
+function Header({ user }) {
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  const handleLogout = async () => {
+    try {
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDropdownOpen]);
+
   return (
     <header className="flex items-center justify-between px-8 py-4 bg-black border-b border-white/10">
       <span className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-yellow-400 tracking-tight select-none">
@@ -29,8 +58,68 @@ function Header() {
         <a href="#about" className="hover:text-white">About</a>
         <a href="#contact" className="hover:text-white">Contact</a>
       </nav>
-      <div className="flex items-center gap-4">
-        <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white font-bold">A</div>
+      <div className="flex items-center gap-4 relative" ref={dropdownRef}>
+        {user ? (
+          <>
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="w-10 h-10 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold hover:scale-105 transition-all cursor-pointer"
+            >
+              {user.email ? user.email.charAt(0).toUpperCase() : 'U'}
+            </button>
+            {isDropdownOpen && (
+              <div className="absolute top-12 right-0 bg-gray-800 border border-gray-700 rounded-lg shadow-lg py-2 min-w-[200px] z-50">
+                <div className="px-4 py-2 border-b border-gray-700">
+                  <p className="text-white font-semibold text-sm">{user.email}</p>
+                  <p className="text-gray-400 text-xs">Signed in</p>
+                </div>
+                <Link 
+                  to="/dashboard" 
+                  className="flex items-center gap-3 px-4 py-2 text-white hover:bg-gray-700 transition-colors text-sm"
+                  onClick={() => setIsDropdownOpen(false)}
+                >
+                  <LayoutDashboard className="w-4 h-4" />
+                  Dashboard
+                </Link>
+                <Link 
+                  to="/profile" 
+                  className="flex items-center gap-3 px-4 py-2 text-white hover:bg-gray-700 transition-colors text-sm"
+                  onClick={() => setIsDropdownOpen(false)}
+                >
+                  <User className="w-4 h-4" />
+                  Profile
+                </Link>
+                <Link 
+                  to="/settings" 
+                  className="flex items-center gap-3 px-4 py-2 text-white hover:bg-gray-700 transition-colors text-sm"
+                  onClick={() => setIsDropdownOpen(false)}
+                >
+                  <Settings className="w-4 h-4" />
+                  Settings
+                </Link>
+                <div className="border-t border-gray-700 mt-2">
+                  <button
+                    onClick={() => {
+                      handleLogout();
+                      setIsDropdownOpen(false);
+                    }}
+                    className="flex items-center gap-3 w-full text-left px-4 py-2 text-red-400 hover:bg-gray-700 transition-colors text-sm"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <Link 
+            to="/login" 
+            className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-full hover:scale-105 transition-all text-sm"
+          >
+            Sign In
+          </Link>
+        )}
       </div>
     </header>
   );
@@ -105,8 +194,24 @@ function FeaturesSection() {
   );
 }
 
-// 4. Join Prompt
-function JoinPrompt() {
+// 4. Join Prompt - Fixed to check authentication status
+function JoinPrompt({ user }) {
+  if (user) {
+    return (
+      <section className="py-12 bg-black/95 flex flex-col items-center justify-center text-center">
+        <h2 className="text-2xl md:text-3xl font-bold text-white mb-4">
+          Welcome back! Ready to continue your story?
+        </h2>
+        <Link 
+          to="/create" 
+          className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-full shadow-lg hover:scale-105 transition-all text-lg"
+        >
+          Create New Story
+        </Link>
+      </section>
+    );
+  }
+
   return (
     <section className="py-12 bg-black/95 flex flex-col items-center justify-center text-center">
       <h2 className="text-2xl md:text-3xl font-bold text-white mb-4">Join Bookology and start your story today!</h2>
@@ -143,7 +248,10 @@ function YourBooksSection({ user, session }) {
       setLoading(false);
       return;
     }
+    
     let isMounted = true;
+    const abortController = new AbortController();
+    
     const fetchBooks = async () => {
       setLoading(true);
       try {
@@ -152,22 +260,40 @@ function YourBooksSection({ user, session }) {
           .select('*, Chapters(count)')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false });
-        if (error) throw error;
+        
+        if (error) {
+          console.error('Error fetching books:', error);
+          throw error;
+        }
+        
         const transformed = Stories?.map(story => ({
           ...story,
           chapter_count: story.Chapters?.[0]?.count || 0,
           title: story.story_title,
           outline: story.story_outline
         })) || [];
-        if (isMounted) setBooks(transformed);
+        
+        if (isMounted) {
+          setBooks(transformed);
+        }
       } catch (err) {
-        if (isMounted) setBooks([]);
+        console.error('Error in fetchBooks:', err);
+        if (isMounted) {
+          setBooks([]);
+        }
       } finally {
-        if (isMounted) setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
+    
     fetchBooks();
-    return () => { isMounted = false; };
+    
+    return () => { 
+      isMounted = false;
+      abortController.abort();
+    };
   }, [user]);
 
   if (!user || !isSupabaseEnabled) return null;
@@ -179,7 +305,11 @@ function YourBooksSection({ user, session }) {
       <h2 className="text-3xl md:text-4xl font-bold text-center text-white mb-10">Your Books</h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto px-4">
         {books.slice(0, 6).map((story) => (
-          <div key={story.id} className="bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group z-50 relative overflow-visible">
+          <Link 
+            to={`/story/${story.id}`} 
+            key={story.id} 
+            className="bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group z-50 relative overflow-visible cursor-pointer"
+          >
             {/* Cover Image Section (placeholder) */}
             <div className="relative h-40 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 overflow-hidden flex items-center justify-center">
               <BookOpen className="w-12 h-12 text-gray-400" />
@@ -197,7 +327,7 @@ function YourBooksSection({ user, session }) {
                 <span className="flex items-center"><Calendar className="w-3 h-3 mr-1" />{story.created_at ? new Date(story.created_at).toLocaleDateString() : 'Unknown'}</span>
               </div>
             </div>
-          </div>
+          </Link>
         ))}
       </div>
     </section>
@@ -209,7 +339,7 @@ export default function BookologyHome({ onStart }) {
   const { isSupabaseEnabled, user, session } = useAuth();
   return (
     <div className="min-h-screen w-screen bg-black text-white font-serif">
-      <Header />
+      <Header user={user} />
       {/* Development Notice */}
       {!isSupabaseEnabled && (
         <div className="bg-yellow-600/20 border border-yellow-500/50 text-yellow-200 px-4 py-2 text-center text-sm">
@@ -219,7 +349,7 @@ export default function BookologyHome({ onStart }) {
       <HeroSection onStart={onStart} />
       <FeaturesSection />
       <YourBooksSection user={user} session={session} />
-      <JoinPrompt />
+      <JoinPrompt user={user} />
       <Footer />
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import { useAuth } from './AuthContext';
@@ -145,13 +145,27 @@ const StoryEditor = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // FIXED: Utility function to convert text with \n\n to HTML paragraphs
+  // FIXED: Utility function to convert text with \n\n to HTML paragraphs with XSS protection
   const convertTextToHtml = useCallback((text) => {
     if (!text) return '';
     
-    // If text already contains HTML tags, return as-is
+    // SECURITY: Basic XSS protection - escape HTML entities
+    const escapeHtml = (str) => {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    };
+    
+    // If text already contains HTML tags, sanitize it
     if (text.includes('<div') || text.includes('<p>')) {
-      return text;
+      // Only allow safe HTML tags
+      const safeText = text
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove script tags
+        .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '') // Remove iframe tags
+        .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '') // Remove object tags
+        .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '') // Remove embed tags
+        .replace(/on\w+\s*=\s*["'][^"']*["']/gi, ''); // Remove event handlers
+      return safeText;
     }
     
     // Convert \n\n to paragraph breaks
@@ -171,7 +185,7 @@ const StoryEditor = () => {
         .map((line, index) => {
           const isLast = index === singleLineParagraphs.length - 1;
           const marginStyle = isLast ? '' : 'margin-bottom: 1.5rem;';
-          return `<div style="${marginStyle}">${line}</div>`;
+          return `<div style="${marginStyle}">${escapeHtml(line)}</div>`;
         })
         .join('');
     }
@@ -181,7 +195,7 @@ const StoryEditor = () => {
       .map((paragraph, index) => {
         const isLast = index === paragraphs.length - 1;
         const marginStyle = isLast ? '' : 'margin-bottom: 1.5rem;';
-        return `<div style="${marginStyle}">${paragraph}</div>`;
+        return `<div style="${marginStyle}">${escapeHtml(paragraph)}</div>`;
       })
       .join('');
   }, []);
@@ -660,8 +674,8 @@ const StoryEditor = () => {
     chapter1GenerationComplete, 
     isGeneratingChapter1, 
     storyStructure.chapters, 
-    loading,
-    generateChapter1FromOutline
+    loading
+    // REMOVED: generateChapter1FromOutline - this was causing infinite loops
   ]);
 
   // Handle choice selection and generate next chapter
@@ -1693,30 +1707,35 @@ const StoryEditor = () => {
     }
   }, [handleContentChange]);
 
-  // Debounced content change handler to prevent cursor jumping
-  const debouncedContentChange = useCallback(
-    debounce((newContent) => {
+  // FIXED: Optimized debounced content change handler with proper memoization
+  const debouncedContentChange = useMemo(() => {
+    return debounce((newContent) => {
       handleContentChangeWithTracking(newContent);
       lastTypingTimeRef.current = Date.now();
-    }, 300), // 300ms debounce
-    [handleContentChangeWithTracking]
-  );
+    }, 300);
+  }, [handleContentChangeWithTracking]); // Only recreate when dependencies change
 
-  // Debounce Cleanup useEffect
+  // FIXED: Proper cleanup effect to prevent memory leaks
   useEffect(() => {
     return () => {
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
       // Cancel any pending debounced calls
-      if (debouncedContentChange.cancel) {
+      if (debouncedContentChange && typeof debouncedContentChange.cancel === 'function') {
         debouncedContentChange.cancel();
       }
     };
   }, [debouncedContentChange]);
 
-  // Handle immediate content changes for UI responsiveness
+  // FIXED: Optimized immediate content change handler with proper error handling
   const handleImmediateContentChange = useCallback((newContent) => {
+    // Validate input to prevent crashes
+    if (typeof newContent !== 'string') {
+      console.warn('Invalid content type received:', typeof newContent);
+      return;
+    }
+    
     setContent(newContent);
     lastTypingTimeRef.current = Date.now();
     
@@ -1726,9 +1745,15 @@ const StoryEditor = () => {
     setWordCount(words);
     setCharCount(text.length);
     
-    // Debounce the actual content processing
-    debouncedContentChange(newContent);
-  }, [debouncedContentChange]);
+    // Debounce the actual content processing with error handling
+    try {
+      debouncedContentChange(newContent);
+    } catch (error) {
+      console.error('Error in debounced content change:', error);
+      // Fallback: update content directly
+      handleContentChangeWithTracking(newContent);
+    }
+  }, [debouncedContentChange, handleContentChangeWithTracking]);
 
 
 
