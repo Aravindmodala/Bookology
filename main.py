@@ -4190,3 +4190,94 @@ async def suggest_continue_endpoint(request: SuggestContinueRequest, user = Depe
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate AI suggestion: {str(e)}"
         )
+
+@app.patch("/story/{story_id}/visibility")
+async def update_story_visibility(
+    story_id: int,
+    visibility_data: dict,
+    user = Depends(get_authenticated_user)
+):
+    """Update story visibility (public/private)"""
+    try:
+        logger.info(f"Updating visibility for story {story_id} by user {user.id}")
+        
+        is_public = visibility_data.get("is_public", False)
+        update_data = {
+            "is_public": is_public,
+            "published_at": datetime.utcnow().isoformat() if is_public else None
+        }
+        
+        # Verify story belongs to user
+        story_response = supabase.table("Stories").select("id").eq(
+            "id", story_id
+        ).eq("user_id", user.id).execute()
+        
+        if not story_response.data:
+            raise HTTPException(status_code=404, detail="Story not found or access denied")
+        
+        # Update the story
+        result = supabase.table("Stories").update(update_data).eq(
+            "id", story_id
+        ).eq("user_id", user.id).execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update story")
+            
+        logger.info(f"Successfully updated story {story_id} visibility to {'public' if is_public else 'private'}")
+        return {
+            "success": True, 
+            "story": result.data[0],
+            "message": f"Story is now {'public' if is_public else 'private'}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update story visibility: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update story visibility")
+
+@app.get("/stories/public")
+async def get_public_stories(
+    page: int = 1,
+    limit: int = 20,
+    genre: Optional[str] = None,
+    sort_by: str = "published_at"
+):
+    """Get public stories for discovery"""
+    try:
+        logger.info(f"Fetching public stories - page: {page}, limit: {limit}, genre: {genre}")
+        
+        query = supabase.table("Stories").select("*").eq("is_public", True)
+        
+        if genre:
+            query = query.eq("genre", genre)
+            
+        # Validate sort_by parameter
+        valid_sort_fields = ["published_at", "created_at", "story_title", "total_chapters"]
+        if sort_by not in valid_sort_fields:
+            sort_by = "published_at"
+            
+        result = query.order(sort_by, desc=True).range(
+            (page - 1) * limit, page * limit - 1
+        ).execute()
+        
+        # Get total count for pagination
+        count_query = supabase.table("Stories").select("id", count="exact").eq("is_public", True)
+        if genre:
+            count_query = count_query.eq("genre", genre)
+        count_result = count_query.execute()
+        total_count = count_result.count or 0
+        
+        logger.info(f"Found {len(result.data)} public stories out of {total_count} total")
+        
+        return {
+            "stories": result.data, 
+            "page": page, 
+            "limit": limit,
+            "total": total_count,
+            "total_pages": (total_count + limit - 1) // limit
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch public stories: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch public stories")

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   BookOpen, 
@@ -15,7 +15,11 @@ import {
   Edit3,
   Trash2,
   Eye,
-  Palette
+  Palette,
+  Globe,
+  Lock,
+  Share2,
+  Loader2
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { supabase, isSupabaseEnabled } from '../supabaseClient';
@@ -28,6 +32,7 @@ const StoryDashboard = ({ onStartNewStory }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('created_at'); // Changed from 'updated_at' to 'created_at'
+  const [filterStatus, setFilterStatus] = useState('all');
   const { user, session } = useAuth();
   const navigate = useNavigate();
 
@@ -45,6 +50,43 @@ const StoryDashboard = ({ onStartNewStory }) => {
   const handleEditStory = (story) => {
     // Navigate to editor in edit mode
     navigate('/editor', { state: { story, mode: 'edit' } });
+  };
+
+  // Add back the visibility toggle functionality
+  const handleToggleVisibility = async (story) => {
+    if (!story.id || !session?.access_token) return;
+    
+    try {
+      const newVisibility = !story.is_public;
+      const updateData = {
+        is_public: newVisibility,
+        published_at: newVisibility ? new Date().toISOString() : null
+      };
+
+      const { error } = await supabase
+        .from('Stories')
+        .update(updateData)
+        .eq('id', story.id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setStories(prev => prev.map(s => 
+        s.id === story.id 
+          ? { ...s, is_public: newVisibility, published_at: updateData.published_at }
+          : s
+      ));
+
+    } catch (err) {
+      console.error('Failed to update visibility:', err);
+      setError(`Failed to update story visibility: ${err.message}`);
+      
+      // Auto-clear error after 5 seconds
+      setTimeout(() => {
+        setError(null);
+      }, 5000);
+    }
   };
 
   const handleDeleteStory = async (story) => {
@@ -153,11 +195,17 @@ const StoryDashboard = ({ onStartNewStory }) => {
 
   const filteredStories = stories.filter(story => {
     const searchLower = searchTerm.toLowerCase();
-    return (
+    const matchesSearch = (
       (story.story_title || '').toLowerCase().includes(searchLower) ||
       (story.story_outline || '').toLowerCase().includes(searchLower) ||
       (story.genre || '').toLowerCase().includes(searchLower)
     );
+    
+    const matchesFilter = filterStatus === 'all' || 
+      (filterStatus === 'public' && story.is_public) ||
+      (filterStatus === 'private' && !story.is_public);
+    
+    return matchesSearch && matchesFilter;
   });
 
   const formatDate = (dateString) => {
@@ -183,37 +231,9 @@ const StoryDashboard = ({ onStartNewStory }) => {
     const [coverLoading, setCoverLoading] = useState(false);
     const [showImageModal, setShowImageModal] = useState(false);
 
-    // Fetch cover image on component mount
-    useEffect(() => {
-      const fetchCoverImage = async () => {
-        if (!story.id || !session?.access_token) return;
-        
-        try {
-          const response = await fetch(
-            createApiUrl(API_ENDPOINTS.GET_COVER_STATUS.replace('{story_id}', story.id)),
-            {
-              headers: {
-                'Authorization': `Bearer ${session.access_token}`,
-                'Content-Type': 'application/json'
-              }
-            }
-          );
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.cover_image_url) {
-              setCoverImage(data.cover_image_url);
-            }
-          }
-        } catch (err) {
-          console.log('No cover image found for story:', story.id);
-        }
-      };
+    // REMOVED: Automatic cover image fetching on mount - this was causing the 429/401 errors!
 
-      fetchCoverImage();
-    }, [story.id, session]);
-
-    // Generate cover image
+    // Generate cover image only when user explicitly clicks
     const handleGenerateCover = async () => {
       if (!story.id || !session?.access_token || coverLoading) return;
       
@@ -243,8 +263,49 @@ const StoryDashboard = ({ onStartNewStory }) => {
       }
     };
 
+    // Copy public link
+    const handleCopyLink = async () => {
+      try {
+        await navigator.clipboard.writeText(`${window.location.origin}/story/${story.id}`);
+      } catch (err) {
+        console.error('Failed to copy link:', err);
+      }
+    };
+
     return (
-      <div className="bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group overflow-hidden">
+      <div className="bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group overflow-hidden relative">
+        {/* Public/Private Toggle - Top Left */}
+        <div className="absolute top-3 left-3 z-20">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleVisibility(story);
+            }}
+            className={`p-2 rounded-lg transition-all duration-200 ${
+              story.is_public 
+                ? 'bg-green-600/80 hover:bg-green-500/90 text-white' 
+                : 'bg-gray-700/80 hover:bg-gray-600/90 text-gray-300'
+            } hover:scale-110`}
+            title={story.is_public ? 'Make Private' : 'Make Public'}
+          >
+            {story.is_public ? (
+              <Globe className="w-4 h-4" />
+            ) : (
+              <Lock className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+
+        {/* Public Badge */}
+        {story.is_public && (
+          <div className="absolute top-3 right-3 z-20">
+            <span className="px-2 py-1 bg-green-600/80 text-white text-xs rounded-full font-medium flex items-center gap-1">
+              <Globe className="w-3 h-3" />
+              Public
+            </span>
+          </div>
+        )}
+
         {/* Cover Image Section */}
         <div className="relative h-48 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 overflow-hidden">
           {coverImage ? (
@@ -327,6 +388,12 @@ const StoryDashboard = ({ onStartNewStory }) => {
                 <Calendar className="w-3 h-3 mr-1" />
                 {formatDate(story.created_at)}
               </span>
+              {story.is_public && story.published_at && (
+                <span className="flex items-center text-green-400">
+                  <Globe className="w-3 h-3 mr-1" />
+                  {formatDate(story.published_at)}
+                </span>
+              )}
             </div>
             <span className="text-blue-400 font-medium text-xs">
               {story.genre || 'Fiction'}
@@ -358,6 +425,24 @@ const StoryDashboard = ({ onStartNewStory }) => {
               >
                 <Menu.Items className="absolute right-0 z-10 mt-2 w-36 origin-top-right rounded-md bg-gray-900 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
                   <div className="py-1">
+                    <Menu.Item>
+                      {({ active }) => (
+                        <button
+                          onClick={() => handleToggleVisibility(story)}
+                          className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-blue-600 text-white' : 'text-blue-400'}`}
+                        >
+                          {story.is_public ? (
+                            <>
+                              <Lock className="w-4 h-4 mr-2" /> Make Private
+                            </>
+                          ) : (
+                            <>
+                              <Globe className="w-4 h-4 mr-2" /> Make Public
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </Menu.Item>
                     {!coverImage && (
                       <Menu.Item>
                         {({ active }) => (
@@ -367,6 +452,18 @@ const StoryDashboard = ({ onStartNewStory }) => {
                             className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-blue-600 text-white' : 'text-blue-400'} disabled:opacity-50`}
                           >
                             <Palette className="w-4 h-4 mr-2" /> Generate Cover
+                          </button>
+                        )}
+                      </Menu.Item>
+                    )}
+                    {story.is_public && (
+                      <Menu.Item>
+                        {({ active }) => (
+                          <button
+                            onClick={handleCopyLink}
+                            className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-green-600 text-white' : 'text-green-400'}`}
+                          >
+                            <Share2 className="w-4 h-4 mr-2" /> Copy Public Link
                           </button>
                         )}
                       </Menu.Item>
@@ -483,6 +580,17 @@ const StoryDashboard = ({ onStartNewStory }) => {
                 <option value="created_at">Date Created</option>
                 <option value="story_title">Title</option>
                 <option value="total_chapters">Chapter Count</option>
+                <option value="published_at">Date Published</option>
+              </select>
+
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
+              >
+                <option value="all">All Stories</option>
+                <option value="public">Public Stories</option>
+                <option value="private">Private Stories</option>
               </select>
             </div>
           </div>
@@ -525,7 +633,7 @@ const StoryDashboard = ({ onStartNewStory }) => {
           {/* Stats Footer */}
           {filteredStories.length > 0 && (
             <div className="mt-12 bg-gray-800 rounded-xl p-6 border border-gray-700">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-center">
                 <div>
                   <div className="text-3xl font-bold text-blue-400 mb-1">
                     {stories.length}
@@ -534,12 +642,18 @@ const StoryDashboard = ({ onStartNewStory }) => {
                 </div>
                 <div>
                   <div className="text-3xl font-bold text-green-400 mb-1">
+                    {stories.filter(s => s.is_public).length}
+                  </div>
+                  <div className="text-gray-400 text-sm">Public Stories</div>
+                </div>
+                <div>
+                  <div className="text-3xl font-bold text-purple-400 mb-1">
                     {stories.reduce((sum, story) => sum + (story.total_chapters || 0), 0)}
                   </div>
                   <div className="text-gray-400 text-sm">Chapters Written</div>
                 </div>
                 <div>
-                  <div className="text-3xl font-bold text-purple-400 mb-1">
+                  <div className="text-3xl font-bold text-yellow-400 mb-1">
                     {stories.filter(story => story.status === 'completed').length}
                   </div>
                   <div className="text-gray-400 text-sm">Completed Stories</div>

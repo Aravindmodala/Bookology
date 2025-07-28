@@ -44,5 +44,8 @@ export const API_ENDPOINTS = {
   GET_COVER_STATUS: '/story/{story_id}/cover_status',
   // Rewrite functionality
   REWRITE_TEXT: '/rewrite_text',
-  SUGGEST_CONTINUE: '/suggest_continue'
+  SUGGEST_CONTINUE: '/suggest_continue',
+  // Story visibility endpoints
+  UPDATE_STORY_VISIBILITY: '/story/{story_id}/visibility',
+  GET_PUBLIC_STORIES: '/stories/public'
 };
