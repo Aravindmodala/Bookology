@@ -47,5 +47,10 @@ export const API_ENDPOINTS = {
   SUGGEST_CONTINUE: '/suggest_continue',
   // Story visibility endpoints
   UPDATE_STORY_VISIBILITY: '/story/{story_id}/visibility',
-  GET_PUBLIC_STORIES: '/stories/public'
+  GET_PUBLIC_STORIES: '/stories/public',
+  // Like and comment endpoints
+  TOGGLE_STORY_LIKE: '/story/{story_id}/like',
+  ADD_STORY_COMMENT: '/story/{story_id}/comment',
+  GET_STORY_LIKES: '/story/{story_id}/likes',
+  GET_STORY_COMMENTS: '/story/{story_id}/comments'
 };

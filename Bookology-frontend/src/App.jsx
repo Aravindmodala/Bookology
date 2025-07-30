@@ -5,6 +5,7 @@ import Auth from './Auth';
 import StoryEditor from './StoryEditor';
 import StoryDashboard from './components/StoryDashboard';
 import StoryCreator from './StoryCreator';
+import ExplorePage from './components/ExplorePage';
 import { AuthProvider } from './AuthContext';
 import ErrorBoundary from './ErrorBoundary';
 
@@ -28,6 +29,7 @@ function App() {
             <Route path="/stories" element={<StoriesWrapper />} />
             <Route path="/create" element={<StoryCreator />} />
             <Route path="/editor" element={<StoryEditor />} />
+            <Route path="/explore" element={<ExplorePage />} />
             <Route path="/login" element={<Auth />} />
           </Routes>
         </Router>
