@@ -26,18 +26,17 @@ import {
   Loader2,
   Zap,
   Target,
-  Users,
   ArrowLeft,
   TreePine,
   X,
-  Sparkles
+  Sparkles,
+  Gamepad2
 } from 'lucide-react';
 import EditorToolbar from './components/EditorToolbar';
 import AIAssistantPanel from './components/AIAssistantPanel';
 // OPTIMIZATION: Lazy load heavy components
 const StoryTree = React.lazy(() => import('./components/StoryTree'));
 const StoryCover = React.lazy(() => import('./components/StoryCover'));
-import GameModeToggle from './components/GameModeToggle';
 
 const StoryEditor = () => {
   const [searchParams] = useSearchParams();
@@ -106,6 +105,10 @@ const StoryEditor = () => {
   const lastContentRef = useRef('');
   const lastTypingTimeRef = useRef(Date.now());
   const isUserTypingRef = useRef(false);
+  
+  // SELECTION FIX: Track when user is actively selecting text
+  const isUserSelectingRef = useRef(false);
+  const selectionTimeoutRef = useRef(null);
 
   // Real data from Supabase
   const [loading, setLoading] = useState(true);
@@ -200,7 +203,51 @@ const StoryEditor = () => {
       .join('');
   }, []);
 
-  // FIX 1: Add missing loadStoryData function
+  // INSTAGRAM-STYLE: Cache-last strategy for optimal UX
+  const buildStoryStructureFromData = useCallback((chaptersData) => {
+    // SELECTION GUARD: Don't update structure if user is selecting text
+    if (isUserSelectingRef.current) {
+      console.log('🔒 Skipping structure update - user is selecting text');
+      return;
+    }
+    
+    const chaptersObject = {};
+    chaptersData.forEach(chapter => {
+      const chapterKey = `chapter-${chapter.chapter_number}`;
+      chaptersObject[chapterKey] = {
+        id: chapter.id,
+        title: chapter.title || `Chapter ${chapter.chapter_number}`,
+        content: chapter.content || '',
+        wordCount: chapter.content ? chapter.content.trim().split(/\s+/).length : 0,
+        chapterNumber: chapter.chapter_number,
+        createdAt: chapter.created_at
+      };
+    });
+    
+    setStoryStructure(prev => ({
+      ...prev,
+      chapters: chaptersObject
+    }));
+
+    // Set active chapter if none selected and we have chapters
+    if (chaptersData.length > 0 && !activeChapter) {
+      // Additional check before setting content
+      const selection = window.getSelection();
+      const hasActiveSelection = selection && 
+                                selection.rangeCount > 0 && 
+                                selection.toString().trim().length > 0;
+      
+      if (!hasActiveSelection && !isUserSelectingRef.current) {
+        const firstChapterKey = `chapter-${chaptersData[0].chapter_number}`;
+        setActiveChapter(firstChapterKey);
+        const htmlContent = convertTextToHtml(chaptersData[0].content || '');
+        setContent(htmlContent);
+        setChapter1GenerationComplete(true);
+      }
+    }
+  }, [activeChapter, convertTextToHtml]);
+
+  // INSTAGRAM-STYLE: Always fetch fresh data while showing cached data immediately
   const loadStoryData = useCallback(async () => {
     if (!storyId || !user || !session?.access_token) {
       setLoading(false);
@@ -210,50 +257,20 @@ const StoryEditor = () => {
     try {
       setLoading(true);
       
-      // 1. CHECK CACHE FIRST
+      // 1. INSTAGRAM STRATEGY: Show cached data immediately (if available)
       const cachedData = getCachedData(storyId);
-      console.log('🔍 Checking cache for story:', storyId, 'Cached:', cachedData.isCached, 'Stale:', cachedData.isStale);
+      console.log('📱 Instagram-style: Checking cache for story:', storyId, 'Cached:', cachedData.isCached, 'Stale:', cachedData.isStale);
       
-      // 2. If we have valid cached data, use it
-      if (cachedData.isCached && !cachedData.isStale) {
-        console.log('✅ Using cached story data');
+      if (cachedData.isCached) {
+        console.log('� Instagram-style: Showing cached data while fetching fresh');
         setStoryData(cachedData.story);
         setChapters(cachedData.chapters);
-        
-        // Build story structure from cached data
-        const chaptersObject = {};
-        cachedData.chapters.forEach(chapter => {
-          const chapterKey = `chapter-${chapter.chapter_number}`;
-          chaptersObject[chapterKey] = {
-            id: chapter.id,
-            title: chapter.title || `Chapter ${chapter.chapter_number}`,
-            content: chapter.content || '',
-            wordCount: chapter.content ? chapter.content.trim().split(/\s+/).length : 0,
-            chapterNumber: chapter.chapter_number,
-            createdAt: chapter.created_at
-          };
-        });
-        
-        setStoryStructure(prev => ({
-          ...prev,
-          chapters: chaptersObject
-        }));
-
-        // FIXED: Set active chapter and content with proper HTML formatting
-        if (cachedData.chapters.length > 0) {
-          const firstChapterKey = `chapter-${cachedData.chapters[0].chapter_number}`;
-          setActiveChapter(firstChapterKey);
-          const htmlContent = convertTextToHtml(cachedData.chapters[0].content || '');
-          setContent(htmlContent);
-          setChapter1GenerationComplete(true);
-        }
-        
-        setLoading(false);
-        return;
+        buildStoryStructureFromData(cachedData.chapters);
+        setLoading(false); // Hide loading since we have data to show
       }
       
-      // 3. If no valid cache, fetch from backend
-      console.log('🔄 Cache miss or stale, fetching from backend');
+      // 2. ALWAYS fetch fresh data in background (Instagram approach)
+      console.log('🔄 Background fetch: Getting latest data from server');
       let chapters = [];
       let story = null;
       
@@ -275,80 +292,111 @@ const StoryEditor = () => {
             'Content-Type': 'application/json'
           }
         });
-        if (!storyResponse.ok) {
-          throw new Error(`Failed to fetch story: ${storyResponse.status}`);
+        if (storyResponse.ok) {
+          story = await storyResponse.json();
         }
-        story = await storyResponse.json();
       }
 
-      // Fetch chapters
-      const chaptersResponse = await fetch(createApiUrl(`/story/${storyId}/chapters`), {
+      // Fetch chapters with cache-busting timestamp to ensure fresh data
+      const chaptersResponse = await fetch(createApiUrl(`/story/${storyId}/chapters?_t=${Date.now()}`), {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json'
         }
       });
-      if (!chaptersResponse.ok) {
-        throw new Error(`Failed to fetch chapters: ${chaptersResponse.status}`);
+      
+      if (chaptersResponse.ok) {
+        const chaptersData = await chaptersResponse.json();
+        chapters = chaptersData.chapters || [];
       }
-      const chaptersData = await chaptersResponse.json();
-      chapters = chaptersData.chapters || [];
 
-      setStoryData(story);
-      setChapters(chapters);
+      // 3. ALWAYS update UI with fresh data (even if we showed cached data)
+      console.log('✅ Instagram-style: Updating UI with fresh data');
       
-      // Build story structure
-      const chaptersObject = {};
-      chapters.forEach(chapter => {
-        const chapterKey = `chapter-${chapter.chapter_number}`;
-        chaptersObject[chapterKey] = {
-          id: chapter.id,
-          title: chapter.title || `Chapter ${chapter.chapter_number}`,
-          content: chapter.content || '',
-          wordCount: chapter.content ? chapter.content.trim().split(/\s+/).length : 0,
-          chapterNumber: chapter.chapter_number,
-          createdAt: chapter.created_at
-        };
-      });
+      // SELECTION GUARD: Check if user is selecting before updating UI
+      const selection = window.getSelection();
+      const hasActiveSelection = selection && 
+                                selection.rangeCount > 0 && 
+                                selection.toString().trim().length > 0;
       
-      setStoryStructure(prev => ({
-        ...prev,
-        chapters: chaptersObject
-      }));
+      if (!isUserSelectingRef.current && !hasActiveSelection) {
+        setStoryData(story);
+        setChapters(chapters);
+        buildStoryStructureFromData(chapters);
+      } else {
+        console.log('🔒 Skipping UI update - user is selecting text');
+        // Still update cache even if we skip UI update
+        if (story && chapters) {
+          setStoryCache(storyId, story, chapters);
+          console.log('💾 Cache updated with fresh data (UI update skipped)');
+        }
+      }
 
-      // 💾 4. SAVE TO CACHE after successful fetch
-      setStoryCache(storyId, story, chapters);
+      // 4. Update cache with fresh data
+      if (story && chapters) {
+        setStoryCache(storyId, story, chapters);
+        console.log('💾 Cache updated with fresh data');
+      }
 
-      // FIXED: If chapters exist, show the first one and set generation complete with proper HTML formatting
+      // 5. Fetch choices for all chapters with force refresh
       if (chapters.length > 0) {
-        const firstChapterKey = `chapter-${chapters[0].chapter_number}`;
-        setActiveChapter(firstChapterKey);
-        const htmlContent = convertTextToHtml(chapters[0].content || '');
-        setContent(htmlContent);
-        setChapter1GenerationComplete(true); // Prevent further generation
-        // Fetch choices for chapters
-        await fetchChoicesForChapters(chapters);
-        return;
+        // Call fetchChoicesForChapters directly to avoid circular dependency
+        setChoicesLoading(true);
+        try {
+          for (const chapter of chapters) {
+            const response = await fetch(createApiUrl(`/chapter/${chapter.id}/choices?_t=${Date.now()}`), {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+              }
+            });
+
+            if (response.ok) {
+              const data = await response.json();
+              if (data.success && data.choices && data.choices.length > 0) {
+                const choicesData = {
+                  choices: data.choices.map(choice => ({
+                    ...choice,
+                    id: choice.id || choice.choice_id,
+                    choice_id: choice.choice_id || choice.id
+                  })),
+                  selected_choice: data.choices.find(c => c.is_selected) || null
+                };
+                setChapterChoices(chapter.id, choicesData);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Error fetching choices in loadStoryData:', err);
+        } finally {
+          setChoicesLoading(false);
+        }
       }
 
-      // If no chapters, and creationMode is 'generate_chapter_1', and not already complete, generate it
-      // Only trigger generation if this is the initial load from StoryCreator
-      if (creationMode === 'generate_chapter_1' && routeStoryData && !chapter1GenerationComplete && !isGeneratingChapter1) {
-        console.log('🎯 Triggering Chapter 1 generation from useEffect (initial load from StoryCreator)');
+      // 6. Handle chapter 1 generation if needed
+      if (chapters.length === 0 && creationMode === 'generate_chapter_1' && routeStoryData && !chapter1GenerationComplete && !isGeneratingChapter1) {
+        console.log('🎯 Triggering Chapter 1 generation from loadStoryData');
         setTimeout(() => {
-          generateChapter1FromOutline();
+          // Call generateChapter1FromOutline directly to avoid circular dependency
+          if (typeof generateChapter1FromOutline === 'function') {
+            generateChapter1FromOutline();
+          }
         }, 500);
-        return;
       }
 
     } catch (err) {
       console.error('Error loading story data:', err);
-      setError(err.message || 'Failed to load story data');
+      // Only show error if we don't have cached data
+      const cachedData = getCachedData(storyId);
+      if (!cachedData.isCached) {
+        setError(err.message || 'Failed to load story data');
+      }
     } finally {
       setLoading(false);
     }
-  }, [storyId, user, session, routeStoryData, creationMode, chapter1GenerationComplete, isGeneratingChapter1, getCachedData, setStoryCache, convertTextToHtml]);
+  }, [storyId, user, session, routeStoryData, creationMode, chapter1GenerationComplete, isGeneratingChapter1, getCachedData, setStoryCache, convertTextToHtml, buildStoryStructureFromData]);
 
   // NEW: Generate Chapter 1 from outline data
   const generateChapter1FromOutline = useCallback(async () => {
@@ -567,8 +615,10 @@ const StoryEditor = () => {
         console.log('✅ Cached', data.choices.length, 'choices from save response');
       }
 
-      // Refresh data after save
-      await loadStoryData();
+      // Refresh data after save - call loadStoryData directly
+      if (typeof loadStoryData === 'function') {
+        await loadStoryData();
+      }
       
       return realChapterId;
     } catch (err) {
@@ -577,7 +627,67 @@ const StoryEditor = () => {
     } finally {
       setSaveInProgress(false);
     }
-  }, [chapters, saveInProgress, session, routeStoryData, addChoicesForChapter, loadStoryData]);
+  }, [chapters, saveInProgress, session, routeStoryData, addChoicesForChapter]);
+
+  // NEW: Polling function to check for new chapters after generation
+  const pollForNewChapter = useCallback(async (expectedChapterNumber, maxAttempts = 10) => {
+    console.log(`🔍 Starting polling for chapter ${expectedChapterNumber}`);
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      console.log(`🔍 Polling attempt ${attempt + 1}/${maxAttempts} for chapter ${expectedChapterNumber}`);
+      
+      try {
+        // Clear cache to force fresh data fetch
+        const storeState = useEditorStore.getState();
+        if (storeState.clearCache) {
+          storeState.clearCache();
+          console.log('🗑️ Cache cleared for polling attempt');
+        }
+        
+        // Fetch fresh chapters data with cache-busting
+        const response = await fetch(createApiUrl(`/story/${storyId}/chapters?_t=${Date.now()}`), {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const newChapter = data.chapters?.find(ch => ch.chapter_number === expectedChapterNumber);
+          
+          if (newChapter) {
+            console.log('✅ Found new chapter via polling!', newChapter.id);
+            
+            // Force refresh all data - call loadStoryData directly
+            if (typeof loadStoryData === 'function') {
+              await loadStoryData();
+            }
+            
+            // Switch to new chapter immediately
+            const newChapterKey = `chapter-${expectedChapterNumber}`;
+            setActiveChapter(newChapterKey);
+            
+            // Show success notification
+            setChapterGenerationSuccess(`✅ Chapter ${expectedChapterNumber} is ready!`);
+            setTimeout(() => setChapterGenerationSuccess(''), 3000);
+            
+            return true;
+          }
+        }
+        
+        // Wait 2 seconds before next attempt
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    }
+    
+    console.warn('⚠️ Polling timed out - chapter may need manual refresh');
+    return false;
+  }, [storyId, session, setActiveChapter, setChapterGenerationSuccess]);
 
   // FIX 2: Memoize fetchChoicesForChapters to prevent infinite loops
   const fetchChoicesForChapters = useCallback(async (chaptersData, forceRefresh = false) => {
@@ -806,9 +916,22 @@ const StoryEditor = () => {
           addChoicesForChapter(newChapterId, choicesData);
         }
 
-        // Force refresh chapters and choices after success
-        console.log('🔄 Force refreshing chapters and choices after successful generation...');
+        // CACHE-BUSTING FIX: Clear cache and start polling for the new chapter
+        console.log('🔄 Clearing cache and starting fresh data fetch...');
+        
+        // Clear all cached data first
+        const storeState = useEditorStore.getState();
+        if (storeState.clearCache) {
+          storeState.clearCache();
+          console.log('�️ Cache cleared after successful generation');
+        }
+        
+        // Force refresh chapters with cache-busting
         await loadStoryData();
+        
+        // Start polling to ensure the new chapter appears quickly
+        console.log('🔍 Starting polling for new chapter...');
+        await pollForNewChapter(nextChapterNumber);
 
       } else {
         console.error('❌ Chapter generation failed:', data);
@@ -950,29 +1073,41 @@ const StoryEditor = () => {
   const safeUpdateEditorContent = useCallback((newHtmlContent, forceUpdate = false) => {
     if (!editorRef.current) return false;
     
-    // Check if user is currently typing (has focus and recent activity)
-    const isUserTyping = editorRef.current === document.activeElement && 
-                        Date.now() - lastTypingTimeRef.current < 2000; // Increased to 2 seconds
-    
-    // Check if there's an active text selection
+    // ENHANCED SELECTION CHECK: Check both our ref and current DOM selection
     const selection = window.getSelection();
     const hasActiveSelection = selection && 
                               selection.rangeCount > 0 && 
                               selection.toString().trim().length > 0;
     
-    // Don't update if user is typing or has selection (unless forced)
-    if (!forceUpdate && (isUserTyping || hasActiveSelection)) {
-      console.log('🔒 Preserving user input - skipping content update', {
-        isUserTyping,
-        hasActiveSelection,
-        selectionText: hasActiveSelection ? selection.toString().substring(0, 50) : ''
+    // SELECTION FIX: Never update during active selection unless forced
+    if (!forceUpdate && (isUserSelectingRef.current || hasActiveSelection)) {
+      console.log('🔒 User is selecting text - skipping auto-update', {
+        refState: isUserSelectingRef.current,
+        domSelection: hasActiveSelection,
+        selectionText: hasActiveSelection ? selection.toString().substring(0, 30) : ''
       });
+      return false;
+    }
+    
+    // Check if user is currently typing (has focus and recent activity)
+    const isUserTyping = editorRef.current === document.activeElement && 
+                        Date.now() - lastTypingTimeRef.current < 2000; // Increased to 2 seconds
+    
+    // Don't update if user is typing (unless forced)
+    if (!forceUpdate && isUserTyping) {
+      console.log('🔒 Preserving user input - skipping content update (typing)');
+      return false;
+    }
+    
+    // Only update if content actually changed
+    const wasContentChanged = editorRef.current.innerHTML !== newHtmlContent;
+    if (!wasContentChanged) {
       return false;
     }
     
     // Save current cursor position using a more reliable method
     let savedPosition = null;
-    if (selection && selection.rangeCount > 0) {
+    if (selection && selection.rangeCount > 0 && !hasActiveSelection) {
       const range = selection.getRangeAt(0);
       savedPosition = {
         startOffset: range.startOffset,
@@ -983,32 +1118,29 @@ const StoryEditor = () => {
     }
     
     // Update content
-    const wasContentChanged = editorRef.current.innerHTML !== newHtmlContent;
-    if (wasContentChanged) {
-      editorRef.current.innerHTML = newHtmlContent;
-      lastContentRef.current = newHtmlContent;
-      
-      // Try to restore cursor position using a more robust method
-      if (savedPosition && !hasActiveSelection) {
-        try {
-          // Wait a bit for DOM to settle
-          setTimeout(() => {
-            const newSelection = window.getSelection();
-            if (newSelection && savedPosition.startContainer && savedPosition.startContainer.parentNode) {
-              const newRange = document.createRange();
-              newRange.setStart(savedPosition.startContainer, savedPosition.startOffset);
-              newRange.setEnd(savedPosition.endContainer, savedPosition.endOffset);
-              newSelection.removeAllRanges();
-              newSelection.addRange(newRange);
-            }
-          }, 10);
-        } catch (error) {
-          console.warn('Failed to restore cursor position:', error);
-        }
+    editorRef.current.innerHTML = newHtmlContent;
+    lastContentRef.current = newHtmlContent;
+    
+    // Try to restore cursor position using a more robust method
+    if (savedPosition) {
+      try {
+        // Wait a bit for DOM to settle
+        setTimeout(() => {
+          const newSelection = window.getSelection();
+          if (newSelection && savedPosition.startContainer && savedPosition.startContainer.parentNode) {
+            const newRange = document.createRange();
+            newRange.setStart(savedPosition.startContainer, savedPosition.startOffset);
+            newRange.setEnd(savedPosition.endContainer, savedPosition.endOffset);
+            newSelection.removeAllRanges();
+            newSelection.addRange(newRange);
+          }
+        }, 10);
+      } catch (error) {
+        console.warn('Failed to restore cursor position:', error);
       }
     }
     
-    return wasContentChanged;
+    return true;
   }, []);
 
   // FIXED: Improved editor content update effect with proper user input preservation
@@ -1023,19 +1155,28 @@ const StoryEditor = () => {
         return;
       }
       
-      // Check if user is currently typing or has selection
+      // ENHANCED SELECTION CHECK: Check both our ref and DOM selection
       const selection = window.getSelection();
       const hasActiveSelection = selection && 
                                 selection.rangeCount > 0 && 
                                 selection.toString().trim().length > 0;
-      const isUserTyping = editorRef.current === document.activeElement && 
-                          Date.now() - lastTypingTimeRef.current < 1000;
+                                
+      // Don't update if user is selecting text
+      if (isUserSelectingRef.current || hasActiveSelection) {
+        console.log('🔒 Skipping content update - user is selecting text', {
+          refState: isUserSelectingRef.current,
+          domSelection: hasActiveSelection
+        });
+        return;
+      }
       
-      // Don't update content if user is actively typing or has selection
-      if (isUserTyping || hasActiveSelection) {
-        console.log('🔒 Skipping content update - user is typing or has selection', {
-          isUserTyping,
-          hasActiveSelection,
+      // Check if user is currently typing
+      const isUserTyping = editorRef.current === document.activeElement && 
+                          Date.now() - lastTypingTimeRef.current < 1500; // Increased from 1000ms
+      
+      // Don't update content if user is actively typing
+      if (isUserTyping) {
+        console.log('🔒 Skipping content update - user is typing', {
           timeSinceLastTyping: Date.now() - lastTypingTimeRef.current
         });
         return;
@@ -1110,6 +1251,39 @@ const StoryEditor = () => {
       }, 100);
     }, 300); // 300ms debounce
   }, [activeChapter, storyStructure.chapters, updateChapterContent]);
+
+  // LOCAL-FIRST: Update chapter content safely with selection protection
+  const updateChapterContentWithLocalFirst = useCallback((chapterId, newContent) => {
+    // 1. Update local state immediately (only if not selecting)
+    if (!isUserSelectingRef.current) {
+      setStoryStructure(prev => {
+        const updatedChapters = { ...prev.chapters };
+        const chapterKey = Object.keys(updatedChapters).find(key => 
+          updatedChapters[key].id === chapterId
+        );
+        
+        if (chapterKey) {
+          updatedChapters[chapterKey] = {
+            ...updatedChapters[chapterKey],
+            content: newContent,
+            wordCount: newContent.trim().split(/\s+/).length
+          };
+        }
+        
+        return {
+          ...prev,
+          chapters: updatedChapters
+        };
+      });
+      
+      // 2. Update cache
+      updateChapterContent(chapterId, newContent);
+      
+      // 3. Mark as having unsaved changes
+      setHasUnsavedChanges(true);
+    }
+    
+  }, [updateChapterContent]);
 
   // FIXED: Enhanced editor input handler with proper user activity tracking
   const handleEditorInput = useCallback((e) => {
@@ -1327,12 +1501,18 @@ const StoryEditor = () => {
     setCharCount(chars);
   }, [content]);
 
-  // FIXED: Cleanup effect to prevent memory leaks
+  // FIXED: Enhanced cleanup effect to prevent memory leaks
   useEffect(() => {
     return () => {
-      // Clear any pending debounce timeouts on unmount
+      // Clear all timeouts on unmount
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
+      }
+      if (selectionTimeoutRef.current) {
+        clearTimeout(selectionTimeoutRef.current);
+      }
+      if (editorBlockTimeoutRef.current) {
+        clearTimeout(editorBlockTimeoutRef.current);
       }
     };
   }, []);
@@ -2159,6 +2339,17 @@ const StoryEditor = () => {
               >
                 <Target className="w-5 h-5" />
               </button>
+              
+              <button
+                onClick={() => setGameMode(!gameMode)}
+                className={`p-2 rounded-lg transition-colors ${
+                  gameMode ? 'bg-green-600 text-white' : 'hover:bg-gray-700 text-gray-300'
+                }`}
+                title={gameMode ? "Game Mode (ON) - Choices visible" : "Normal Mode (OFF) - Choices hidden"}
+                aria-label="Toggle Game Mode"
+              >
+                <Gamepad2 className="w-5 h-5" />
+              </button>
             </div>
             
             {/* Center Section - Writing Stats */}
@@ -2194,17 +2385,6 @@ const StoryEditor = () => {
                 aria-label="Toggle Word Count"
               >
                 <FileText className="w-5 h-5" />
-              </button>
-              
-              <button
-                onClick={() => setGameMode(!gameMode)}
-                className={`p-2 rounded-lg transition-colors ${
-                  gameMode ? 'bg-purple-600 text-white' : 'hover:bg-gray-700 text-gray-300'
-                }`}
-                title="Game Mode"
-                aria-label="Toggle Game Mode"
-              >
-                <Users className="w-5 h-5" />
               </button>
               
               <div className="h-6 w-px bg-gray-600"></div>
@@ -2292,7 +2472,29 @@ const StoryEditor = () => {
                   className="w-full min-h-[700px] bg-gray-800 border border-gray-700 rounded-lg p-8 text-white text-lg leading-relaxed focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-all duration-200"
                   onInput={(e) => handleImmediateContentChange(e.target.innerHTML)}
                   onSelect={handleTextSelection}
+                  onMouseDown={() => { 
+                    isUserSelectingRef.current = true;
+                    console.log('🖱️ Mouse down - selection started');
+                  }}
+                  onMouseUp={() => {
+                    // Longer delay to ensure browser finishes selection
+                    setTimeout(() => { 
+                      isUserSelectingRef.current = false;
+                      console.log('🖱️ Mouse up - selection ended');
+                    }, 300); // Increased from 10ms to 300ms
+                  }}
                   onKeyDown={(e) => {
+                    // Track keyboard-based selection
+                    if (e.shiftKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+                      isUserSelectingRef.current = true;
+                      console.log('⌨️ Keyboard selection started');
+                      // Reset selection flag after longer delay
+                      clearTimeout(selectionTimeoutRef.current);
+                      selectionTimeoutRef.current = setTimeout(() => {
+                        isUserSelectingRef.current = false;
+                        console.log('⌨️ Keyboard selection timeout ended');
+                      }, 500); // Longer timeout for keyboard selection
+                    }
                     // Basic keyboard shortcuts
                     if (e.ctrlKey || e.metaKey) {
                       switch (e.key) {

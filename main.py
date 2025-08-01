@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 import uuid
 
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, status, Body
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, status, Body, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.requests import Request
@@ -496,9 +496,14 @@ async def get_story_details(story_id: int, user = Depends(get_authenticated_user
         raise HTTPException(status_code=500, detail="Failed to fetch story details")
 
 @app.get("/story/{story_id}/chapters")
-async def get_story_chapters(story_id: int, user = Depends(get_authenticated_user_optional)):
+async def get_story_chapters(story_id: int, response: Response, user = Depends(get_authenticated_user_optional)):
     """Get all chapters for a specific story."""
     try:
+        # Add no-cache headers to ensure fresh data
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        
         # Get story - allow access to public stories or stories owned by user
         query = supabase.table("Stories").select("*").eq("id", story_id)
         
@@ -1494,9 +1499,20 @@ async def generate_chapter_endpoint(chapter: ChapterInput, user = Depends(get_au
                 chapter_id = existing_chapter.data[0]["id"]
                 logger.info("Chapter 1 already exists with ID: {}".format(chapter_id))
                 
-                # Fetch choices for this chapter
-                choices_response = supabase.table("story_choices").select("*").eq("chapter_id", chapter_id).execute()
-                choices = choices_response.data if choices_response.data else []
+                # Fetch choices for this chapter with retry logic to handle async save timing
+                choices = []
+                max_retries = 3
+                retry_delay = 1.0  # seconds
+                
+                for attempt in range(max_retries):
+                    choices_response = supabase.table("story_choices").select("*").eq("chapter_id", chapter_id).execute()
+                    choices = choices_response.data if choices_response.data else []
+                    
+                    if choices or attempt == max_retries - 1:  # Found choices or last attempt
+                        break
+                    
+                    logger.info(f"No choices found for chapter {chapter_id}, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(retry_delay)
                 
                 logger.info("Returning existing Chapter 1 with {} choices".format(len(choices)))
                 return {

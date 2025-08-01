@@ -53,66 +53,76 @@ class OptimizedChapterService:
         supabase_client
     ) -> ChapterSaveResult:
         """
-        Simplified optimized chapter save:
+        FIXED: Synchronous choice saving to eliminate race conditions:
         1. Immediate chapter save (priority)
-        2. Parallel summary + DNA generation
-        3. Update chapter with summary + DNA
-        4. Save choices with story_id + chapter_number + choice_id
+        2. IMMEDIATE choice save (synchronous - critical for UX)
+        3. Background summary + DNA generation (heavy operations only)
         """
         start_time = time.time()
         story_id = chapter_data['story_id']
         chapter_number = chapter_data['chapter_number']
         content = chapter_data['content']
         
-        logger.info(f"🚀 Starting optimized save for Chapter {chapter_number}")
+        logger.info(f"🚀 Starting SYNCHRONOUS save for Chapter {chapter_number}")
         
         try:
             # STEP 1: IMMEDIATE CHAPTER SAVE (highest priority)
             chapter_id = await self._save_chapter_immediate(
                 chapter_data, user_id, supabase_client
             )
+            logger.info(f"✅ Chapter saved with ID: {chapter_id}")
             
-            # STEP 2: Get previous chapters for DNA context
+            # STEP 2: IMMEDIATE CHOICE SAVE (synchronous - critical for UX)
+            choices_result = []
+            if chapter_data.get('choices', []):
+                logger.info(f"💾 Saving {len(chapter_data['choices'])} choices SYNCHRONOUSLY...")
+                choices_result = await self._save_choices_synchronous(
+                    chapter_id, story_id, chapter_number, user_id, 
+                    chapter_data.get('choices', []), supabase_client
+                )
+                logger.info(f"✅ SYNCHRONOUS: Saved {len(choices_result)} choices immediately")
+            else:
+                logger.info("ℹ️ No choices to save")
+            
+            # STEP 3: HEAVY OPERATIONS IN BACKGROUND (summary + DNA only)
+            # Get previous chapters for DNA context
             previous_chapters = await self._get_previous_chapters_for_dna(
                 story_id, chapter_number, supabase_client
             )
             
-            # STEP 3: PARALLEL ASYNC OPERATIONS (NO VECTORS)
-            summary_task = self._generate_summary_async(content, chapter_number, story_id)
-            dna_task = self._generate_dna_async(content, chapter_number, previous_chapters, chapter_data.get('user_choice', ''))
-            choices_task = self._extract_choices_async(chapter_data.get('choices', []))
-            
-            # Wait for all operations
-            summary_result, dna_result, choices_result = await asyncio.gather(
-                summary_task,
-                dna_task,
-                choices_task,
-                return_exceptions=True
-            )
-            
-            # STEP 4: UPDATE CHAPTER WITH SUMMARY + DNA + CHOICES
-            await self._batch_update_chapter_with_dna(
-                chapter_id=chapter_id,
-                story_id=story_id,
-                chapter_number=chapter_number,  # FIXED: Added chapter_number parameter
-                user_id=user_id,                # FIXED: Added user_id parameter
-                summary=summary_result if not isinstance(summary_result, Exception) else None,
-                dna=dna_result if not isinstance(dna_result, Exception) else None,
-                choices=choices_result if not isinstance(choices_result, Exception) else [],
-                supabase_client=supabase_client
-            )
+            # Start background tasks for heavy operations only
+            asyncio.create_task(self._generate_metadata_only_async(
+                chapter_id, content, chapter_number, story_id, 
+                previous_chapters, chapter_data.get('user_choice', ''), supabase_client
+            ))
             
             save_time = time.time() - start_time
             
             # Update metrics
-            self._update_metrics(save_time, summary_result, dna_result)
+            self._update_metrics(save_time, {"summary": "background"}, {"dna": "background"})
             
-            logger.info(f"✅ Chapter {chapter_number} saved with summary, DNA, and choices in {save_time:.2f}s")
+            logger.info(f"✅ Chapter {chapter_number} saved with choices IMMEDIATELY in {save_time:.2f}s")
             
             return ChapterSaveResult(
                 chapter_id=chapter_id,
-                summary=summary_result.get('summary', '') if not isinstance(summary_result, Exception) else '',
-                choices=choices_result if not isinstance(choices_result, Exception) else [],
+                summary="Processing in background...",
+                choices=choices_result,
+                save_time=save_time,
+                performance_metrics=self._get_performance_metrics()
+            )
+            
+            
+            save_time = time.time() - start_time
+            
+            # Update metrics
+            self._update_metrics(save_time, {"summary": "background"}, {"dna": "background"})
+            
+            logger.info(f"✅ Chapter {chapter_number} saved with choices IMMEDIATELY in {save_time:.2f}s")
+            
+            return ChapterSaveResult(
+                chapter_id=chapter_id,
+                summary="Processing in background...",
+                choices=choices_result,
                 save_time=save_time,
                 performance_metrics=self._get_performance_metrics()
             )
@@ -120,6 +130,113 @@ class OptimizedChapterService:
         except Exception as e:
             logger.error(f"❌ Failed to save chapter: {e}")
             raise
+
+    async def _save_choices_synchronous(
+        self,
+        chapter_id: int,
+        story_id: int,
+        chapter_number: int,
+        user_id: int,
+        choices: List[Dict[str, Any]],
+        supabase_client
+    ) -> List[Dict[str, Any]]:
+        """Save choices IMMEDIATELY (synchronously) - critical for UX"""
+        try:
+            if not choices or len(choices) == 0:
+                return []
+                
+            logger.info(f"🔄 Deleting existing choices for chapter {chapter_number}...")
+            
+            # Delete existing choices for this chapter first
+            delete_response = supabase_client.table("story_choices").delete().eq(
+                "story_id", story_id
+            ).eq("chapter_number", chapter_number).execute()
+            
+            logger.info(f"🗑️ Deleted existing choices: {len(delete_response.data) if delete_response.data else 0}")
+            
+            # Extract and validate choices first
+            valid_choices = await self._extract_choices_async(choices)
+            
+            if not valid_choices:
+                logger.warning("⚠️ No valid choices to save")
+                return []
+            
+            # Prepare choices data for database
+            choice_records = []
+            for i, choice in enumerate(valid_choices):
+                choice_id = choice.get('choice_id', str(i+1))
+                choice_record = {
+                    'story_id': story_id,
+                    'chapter_number': chapter_number,
+                    'choice_id': choice_id,
+                    'title': choice.get('title', f'Choice {i+1}'),
+                    'description': choice.get('description', ''),
+                    'story_impact': choice.get('story_impact', 'medium'),
+                    'choice_type': choice.get('choice_type', 'narrative'),
+                    'user_id': user_id,
+                    'chapter_id': chapter_id,
+                }
+                choice_records.append(choice_record)
+            
+            logger.info(f"📝 Inserting {len(choice_records)} choices...")
+            
+            # Insert new choices SYNCHRONOUSLY
+            choices_response = supabase_client.table("story_choices").insert(choice_records).execute()
+            
+            if choices_response.data and len(choices_response.data) > 0:
+                logger.info(f"✅ SYNCHRONOUS: Successfully saved {len(choices_response.data)} choices")
+                return choices_response.data
+            else:
+                logger.error("❌ SYNCHRONOUS: No choices were saved")
+                return []
+                
+        except Exception as e:
+            logger.error(f"❌ SYNCHRONOUS choice saving failed: {e}")
+            raise e
+
+    async def _generate_metadata_only_async(
+        self,
+        chapter_id: int,
+        content: str,
+        chapter_number: int,
+        story_id: int,
+        previous_chapters: List[Dict[str, Any]],
+        user_choice: str,
+        supabase_client
+    ):
+        """Background task ONLY for heavy operations - choices are already saved"""
+        try:
+            logger.info("🧠 Starting background metadata generation...")
+            
+            # Generate summary and DNA in parallel
+            summary_task = self._generate_summary_async(content, chapter_number, story_id)
+            dna_task = self._generate_dna_async(content, chapter_number, previous_chapters, user_choice)
+            
+            summary_result, dna_result = await asyncio.gather(
+                summary_task,
+                dna_task,
+                return_exceptions=True
+            )
+            
+            # Update chapter with summary and DNA
+            update_data = {}
+            if summary_result and not isinstance(summary_result, Exception) and summary_result.get('summary'):
+                update_data['summary'] = summary_result['summary']
+                logger.info(f"📝 Background: Adding summary: {len(summary_result['summary'])} chars")
+            
+            if dna_result and not isinstance(dna_result, Exception) and not dna_result.get('error'):
+                import json
+                update_data['dna'] = json.dumps(dna_result)
+                logger.info(f"📝 Background: Adding DNA: {len(json.dumps(dna_result))} chars")
+            
+            if update_data:
+                supabase_client.table("Chapters").update(update_data).eq('id', chapter_id).execute()
+                logger.info(f"✅ Background: Updated chapter {chapter_id} with metadata")
+            
+            logger.info("✅ Background metadata generation complete")
+            
+        except Exception as e:
+            logger.error(f"❌ Background metadata generation failed: {e}")
 
     async def _save_chapter_immediate(
         self, 
@@ -301,53 +418,6 @@ class OptimizedChapterService:
         )
         logger.info(f"🧬 [DNA DEBUG] Final DNA result for Chapter {chapter_number}: {dna_result}")
         return dna_result
-
-    async def _batch_update_chapter_with_dna(
-        self,
-        chapter_id: int,
-        story_id: int,
-        chapter_number: int,  # FIXED: Added chapter_number parameter
-        user_id: int,         # FIXED: Added user_id parameter
-        summary: Optional[Dict[str, Any]],
-        dna: Optional[Dict[str, Any]],
-        choices: List[Dict[str, Any]],
-        supabase_client
-    ):
-        logger.info(f"📝 [DNA DEBUG] Updating chapter {chapter_id} with summary and DNA...")
-        update_data = {}
-        if summary and summary.get('summary'):
-            update_data['summary'] = summary['summary']
-            logger.info(f"📝 [DNA DEBUG] Adding summary: {len(summary['summary'])} chars")
-        if dna and not dna.get('error'):
-            import json
-            update_data['dna'] = json.dumps(dna)
-            logger.info(f"📝 [DNA DEBUG] Adding DNA: {len(json.dumps(dna))} chars")
-        else:
-            logger.warning(f"📝 [DNA DEBUG] DNA not saved for chapter {chapter_id}: {dna}")
-        if update_data:
-            supabase_client.table("Chapters").update(update_data).eq('id', chapter_id).execute()
-            logger.info(f"📝 [DNA DEBUG] Updated chapter {chapter_id} with summary: {bool(summary)}, DNA: {bool(dna and not dna.get('error'))}")
-        if choices:
-            supabase_client.table("story_choices").delete().eq('story_id', story_id).eq('chapter_number', chapter_number).execute()
-            choice_records = []
-            for i, choice in enumerate(choices):
-                # Use choice_id from validated choice if available, otherwise use index + 1
-                choice_id = choice.get('choice_id', str(i+1))
-                choice_records.append({
-                    'story_id': story_id,
-                    'chapter_number': chapter_number,
-                    'choice_id': choice_id,
-                    'title': choice['title'],
-                    'description': choice['description'],
-                    'story_impact': choice['story_impact'],
-                    'choice_type': choice['choice_type'],
-                    'user_id': user_id,
-                    'chapter_id': chapter_id,
-                })
-            if choice_records:
-                supabase_client.table("story_choices").insert(choice_records).execute()
-                logger.info(f"📝 [DNA DEBUG] Saved {len(choice_records)} choices for chapter {chapter_id}")
-        logger.info(f"📝 [DNA DEBUG] Chapter update completed for {chapter_id}")
 
     def _update_metrics(self, save_time: float, summary_result: Any, dna_result: Any = None):
         """Update performance metrics"""
