@@ -109,6 +109,7 @@ const StoryEditor = () => {
   // SELECTION FIX: Track when user is actively selecting text
   const isUserSelectingRef = useRef(false);
   const selectionTimeoutRef = useRef(null);
+  const isSelectingRef = useRef(false);
 
   // Real data from Supabase
   const [loading, setLoading] = useState(true);
@@ -1714,6 +1715,40 @@ const StoryEditor = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  // Selection tracking event listeners
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    const handleMouseDown = () => {
+      isSelectingRef.current = true;
+    };
+
+    const handleMouseUp = () => {
+      setTimeout(() => {
+        isSelectingRef.current = false;
+      }, 0);
+    };
+
+    const editor = editorRef.current;
+    editor.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      if (editor) {
+        editor.removeEventListener('mousedown', handleMouseDown);
+      }
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
+  // Imperative content updates
+  useEffect(() => {
+    if (!editorRef.current || isSelectingRef.current) return;
+    if (editorRef.current.innerHTML !== content) {
+      editorRef.current.innerHTML = content;
+    }
+  }, [content]);
+
   // NEW: Generate AI suggestion
   const handleGenerateAISuggestion = async () => {
     if (!session?.access_token || !content.trim()) {
@@ -1825,7 +1860,6 @@ const StoryEditor = () => {
                 contentEditable
                 className="w-full h-96 bg-transparent text-white text-lg leading-relaxed focus:outline-none resize-none overflow-y-auto"
                 onInput={(e) => setContent(e.target.innerHTML)}
-                dangerouslySetInnerHTML={{ __html: content }}
               />
             </div>
             
@@ -2472,17 +2506,6 @@ const StoryEditor = () => {
                   className="w-full min-h-[700px] bg-gray-800 border border-gray-700 rounded-lg p-8 text-white text-lg leading-relaxed focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-all duration-200"
                   onInput={(e) => handleImmediateContentChange(e.target.innerHTML)}
                   onSelect={handleTextSelection}
-                  onMouseDown={() => { 
-                    isUserSelectingRef.current = true;
-                    console.log('🖱️ Mouse down - selection started');
-                  }}
-                  onMouseUp={() => {
-                    // Longer delay to ensure browser finishes selection
-                    setTimeout(() => { 
-                      isUserSelectingRef.current = false;
-                      console.log('🖱️ Mouse up - selection ended');
-                    }, 300); // Increased from 10ms to 300ms
-                  }}
                   onKeyDown={(e) => {
                     // Track keyboard-based selection
                     if (e.shiftKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
@@ -2515,7 +2538,6 @@ const StoryEditor = () => {
                       }
                     }
                   }}
-                  dangerouslySetInnerHTML={{ __html: content }}
                   aria-label="Story editor content area"
                   role="textbox"
                   aria-multiline="true"
