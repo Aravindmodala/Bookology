@@ -27,8 +27,8 @@ class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
     
-    # Leonardo.ai API Configuration  
-    LEONARDO_API_KEY: str = os.getenv("LEONARDO_API_KEY", "")
+    # OpenAI DALL-E 3 API Configuration (uses existing OPENAI_API_KEY)
+    # LEONARDO_API_KEY removed - now using OPENAI_API_KEY for both text and image generation
     
     # Database Configuration
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")

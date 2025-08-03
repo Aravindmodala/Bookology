@@ -5,14 +5,11 @@ import { useAuth } from './AuthContext';
 import { createApiUrl, API_ENDPOINTS } from './config';
 import { useEditorStore } from './store/editorStore';
 
-// Simple debounce utility function
-const debounce = (func, delay) => {
-  let timeoutId;
-  return function (...args) {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func.apply(this, args), delay);
-  };
-};
+// Auto-save imports
+import useAutoSave from './hooks/useAutoSave';
+import SaveStatusIndicator from './components/SaveStatusIndicator';
+
+
 // OPTIMIZATION: Import icons more efficiently to reduce bundle size
 import { 
   Eye,
@@ -147,7 +144,20 @@ const StoryEditor = () => {
 
   // Basic state for core functionality
   const [isSaving, setIsSaving] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Auto-save hook - MOVED HERE to fix "Cannot access 'pushUndo' before initialization" error
+  const currentChapterId = storyStructure.chapters?.[activeChapter]?.id;
+  const {
+    isSaving: autoSaving,
+    saveStatus,
+    error: autoSaveError,
+    hasUnsavedChanges,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    pushUndo
+  } = useAutoSave(content, currentChapterId, storyId, { enabled: !!currentChapterId && !!storyId });
 
   // FIXED: Utility function to convert text with \n\n to HTML paragraphs with XSS protection
   const convertTextToHtml = useCallback((text) => {
@@ -924,7 +934,7 @@ const StoryEditor = () => {
         const storeState = useEditorStore.getState();
         if (storeState.clearCache) {
           storeState.clearCache();
-          console.log('�️ Cache cleared after successful generation');
+          console.log('🗑️ Cache cleared after successful generation');
         }
         
         // Force refresh chapters with cache-busting
@@ -1202,10 +1212,13 @@ const StoryEditor = () => {
     }
   }, [activeChapter, storyStructure.chapters, convertTextToHtml, safeUpdateEditorContent]);
 
-  // FIXED: Enhanced content update handler with proper typing state management
+  // REAL-TIME AUTO-SAVE: Enhanced content update handler with undo/redo support
   const handleContentChange = useCallback((newContent) => {
     // Don't update if content hasn't actually changed
     if (newContent === lastContentRef.current) return;
+    
+    // Store previous content for undo
+    const previousContent = lastContentRef.current;
     lastContentRef.current = newContent;
 
     // Update typing state
@@ -1218,73 +1231,40 @@ const StoryEditor = () => {
     setWordCount(words);
     setCharCount(text.length);
 
-    // Clear any existing debounce timeout
-    if (debounceTimeoutRef.current) {
-      clearTimeout(debounceTimeoutRef.current);
-    }
-
-    // Debounce the actual state updates to avoid interfering with typing
-    debounceTimeoutRef.current = setTimeout(() => {
-      setContent(newContent);
-      
-      // Update cache if we have an active chapter
-      if (activeChapter && storyStructure.chapters[activeChapter]) {
-        const chapterData = storyStructure.chapters[activeChapter];
-        updateChapterContent(chapterData.id, newContent);
-        
-        // Also update local story structure
-        setStoryStructure(prev => ({
-          ...prev,
-          chapters: {
-            ...prev.chapters,
-            [activeChapter]: {
-              ...prev.chapters[activeChapter],
-              content: newContent,
-              wordCount: words
-            }
-          }
-        }));
-      }
-      
-      // Mark typing as finished after debounce
-      setTimeout(() => {
-        isUserTypingRef.current = false;
-      }, 100);
-    }, 300); // 300ms debounce
-  }, [activeChapter, storyStructure.chapters, updateChapterContent]);
-
-  // LOCAL-FIRST: Update chapter content safely with selection protection
-  const updateChapterContentWithLocalFirst = useCallback((chapterId, newContent) => {
-    // 1. Update local state immediately (only if not selecting)
-    if (!isUserSelectingRef.current) {
-      setStoryStructure(prev => {
-        const updatedChapters = { ...prev.chapters };
-        const chapterKey = Object.keys(updatedChapters).find(key => 
-          updatedChapters[key].id === chapterId
-        );
-        
-        if (chapterKey) {
-          updatedChapters[chapterKey] = {
-            ...updatedChapters[chapterKey],
-            content: newContent,
-            wordCount: newContent.trim().split(/\s+/).length
-          };
-        }
-        
-        return {
-          ...prev,
-          chapters: updatedChapters
-        };
-      });
-      
-      // 2. Update cache
-      updateChapterContent(chapterId, newContent);
-      
-      // 3. Mark as having unsaved changes
-      setHasUnsavedChanges(true);
+    // Update content immediately for real-time auto-save
+    setContent(newContent);
+    
+    // Add to undo stack if we have previous content
+    if (previousContent && previousContent !== '') {
+      pushUndo(previousContent);
     }
     
-  }, [updateChapterContent]);
+    // Update cache if we have an active chapter
+    if (activeChapter && storyStructure.chapters[activeChapter]) {
+      const chapterData = storyStructure.chapters[activeChapter];
+      updateChapterContent(chapterData.id, newContent);
+      
+      // Also update local story structure
+      setStoryStructure(prev => ({
+        ...prev,
+        chapters: {
+          ...prev.chapters,
+          [activeChapter]: {
+            ...prev.chapters[activeChapter],
+            content: newContent,
+            wordCount: words
+          }
+        }
+      }));
+    }
+    
+    // Mark typing as finished after a short delay
+    setTimeout(() => {
+      isUserTypingRef.current = false;
+    }, 100);
+  }, [activeChapter, storyStructure.chapters, updateChapterContent, pushUndo]);
+
+
 
   // FIXED: Enhanced editor input handler with proper user activity tracking
   const handleEditorInput = useCallback((e) => {
@@ -1618,7 +1598,6 @@ const StoryEditor = () => {
       setChapters(updatedChapters);
 
       // Update UI state
-      setHasUnsavedChanges(false);
       setIsSaving(false);
       
       showNotification('success', 'Chapter saved successfully!');
@@ -1910,39 +1889,18 @@ const StoryEditor = () => {
     // For now, just log to console. Can be enhanced later.
   }, []);
 
-  // Simple content change tracking
-  const handleContentChangeWithTracking = useCallback((newContent) => {
-    handleContentChange(newContent);
-    
-    // Track for unsaved changes
-    if (newContent !== lastContentRef.current) {
-      setHasUnsavedChanges(true);
-      lastContentRef.current = newContent;
-    }
-  }, [handleContentChange]);
 
-  // FIXED: Optimized debounced content change handler with proper memoization
-  const debouncedContentChange = useMemo(() => {
-    return debounce((newContent) => {
-      handleContentChangeWithTracking(newContent);
-      lastTypingTimeRef.current = Date.now();
-    }, 300);
-  }, [handleContentChangeWithTracking]); // Only recreate when dependencies change
 
-  // FIXED: Proper cleanup effect to prevent memory leaks
+  // REAL-TIME AUTO-SAVE: Cleanup effect for any remaining timeouts
   useEffect(() => {
     return () => {
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
-      // Cancel any pending debounced calls
-      if (debouncedContentChange && typeof debouncedContentChange.cancel === 'function') {
-        debouncedContentChange.cancel();
-      }
     };
-  }, [debouncedContentChange]);
+  }, []);
 
-  // FIXED: Optimized immediate content change handler with proper error handling
+  // REAL-TIME AUTO-SAVE: Immediate content change handler with auto-save integration
   const handleImmediateContentChange = useCallback((newContent) => {
     // Validate input to prevent crashes
     if (typeof newContent !== 'string') {
@@ -1950,26 +1908,24 @@ const StoryEditor = () => {
       return;
     }
     
-    setContent(newContent);
-    lastTypingTimeRef.current = Date.now();
-    
-    // Update word count immediately for UI responsiveness
-    const text = newContent.replace(/<[^>]*>/g, '');
-    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-    setWordCount(words);
-    setCharCount(text.length);
-    
-    // Debounce the actual content processing with error handling
-    try {
-      debouncedContentChange(newContent);
-    } catch (error) {
-      console.error('Error in debounced content change:', error);
-      // Fallback: update content directly
-      handleContentChangeWithTracking(newContent);
-    }
-  }, [debouncedContentChange, handleContentChangeWithTracking]);
+    // Use the main handleContentChange which includes auto-save and undo/redo
+    handleContentChange(newContent);
+  }, [handleContentChange]);
 
-
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        if (canUndo) undo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+        e.preventDefault();
+        if (canRedo) redo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canUndo, canRedo, undo, redo]);
 
   return (
     <div className="h-screen bg-gray-900 text-white flex">
@@ -2477,7 +2433,19 @@ const StoryEditor = () => {
           )}
         </div>
 
+        {/* Save Status Indicator */}
+        <SaveStatusIndicator
+          saveStatus={saveStatus}
+          isSaving={autoSaving}
+          hasUnsavedChanges={hasUnsavedChanges}
+          error={autoSaveError}
+          className="mb-2"
+        />
 
+        <div className="flex gap-2 mb-2">
+          <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
+          <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y or Ctrl+Shift+Z)">Redo</button>
+        </div>
 
         {/* Editor Content */}
         <div className="flex-1 flex overflow-hidden">

@@ -8,6 +8,7 @@ import StoryCreator from './StoryCreator';
 import ExplorePage from './components/ExplorePage';
 import { AuthProvider } from './AuthContext';
 import ErrorBoundary from './ErrorBoundary';
+import './styles/enhancedComponents.css';
 
 function HomeWrapper() {
   const navigate = useNavigate();
@@ -30,6 +31,7 @@ function App() {
             <Route path="/create" element={<StoryCreator />} />
             <Route path="/editor" element={<StoryEditor />} />
             <Route path="/explore" element={<ExplorePage />} />
+            <Route path="/story/:storyId" element={<StoryEditor />} />
             <Route path="/login" element={<Auth />} />
           </Routes>
         </Router>

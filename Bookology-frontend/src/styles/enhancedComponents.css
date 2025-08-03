@@ -1,0 +1,288 @@
+/* Enhanced Story Card Styles */
+.story-card-3d {
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+
+.story-card-3d:hover {
+  transform: translateY(-8px) rotateY(5deg);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Mood-based color schemes */
+.story-card-Fantasy {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.story-card-Science\ Fiction {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.story-card-Mystery {
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+}
+
+.story-card-Romance {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+}
+
+.story-card-Thriller {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+}
+
+.story-card-Adventure {
+  background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
+}
+
+.story-card-Drama {
+  background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
+}
+
+.story-card-Comedy {
+  background: linear-gradient(135deg, #fdcb6e 0%, #e17055 100%);
+}
+
+.story-card-Horror {
+  background: linear-gradient(135deg, #2d3436 0%, #636e72 100%);
+}
+
+.story-card-Historical {
+  background: linear-gradient(135deg, #d63031 0%, #e84393 100%);
+}
+
+/* Text truncation utilities */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Enhanced filter styles */
+.advanced-filters {
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+/* Loading skeleton animation */
+@keyframes shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Enhanced button hover effects */
+.enhanced-button {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.enhanced-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.enhanced-button:hover::before {
+  left: 100%;
+}
+
+/* Story card hover overlay */
+.story-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.story-card-3d:hover .story-card-overlay {
+  opacity: 1;
+}
+
+/* Progress bar animation */
+.progress-bar {
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  background-size: 200% 100%;
+  animation: progressShimmer 2s ease-in-out infinite;
+}
+
+@keyframes progressShimmer {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Mood indicator pulse */
+.mood-indicator {
+  animation: moodPulse 2s ease-in-out infinite;
+}
+
+@keyframes moodPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+/* Enhanced grid layout */
+.stories-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+@media (min-width: 640px) {
+  .stories-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .stories-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .stories-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Filter badge animations */
+.filter-badge {
+  animation: badgeAppear 0.3s ease-out;
+}
+
+@keyframes badgeAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.8) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Enhanced search input */
+.enhanced-search {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+.enhanced-search:focus {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
+/* Story card content fade */
+.story-content {
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.8));
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
+/* Enhanced pagination */
+.pagination-button {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.pagination-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.3s ease, height 0.3s ease;
+}
+
+.pagination-button:hover::before {
+  width: 100%;
+  height: 100%;
+}
+
+/* Responsive design utilities */
+@media (max-width: 768px) {
+  .story-card-3d {
+    margin-bottom: 16px;
+  }
+  
+  .advanced-filters {
+    padding: 16px;
+  }
+  
+  .stories-grid {
+    gap: 16px;
+  }
+}
+
+/* Accessibility improvements */
+@media (prefers-reduced-motion: reduce) {
+  .story-card-3d,
+  .enhanced-button,
+  .filter-badge,
+  .mood-indicator {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .story-card-3d {
+    border: 2px solid white;
+  }
+  
+  .enhanced-search {
+    border: 2px solid white;
+  }
+} 

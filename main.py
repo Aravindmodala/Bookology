@@ -46,7 +46,7 @@ from chapter_summary import generate_chapter_summary
 from services.cover_prompt_service import cover_prompt_service
 
 # Add this import with other service imports
-from services.leonardo_service import leonardo_service, LeonardoAPIError
+from services.dalle_service import dalle_service, DalleAPIError
 
 # --- ASYNC BACKGROUND TASKS FOR SUMMARY & DNA ---
 import traceback
@@ -3815,7 +3815,7 @@ async def test_cover_prompt_endpoint(
 ):
     """
     TEST ENDPOINT: Generate and return a cover prompt for a story without actually creating an image.
-    This allows us to test and refine prompt quality before implementing Leonardo.ai integration.
+    This allows us to test and refine prompt quality before implementing DALL-E 3 integration.
     """
     try:
         logger.info(f"🧪 Testing cover prompt generation for story {story_id}")
@@ -3857,16 +3857,17 @@ async def test_cover_prompt_endpoint(
         logger.info(f"   Characters: {main_characters}")
         logger.info(f"   Locations: {key_locations}")
         
-        # Generate the prompt using our smart service
-        prompt_result = cover_prompt_service.generate_cover_prompt(
+        # Generate the prompt using our smart service for DALL-E 3
+        prompt_result = cover_prompt_service.generate_cover_prompt_for_dalle(
             title=title,
             genre=genre,
             main_characters=main_characters,
             key_locations=key_locations,
-            tone=tone
+            tone=tone,
+            author_name=user.email.split('@')[0] if user.email else ""
         )
         
-        logger.info(f"✅ Generated cover prompt for '{title}'")
+        logger.info(f"✅ Generated DALL-E 3 cover prompt for '{title}'")
         logger.info(f"📝 Prompt: {prompt_result['prompt'][:100]}...")
         
         return {
@@ -3880,7 +3881,7 @@ async def test_cover_prompt_endpoint(
                 "key_locations": key_locations
             },
             "prompt_result": prompt_result,
-            "message": "Cover prompt generated successfully! Review the prompt quality before implementing image generation."
+            "message": "DALL-E 3 cover prompt generated successfully! Review the prompt quality before implementing image generation."
         }
         
     except HTTPException:
@@ -3895,12 +3896,12 @@ async def generate_cover_endpoint(
     user = Depends(get_authenticated_user)
 ):
     """
-    Generate an AI-powered book cover for a story using Leonardo.ai.
+    Generate an AI-powered book cover for a story using OpenAI DALL-E 3.
     
     This endpoint:
     1. Fetches story data from database
     2. Generates an intelligent prompt using story context
-    3. Calls Leonardo.ai API to generate the cover image
+    3. Calls OpenAI DALL-E 3 API to generate the cover image with text
     4. Saves the image URL and metadata to database
     """
     try:
@@ -3956,27 +3957,35 @@ async def generate_cover_endpoint(
             logger.info(f"   Characters: {main_characters}")
             logger.info(f"   Locations: {key_locations}")
             
-            # Step 4: Generate intelligent prompt
-            prompt_result = cover_prompt_service.generate_cover_prompt(
+            # Step 4: Generate intelligent prompt for DALL-E 3
+            prompt_result = cover_prompt_service.generate_cover_prompt_for_dalle(
                 title=title,
                 genre=genre,
                 main_characters=main_characters,
                 key_locations=key_locations,
-                tone=tone
+                tone=tone,
+                author_name=user.email.split('@')[0] if user.email else ""  # Use email prefix as author name
             )
             
             prompt = prompt_result["prompt"]
-            logger.info(f"📝 Generated prompt: {prompt[:100]}...")
+            logger.info(f"📝 Generated DALL-E 3 prompt: {prompt[:100]}...")
             
-            # Step 5: Generate image using Leonardo.ai
-            logger.info(f"🚀 Calling Leonardo.ai API for image generation")
-            leonardo_result = await leonardo_service.generate_image(prompt)
+            # Step 5: Generate image using DALL-E 3
+            logger.info(f"🚀 Calling OpenAI DALL-E 3 API for image generation")
+            dalle_result = await dalle_service.generate_image_with_text(
+                prompt=prompt_result["base_prompt"],
+                title=prompt_result["title"],
+                author_name=prompt_result["author_name"],
+                size="1792x1024",  # Book cover aspect ratio
+                quality="hd",
+                style="vivid"
+            )
             
-            primary_image_url = leonardo_result["primary_image_url"]
-            generation_id = leonardo_result["generation_id"]
-            image_width = leonardo_result.get("image_width", 832)
-            image_height = leonardo_result.get("image_height", 1216)
-            aspect_ratio = leonardo_result.get("aspect_ratio", 0.68)
+            primary_image_url = dalle_result["primary_image_url"]
+            generation_id = dalle_result["generation_id"]
+            image_width = dalle_result.get("image_width", 1792)
+            image_height = dalle_result.get("image_height", 1024)
+            aspect_ratio = dalle_result.get("aspect_ratio", 1.75)
             
             # Step 6: Update database with successful result including dimensions
             update_data = {
@@ -4004,13 +4013,13 @@ async def generate_cover_endpoint(
                 "generation_id": generation_id,
                 "prompt": prompt,
                 "prompt_reasoning": prompt_result["reasoning"],
-                "leonardo_result": leonardo_result,
-                "message": "Cover generated successfully!"
+                "dalle_result": dalle_result,
+                "message": "Cover generated successfully with DALL-E 3!"
             }
             
-        except LeonardoAPIError as e:
-            # Handle Leonardo-specific errors
-            logger.error(f"❌ Leonardo.ai API error for story {story_id}: {str(e)}")
+        except DalleAPIError as e:
+            # Handle DALL-E 3 specific errors
+            logger.error(f"❌ OpenAI DALL-E 3 API error for story {story_id}: {str(e)}")
             
             # Update status to failed
             supabase.table("Stories").update({

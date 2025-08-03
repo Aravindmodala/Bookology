@@ -76,8 +76,12 @@ const AIAssistantPanel = ({
           'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
-          text: selectedText,
-          context: storyContext?.content || ''
+          selected_text: selectedText,
+          story_context: {
+            content: storyContext?.content || '',
+            title: storyContext?.title || '',
+            genre: storyContext?.genre || ''
+          }
         })
       });
 

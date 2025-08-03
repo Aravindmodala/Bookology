@@ -52,5 +52,6 @@ export const API_ENDPOINTS = {
   TOGGLE_STORY_LIKE: '/story/{story_id}/like',
   ADD_STORY_COMMENT: '/story/{story_id}/comment',
   GET_STORY_LIKES: '/story/{story_id}/likes',
-  GET_STORY_COMMENTS: '/story/{story_id}/comments'
+  GET_STORY_COMMENTS: '/story/{story_id}/comments',
+  UPDATE_CHAPTER_CONTENT: '/update_chapter_content' // Real-time save endpoint
 };

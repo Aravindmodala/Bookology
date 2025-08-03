@@ -15,7 +15,14 @@ logger = setup_logger(__name__)
 EXAMPLES_PATH = os.path.join(os.path.dirname(__file__), 'story_outline_examples.json')
 
 # Set up your LLM (replace with your API key and model)
-lm = dspy.LM('openai/gpt-4o-mini', api_key=os.getenv("OPENAI_API_KEY"), temperature=0.7, max_tokens=3000)
+from config import get_settings
+settings = get_settings()
+
+if not settings.OPENAI_API_KEY:
+    logger.error("❌ OPENAI_API_KEY not found in environment variables")
+    raise ValueError("OPENAI_API_KEY environment variable is required")
+
+lm = dspy.LM('openai/gpt-4o-mini', api_key=settings.OPENAI_API_KEY, temperature=0.7, max_tokens=3000)
 dspy.configure(lm=lm)
 
 # Define signatures for DSPy

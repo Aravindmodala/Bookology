@@ -251,6 +251,89 @@ class CoverPromptService:
         
         return result
     
+    def generate_cover_prompt_for_dalle(
+        self, 
+        title: str, 
+        genre: str, 
+        main_characters: List[str], 
+        key_locations: List[str],
+        tone: Optional[str] = None,
+        author_name: str = ""
+    ) -> Dict[str, str]:
+        """
+        Generate a DALL-E 3 optimized book cover prompt with text generation capabilities.
+        
+        Returns:
+            Dict with 'prompt', 'reasoning', 'elements', and 'text_prompt' keys
+        """
+        logger.info(f"🎨 Generating DALL-E 3 optimized cover prompt for '{title}' ({genre})")
+        
+        # Clean and normalize inputs
+        genre = genre.lower() if genre else "contemporary"
+        title = title.strip()
+        
+        # Get genre-specific styling
+        genre_info = self.genre_styles.get(genre, self.genre_styles["contemporary"])
+        
+        # Enhance characters and locations
+        enhanced_characters = self.enhance_character_descriptions(main_characters)
+        enhanced_locations = self.enhance_location_descriptions(key_locations)
+        
+        # Build a SIMPLIFIED prompt optimized for DALL-E 3 text generation
+        prompt_parts = []
+        
+        # 1. Start with clear book cover instruction
+        prompt_parts.append("Professional book cover design")
+        
+        # 2. Add main visual elements (simplified)
+        if enhanced_characters:
+            char_desc = f"featuring {', '.join(enhanced_characters[:2])}"  # Limit to 2 characters
+            prompt_parts.append(char_desc)
+        
+        if enhanced_locations:
+            loc_desc = f"in {enhanced_locations[0]}"  # Use only primary location
+            prompt_parts.append(loc_desc)
+        
+        # 3. Add genre mood (simplified)
+        prompt_parts.append(genre_info["mood"])
+        
+        # 4. Add color palette
+        prompt_parts.append(genre_info["color_palette"])
+        
+        # 5. Add essential quality terms for DALL-E 3
+        prompt_parts.append("high quality, detailed artwork, professional typography")
+        
+        # Combine for base prompt (NO text instructions here)
+        base_prompt = " ".join(prompt_parts)
+        
+        # Generate reasoning
+        reasoning = self._generate_reasoning(title, genre, enhanced_characters, enhanced_locations, genre_info)
+        
+        # Extract key elements for summary
+        elements = {
+            "characters": enhanced_characters,
+            "locations": enhanced_locations,
+            "genre_style": genre_info["mood"],
+            "color_palette": genre_info["color_palette"]
+        }
+        
+        result = {
+            "prompt": base_prompt,  # Return base prompt only - text will be added by dalle_service
+            "base_prompt": base_prompt,
+            "text_prompt": "",  # Empty - will be handled by dalle_service
+            "reasoning": reasoning,
+            "elements": elements,
+            "genre": genre,
+            "character_count": len(enhanced_characters),
+            "location_count": len(enhanced_locations),
+            "title": title,
+            "author_name": author_name
+        }
+        
+        logger.info(f"✅ Generated simplified DALL-E 3 base prompt: {base_prompt[:100]}...")
+        
+        return result
+    
     def _generate_reasoning(
         self, 
         title: str, 
