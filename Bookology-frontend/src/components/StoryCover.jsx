@@ -3,7 +3,7 @@ import { Image, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
 import { createApiUrl, API_ENDPOINTS } from '../config';
 import { useAuth } from '../AuthContext';
 import ImageModal from './ImageModal';
-import CacheService from '../services/cacheService';
+import { cacheService } from '../services/cacheService';
 
 const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
   const { session } = useAuth();
@@ -34,7 +34,7 @@ const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
   // Load cached data immediately for instant display
   const loadFromCache = () => {
     try {
-      const cachedData = CacheService.get(cacheKey);
+      const cachedData = cacheService.get(cacheKey);
       if (cachedData) {
         setCoverImageUrl(cachedData.cover_image_url);
         setImageWidth(cachedData.image_width);
@@ -62,7 +62,7 @@ const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
         status: data.status,
         generated_at: data.generated_at
       };
-      CacheService.set(cacheKey, cacheData, 5 * 60 * 1000); // 5 min TTL
+      cacheService.set(cacheKey, cacheData, 5 * 60 * 1000); // 5 min TTL
       console.log('💾 Cover data cached for future instant loading');
     } catch (error) {
       console.warn('Failed to cache cover data:', error);
@@ -426,7 +426,7 @@ const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
                 setCoverImageUrl(null);
                 setError('Failed to load cover image');
                 // Clear cache if image fails to load
-                CacheService.remove(cacheKey);
+                cacheService.remove(cacheKey);
               }}
             />
             {/* Overlay on hover */}
