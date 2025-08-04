@@ -3976,7 +3976,7 @@ async def generate_cover_endpoint(
                 prompt=prompt_result["base_prompt"],
                 title=prompt_result["title"],
                 author_name=prompt_result["author_name"],
-                size="1792x1024",  # Book cover aspect ratio
+                size="1024x1792",  # Book cover aspect ratio
                 quality="hd",
                 style="vivid"
             )
