@@ -27,7 +27,8 @@ import {
   TreePine,
   X,
   Sparkles,
-  Gamepad2
+  Gamepad2,
+  RefreshCw
 } from 'lucide-react';
 import EditorToolbar from './components/EditorToolbar';
 import AIAssistantPanel from './components/AIAssistantPanel';
@@ -107,6 +108,9 @@ const StoryEditor = () => {
   const isUserSelectingRef = useRef(false);
   const selectionTimeoutRef = useRef(null);
   const isSelectingRef = useRef(false);
+  
+  // OPTIMIZATION: Track if we've already fetched fresh data this session
+  const firstFetchRef = useRef(false);
 
   // Real data from Supabase
   const [loading, setLoading] = useState(true);
@@ -273,15 +277,21 @@ const StoryEditor = () => {
       console.log('📱 Instagram-style: Checking cache for story:', storyId, 'Cached:', cachedData.isCached, 'Stale:', cachedData.isStale);
       
       if (cachedData.isCached) {
-        console.log('� Instagram-style: Showing cached data while fetching fresh');
+        console.log('📦 Instagram-style: Showing cached data while fetching fresh');
         setStoryData(cachedData.story);
         setChapters(cachedData.chapters);
         buildStoryStructureFromData(cachedData.chapters);
         setLoading(false); // Hide loading since we have data to show
       }
       
-      // 2. ALWAYS fetch fresh data in background (Instagram approach)
-      console.log('🔄 Background fetch: Getting latest data from server');
+      // 2. OPTIMIZATION: Only fetch fresh data ONCE per browser session
+      if (firstFetchRef.current) {
+        console.log('⏭️ OPTIMIZATION: Skipping fetch - already have fresh data this session');
+        return;
+      }
+      firstFetchRef.current = true;
+      
+      console.log('🔄 Initial fetch: Getting fresh data from server (once per session)');
       let chapters = [];
       let story = null;
       
@@ -626,10 +636,8 @@ const StoryEditor = () => {
         console.log('✅ Cached', data.choices.length, 'choices from save response');
       }
 
-      // Refresh data after save - call loadStoryData directly
-      if (typeof loadStoryData === 'function') {
-        await loadStoryData();
-      }
+      // OPTIMIZATION: No need to refresh data after save - local state + cache is sufficient
+      // Removed: await loadStoryData(); to prevent background fetch spam
       
       return realChapterId;
     } catch (err) {
@@ -671,10 +679,10 @@ const StoryEditor = () => {
           if (newChapter) {
             console.log('✅ Found new chapter via polling!', newChapter.id);
             
-            // Force refresh all data - call loadStoryData directly
-            if (typeof loadStoryData === 'function') {
-              await loadStoryData();
-            }
+            // OPTIMIZATION: Update local state directly instead of full refresh
+            // Removed: await loadStoryData(); to prevent background fetch spam
+            setChapters(prev => [...prev, newChapter]);
+            buildStoryStructureFromData([...chapters, newChapter]);
             
             // Switch to new chapter immediately
             const newChapterKey = `chapter-${expectedChapterNumber}`;
@@ -937,8 +945,8 @@ const StoryEditor = () => {
           console.log('🗑️ Cache cleared after successful generation');
         }
         
-        // Force refresh chapters with cache-busting
-        await loadStoryData();
+        // OPTIMIZATION: Use polling instead of full refresh to prevent background fetch spam
+        // Removed: await loadStoryData(); - the polling will handle finding the new chapter
         
         // Start polling to ensure the new chapter appears quickly
         console.log('🔍 Starting polling for new chapter...');
@@ -1061,8 +1069,8 @@ const StoryEditor = () => {
         // Auto-clear success notification after 3 seconds
         setTimeout(() => setChapterGenerationSuccess(''), 3000);
 
-        // Force refresh to get the new chapter
-        await loadStoryData();
+        // OPTIMIZATION: Trust that the chapter was created - no need for full refresh
+        // Removed: await loadStoryData(); to prevent background fetch spam
         
         // Switch to the new chapter
         setActiveChapter(`chapter-${nextChapterNumber}`);
@@ -1537,24 +1545,19 @@ const StoryEditor = () => {
         storyId: storyId
       });
 
-      // Prepare the save request
-      const saveData = {
-        story_id: parseInt(storyId),
-        chapter_id: chapterData.id,
-        chapter_number: chapterData.chapterNumber || 1,
-        title: chapterData.title || `Chapter ${chapterData.chapterNumber || 1}`,
-        content: content, // Current editor content overwrites previous version
-        word_count: content.trim().split(/\s+/).length
-      };
-
-      // Call the backend save endpoint
-      const response = await fetch(createApiUrl(API_ENDPOINTS.SAVE_CHAPTER), {
+      // Call the lightweight update endpoint (same as autosave)
+      const response = await fetch(createApiUrl(API_ENDPOINTS.UPDATE_CHAPTER_CONTENT), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`
         },
-        body: JSON.stringify(saveData)
+        body: JSON.stringify({
+          story_id: parseInt(storyId),
+          chapter_id: chapterData.id,          // DB id, required by endpoint
+          content: content,                    // full HTML
+          word_count: content.trim().split(/\s+/).length
+        })
       });
 
       if (!response.ok) {
@@ -1563,13 +1566,16 @@ const StoryEditor = () => {
       }
 
       const result = await response.json();
-      console.log('✅ Chapter saved successfully:', result);
+      console.log('✅ Chapter content updated successfully:', result);
+
+      // Calculate word count for cache update
+      const word_count = content.trim().split(/\s+/).length;
 
       // 💾 Update local cache immediately after successful save
       const updatedChapter = {
         ...chapterData,
         content: content,
-        word_count: saveData.word_count,
+        word_count: word_count,
         updated_at: new Date().toISOString()
       };
 
@@ -1589,7 +1595,7 @@ const StoryEditor = () => {
           [activeChapter]: {
             ...prev.chapters[activeChapter],
             content: content,
-            wordCount: saveData.word_count
+            wordCount: word_count
           }
         }
       }));
@@ -1600,7 +1606,7 @@ const StoryEditor = () => {
       // Update UI state
       setIsSaving(false);
       
-      showNotification('success', 'Chapter saved successfully!');
+      showNotification('success', 'Chapter content updated successfully!');
 
     } catch (err) {
       console.error('❌ Error saving chapter:', err);
@@ -1926,6 +1932,13 @@ const StoryEditor = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canUndo, canRedo, undo, redo]);
+
+  // STEP 3: Manual refresh hook for optional UX
+  const refreshStoryFromServer = useCallback(async () => {
+    console.log('🔄 Manual refresh: Resetting fetch guard and reloading data');
+    firstFetchRef.current = false;   // reset guard
+    await loadStoryData();           // one explicit pull
+  }, [loadStoryData]);
 
   return (
     <div className="h-screen bg-gray-900 text-white flex">
@@ -2395,6 +2408,16 @@ const StoryEditor = () => {
                 ) : (
                   <Zap className="w-5 h-5" />
                 )}
+              </button>
+              
+              {/* Manual Refresh Button for Testing */}
+              <button
+                onClick={refreshStoryFromServer}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-white"
+                title="Refresh from Server (Manual)"
+                aria-label="Refresh from Server"
+              >
+                <RefreshCw className="w-5 h-5" />
               </button>
               
               <button

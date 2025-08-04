@@ -7,8 +7,10 @@ Used for real-time saving like Sudowrite.
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
-from fastapi import HTTPException, Depends
-from main import app, supabase, get_authenticated_user, logger
+from fastapi import APIRouter, Depends, HTTPException
+from main import supabase, get_authenticated_user, logger   # non-circular items
+
+router = APIRouter()
 
 class UpdateChapterContentInput(BaseModel):
     """Input model for updating only chapter content (no summary regeneration)."""
@@ -17,7 +19,7 @@ class UpdateChapterContentInput(BaseModel):
     content: str = Field(..., min_length=1, description="New chapter content")
     word_count: Optional[int] = None
 
-@app.post("/update_chapter_content")
+@router.post("/update_chapter_content")
 async def update_chapter_content_endpoint(
     update_data: UpdateChapterContentInput,
     user = Depends(get_authenticated_user)

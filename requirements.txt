@@ -22,6 +22,7 @@ python-dotenv>=1.0.0,<2.0.0
 
 # HTTP and templating
 jinja2>=3.1.0,<4.0.0
+requests>=2.31.0
 
 # Performance optimization dependencies
 sentence-transformers>=2.2.0,<3.0.0

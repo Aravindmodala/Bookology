@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import json
 from datetime import datetime
 import uuid
+import requests              # NEW – download the temp image
 
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, status, Body, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -143,6 +144,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+from simple_content_update_endpoint import router as update_router
+app.include_router(update_router)
 
 # Keep original models for compatibility
 class StoryInput(BaseModel):
@@ -3986,6 +3991,31 @@ async def generate_cover_endpoint(
             image_width = dalle_result.get("image_width", 1792)
             image_height = dalle_result.get("image_height", 1024)
             aspect_ratio = dalle_result.get("aspect_ratio", 1.75)
+            
+            # ── Make image permanent – upload to Supabase Storage ──
+            try:
+                # 1) download the temporary Azure / Leonardo image
+                img_bytes = requests.get(primary_image_url, timeout=60).content
+
+                # 2) choose a unique filename   e.g. 181_8d72a91e.png
+                ext       = "png" if primary_image_url.lower().endswith(".png") else "jpg"
+                filename  = f"{story_id}_{uuid.uuid4().hex}.{ext}"
+
+                # 3) upload to bucket "covers"
+                supabase.storage.from_("covers").upload(
+                    filename,
+                    img_bytes,
+                    { "content-type": f"image/{ext}" }
+                )
+
+                # 4) get permanent public URL and overwrite old link
+                permanent_url   = supabase.storage.from_("covers").get_public_url(filename)
+                primary_image_url = permanent_url
+                logger.info(f"🆕 Cover stored permanently: {permanent_url}")
+
+            except Exception as e:
+                # If upload fails keep temp URL (may expire later)
+                logger.error(f"⚠️  Storage upload failed, using temp URL: {e}")
             
             # Step 6: Update database with successful result including dimensions
             update_data = {
