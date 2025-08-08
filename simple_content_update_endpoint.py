@@ -8,7 +8,11 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
-from main import supabase, get_authenticated_user, logger   # non-circular items
+from logger_config import setup_logger
+from dependencies import get_supabase_client, get_authenticated_user
+
+logger = setup_logger(__name__)
+
 
 router = APIRouter()
 
@@ -24,6 +28,7 @@ async def update_chapter_content_endpoint(
     update_data: UpdateChapterContentInput,
     user = Depends(get_authenticated_user)
 ):
+    supabase = get_supabase_client()
     """
     Simple endpoint to update only chapter content without regenerating summaries or choices.
     Used for text rewrites and real-time auto-save functionality.

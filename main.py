@@ -1,8 +1,4 @@
-﻿"""
-Optimized main.py with service layer architecture and async operations.
-"""
-
-import asyncio
+﻿import asyncio
 import time
 from typing import Dict, Any, List, Union
 from contextlib import asynccontextmanager
@@ -10,25 +6,19 @@ import json
 from datetime import datetime
 import uuid
 import requests              # NEW – download the temp image
-
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, status, Body, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.requests import Request
-from fastapi.security import HTTPBearer
+# HTTPBearer imported via dependencies
 from pydantic import BaseModel, Field, field_validator
-
 from config import settings
 from logger_config import setup_logger
 from exceptions import *
-
-# Import optimized services
 from services import DatabaseService, StoryService, EmbeddingService, CacheService
 from services.database_service import db_service
-# Use the correct class name
 from services.story_service_with_dna import StoryService  
 story_service = StoryService()
-
 from services.embedding_service import embedding_service
 from services.cache_service import cache_service
 
@@ -38,13 +28,17 @@ from models.chat_models import ChatMessage, ChatResponse
 
 # Keep original imports for compatibility
 from story_chatbot import StoryChatbot
-from supabase import create_client, Client
+from supabase import Client
 from typing import Optional
 
+# Import shared dependencies
+from dependencies import (
+    get_supabase_client as deps_get_supabase_client,
+    get_authenticated_user,
+    get_authenticated_user_optional,
+    get_current_user_from_token,
+)
 from chapter_summary import generate_chapter_summary
-
-# Add this import at the top with other imports
-from services.cover_prompt_service import cover_prompt_service
 
 # Add this import with other service imports
 from services.dalle_service import dalle_service, DalleAPIError
@@ -54,10 +48,9 @@ import traceback
 from chapter_summary import generate_chapter_summary
 from story_dna_extractor import extract_enhanced_chapter_dna
 
-def get_supabase_client():
-    from supabase import create_client
-    from config import settings
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+# Request/response schemas (moved from main.py)
+from app.schemas import StoryInput, ChapterInput, StorySaveInput, StoryChatRequest, RewriteTextRequest
+
 
 async def generate_and_update_summary_async(chapter_id: int, chapter_content: str, chapter_number: int, story_title: str, story_context: str):
     try:
@@ -70,7 +63,7 @@ async def generate_and_update_summary_async(chapter_id: int, chapter_content: st
         )
         if summary_result.get("success"):
             summary_text = summary_result["summary"]
-            supabase = get_supabase_client()
+            supabase = deps_get_supabase_client()
             supabase.table("Chapters").update({"summary": summary_text}).eq("id", chapter_id).execute()
             logger.info(f"[ASYNC] Summary updated for Chapter {chapter_id}")
         else:
@@ -92,7 +85,7 @@ async def generate_and_update_dna_async(chapter_id: int, chapter_content: str, c
         import json
         if dna_result and not dna_result.get("error"):
             dna_json = json.dumps(dna_result)
-            supabase = get_supabase_client()
+            supabase = deps_get_supabase_client()
             supabase.table("Chapters").update({"dna": dna_json}).eq("id", chapter_id).execute()
             logger.info(f"[ASYNC] DNA updated for Chapter {chapter_id}")
         else:
@@ -103,8 +96,7 @@ async def generate_and_update_dna_async(chapter_id: int, chapter_content: str, c
 
 logger = setup_logger(__name__)
 
-# Authentication
-auth_scheme = HTTPBearer()
+# Authentication schemes imported from dependencies
 
 # Initialize services at startup
 @asynccontextmanager
@@ -115,7 +107,7 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize Supabase client only (minimal initialization)
         global supabase
-        supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+        supabase = deps_get_supabase_client()
         logger.info("Supabase client initialized")
         
         logger.info("Basic services initialized successfully")
@@ -144,64 +136,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+from app.endpoints.covers import router as covers_router
+app.include_router(covers_router, tags=["cover"])
 
+from app.endpoints.health import router as health_router
+app.include_router(health_router, tags=["health"])
 # Include routers
 from simple_content_update_endpoint import router as update_router
 app.include_router(update_router)
 
-# Keep original models for compatibility
-class StoryInput(BaseModel):
-    idea: str = Field(..., min_length=10, max_length=500)
-    format: Optional[str] = Field(default="book", pattern="^(book|movie)$")
-    story_id: Optional[int] = Field(default=None, description="Optional story ID for continuation")
-    
-    @field_validator('idea')
-    @classmethod
-    def validate_idea(cls, v):
-        if not v.strip():
-            raise ValueError("Story idea cannot be empty")
-        return v.strip()
-
-class ChapterInput(BaseModel):
-    outline: str = Field(..., min_length=50)
-    chapter_number: int = Field(default=1, ge=1)
-    story_id: Optional[int] = Field(default=None, description="Story ID for saving generated chapter")
-
-class StorySaveInput(BaseModel):
-    story_outline: str = Field(..., min_length=50)
-    chapter_1_content: str = Field(..., min_length=100)
-    story_title: str = Field(..., min_length=1, max_length=200)
-    # New metadata fields
-    outline_json: Optional[Dict[str, Any]] = None
-    genre: Optional[str] = None
-    theme: Optional[str] = None
-    style: Optional[str] = None
-    language: str = "English"
-    tags: List[str] = Field(default_factory=list)
-    tone_keywords: List[str] = Field(default_factory=list)
-    estimated_total_chapters: Optional[int] = None
-    total_estimated_words: Optional[int] = None
-    main_characters: List[Dict[str, Any]] = Field(default_factory=list)
-    key_locations: List[Dict[str, Any]] = Field(default_factory=list)
-    # New field for automatic choices
-    chapter_1_choices: List[Dict[str, Any]] = Field(default_factory=list, description="Auto-generated choices for Chapter 1")
-
-class StoryChatRequest(BaseModel):
-    """Input model for story chat interactions."""
-    story_id: int = Field(..., gt=0, description="ID of the story to chat about")
-    message: str = Field(..., min_length=1, max_length=1000, description="User message")
-
-class RewriteTextRequest(BaseModel):
-    """Input model for text rewriting functionality."""
-    selected_text: str = Field(..., min_length=1, max_length=2000, description="Text to be rewritten")
-    story_context: Optional[Dict[str, Any]] = Field(default=None, description="Story context for better rewrites")
-    
-    @field_validator('selected_text')
-    @classmethod
-    def validate_selected_text(cls, v):
-        if not v.strip():
-            raise ValueError("Selected text cannot be empty")
-        return v.strip()
+# Pydantic request models moved to api/schemas.py
 
 # Initialize chatbot (keep for compatibility) - DISABLED due to connection issues
 # story_chatbot = StoryChatbot()
@@ -210,181 +154,7 @@ story_chatbot = None
 # Initialize Supabase client globally
 supabase: Optional[Client] = None
 
-# SECURITY: Rate limiting for authentication attempts
-from collections import defaultdict
-from time import time
-auth_attempts = defaultdict(list)
-MAX_AUTH_ATTEMPTS = 5  # Maximum attempts per minute
-AUTH_WINDOW = 60  # Time window in seconds
-
-# Authentication dependency with enhanced security
-async def get_authenticated_user(token = Depends(auth_scheme)):
-    """Get authenticated user - enhanced security version with comprehensive validation."""
-    try:
-        # SECURITY: Rate limiting check
-        client_ip = "unknown"  # In production, get from request.client.host
-        current_time = time()
-        
-        # Clean old attempts
-        auth_attempts[client_ip] = [t for t in auth_attempts[client_ip] if current_time - t < AUTH_WINDOW]
-        
-        # Check if too many attempts
-        if len(auth_attempts[client_ip]) >= MAX_AUTH_ATTEMPTS:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many authentication attempts. Please try again later."
-            )
-        
-        # Record this attempt
-        auth_attempts[client_ip].append(current_time)
-        
-        # SECURITY: Validate token format before processing
-        if not token or not token.credentials:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing authentication token"
-            )
-        
-        # SECURITY: Enhanced token format validation
-        token_str = token.credentials.strip()
-        
-        # More flexible validation for Supabase tokens
-        if len(token_str) < 50:  # Allow shorter tokens
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token format"
-            )
-        
-        # SECURITY: Validate token structure (should be JWT format)
-        if not token_str.count('.') == 2:  # JWT has 3 parts separated by dots
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token structure"
-            )
-        
-        # SECURITY: Simplified JWT header validation for Supabase
-        try:
-            import base64
-            import json
-            
-            # Split token and validate structure
-            token_parts = token_str.split('.')
-            if len(token_parts) != 3:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token structure"
-                )
-            
-            header_part = token_parts[0]
-            # Add padding if needed for base64 decoding
-            header_part += '=' * (4 - len(header_part) % 4)
-            
-            # Decode and validate header
-            try:
-                header = json.loads(base64.b64decode(header_part))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                # If header decoding fails, continue with basic validation
-                logger.warning("Token header decoding failed, continuing with basic validation")
-                header = {}
-            
-            # More lenient validation for Supabase tokens
-            if isinstance(header, dict):
-                # Check if it's a valid JWT header (optional checks)
-                if 'alg' in header and header.get('alg') not in ['HS256', 'RS256']:
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid token algorithm"
-                    )
-                
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"Token validation failed: {type(e).__name__}")
-            # Continue with basic validation instead of failing
-            pass
-        
-        global supabase
-        if not supabase:
-            # Fallback: create client if global one not available
-            from supabase import create_client
-            supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-        
-        user_response = supabase.auth.get_user(token_str)
-        user = user_response.user
-        
-        if not user:
-            raise AuthorizationError("Invalid or expired token")
-        
-        # SECURITY: Log authentication success (without sensitive data)
-        logger.info(f"User authenticated successfully: {user.id}")
-        
-        # SECURITY: Remove rate limiting for successful authentication
-        if client_ip in auth_attempts:
-            auth_attempts[client_ip].clear()
-        
-        return user
-        
-    except HTTPException:
-        raise  # Re-raise HTTP exceptions as-is
-    except Exception as e:
-        logger.error(f"Authentication failed: {type(e).__name__}")  # Don't log full error details
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
-        )
-
-# Optional auth scheme  
-optional_auth_scheme = HTTPBearer(auto_error=False)
-
-async def get_authenticated_user_optional(token = Depends(optional_auth_scheme)):
-    """Get authenticated user but return None if not authenticated (no error)."""
-    if not token:
-        return None
-        
-    try:
-        global supabase
-        if not supabase:
-            # Fallback: create client if global one not available
-            from supabase import create_client
-            supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-        
-        user_response = supabase.auth.get_user(token.credentials)
-        user = user_response.user
-        
-        return user  # Return user or None
-        
-    except Exception as e:
-        logger.info(f"Optional authentication failed (this is OK): {e}")
-        return None  # Return None instead of raising error
-
-async def get_current_user_from_token(token_string: str):
-    """Extract user from raw token string (for manual token parsing)."""
-    try:
-        global supabase
-        if not supabase:
-            # Fallback: create client if global one not available
-            from supabase import create_client
-            supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-        
-        # Use the raw token string directly
-        user_response = supabase.auth.get_user(token_string)
-        user = user_response.user
-        
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token"
-            )
-        
-        logger.info(f"User authenticated successfully: {user.id}")
-        return user
-        
-    except Exception as e:
-        logger.error(f"Token authentication failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
-        )
+# Authentication functions imported from dependencies.py
 
 # Health check endpoint
 @app.get("/health")
@@ -3813,310 +3583,6 @@ async def save_choices_for_chapter(story_id, chapter_id, chapter_number, choices
         supabase.table("story_choices").insert(choice_record).execute()
 
 # Add this endpoint near the end of the file, before the last endpoints
-@app.get("/story/{story_id}/cover_prompt_test")
-async def test_cover_prompt_endpoint(
-    story_id: int,
-    user = Depends(get_authenticated_user)
-):
-    """
-    TEST ENDPOINT: Generate and return a cover prompt for a story without actually creating an image.
-    This allows us to test and refine prompt quality before implementing DALL-E 3 integration.
-    """
-    try:
-        logger.info(f"🧪 Testing cover prompt generation for story {story_id}")
-        
-        # Fetch story data from database
-        story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
-        
-        if not story_response.data:
-            raise HTTPException(status_code=404, detail="Story not found")
-        
-        story = story_response.data[0]
-        
-        # Extract story data
-        title = story.get("story_title", "Untitled Story")
-        genre = story.get("genre", "contemporary")
-        tone = story.get("tone", "")
-        
-        # Parse JSON fields (they might be stored as strings)
-        import json
-        main_characters = story.get("main_characters", [])
-        key_locations = story.get("key_locations", [])
-        
-        # Handle if they're stored as JSON strings
-        if isinstance(main_characters, str):
-            try:
-                main_characters = json.loads(main_characters)
-            except:
-                main_characters = []
-        
-        if isinstance(key_locations, str):
-            try:
-                key_locations = json.loads(key_locations)
-            except:
-                key_locations = []
-        
-        logger.info(f"📊 Story data for prompt generation:")
-        logger.info(f"   Title: {title}")
-        logger.info(f"   Genre: {genre}")
-        logger.info(f"   Characters: {main_characters}")
-        logger.info(f"   Locations: {key_locations}")
-        
-        # Generate the prompt using our smart service for DALL-E 3
-        prompt_result = cover_prompt_service.generate_cover_prompt_for_dalle(
-            title=title,
-            genre=genre,
-            main_characters=main_characters,
-            key_locations=key_locations,
-            tone=tone,
-            author_name=user.email.split('@')[0] if user.email else ""
-        )
-        
-        logger.info(f"✅ Generated DALL-E 3 cover prompt for '{title}'")
-        logger.info(f"📝 Prompt: {prompt_result['prompt'][:100]}...")
-        
-        return {
-            "success": True,
-            "story_id": story_id,
-            "story_data": {
-                "title": title,
-                "genre": genre,
-                "tone": tone,
-                "main_characters": main_characters,
-                "key_locations": key_locations
-            },
-            "prompt_result": prompt_result,
-            "message": "DALL-E 3 cover prompt generated successfully! Review the prompt quality before implementing image generation."
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error testing cover prompt for story {story_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate cover prompt: {str(e)}")
-
-@app.post("/story/{story_id}/generate_cover")
-async def generate_cover_endpoint(
-    story_id: int,
-    user = Depends(get_authenticated_user)
-):
-    """
-    Generate an AI-powered book cover for a story using OpenAI DALL-E 3.
-    
-    This endpoint:
-    1. Fetches story data from database
-    2. Generates an intelligent prompt using story context
-    3. Calls OpenAI DALL-E 3 API to generate the cover image with text
-    4. Saves the image URL and metadata to database
-    """
-    try:
-        logger.info(f"🎨 Starting cover generation for story {story_id}")
-        
-        # Step 1: Fetch and validate story data
-        story_response = supabase.table("Stories").select("*").eq("id", story_id).eq("user_id", user.id).execute()
-        
-        if not story_response.data:
-            raise HTTPException(status_code=404, detail="Story not found")
-        
-        story = story_response.data[0]
-        
-        # Check if cover is already being generated
-        current_status = story.get("cover_generation_status", "none")
-        if current_status == "generating":
-            return {
-                "success": False,
-                "message": "Cover generation is already in progress for this story",
-                "status": "generating"
-            }
-        
-        # Step 2: Update status to generating
-        supabase.table("Stories").update({
-            "cover_generation_status": "generating"
-        }).eq("id", story_id).eq("user_id", user.id).execute()
-        
-        try:
-            # Step 3: Extract story data
-            title = story.get("story_title", "Untitled Story")
-            genre = story.get("genre", "contemporary")
-            tone = story.get("tone", "")
-            
-            # Parse JSON fields safely
-            import json
-            main_characters = story.get("main_characters", [])
-            key_locations = story.get("key_locations", [])
-            
-            # Handle if they're stored as JSON strings
-            if isinstance(main_characters, str):
-                try:
-                    main_characters = json.loads(main_characters)
-                except:
-                    main_characters = []
-            
-            if isinstance(key_locations, str):
-                try:
-                    key_locations = json.loads(key_locations)
-                except:
-                    key_locations = []
-            
-            logger.info(f"📊 Generating cover for '{title}' ({genre})")
-            logger.info(f"   Characters: {main_characters}")
-            logger.info(f"   Locations: {key_locations}")
-            
-            # Step 4: Generate intelligent prompt for DALL-E 3
-            prompt_result = cover_prompt_service.generate_cover_prompt_for_dalle(
-                title=title,
-                genre=genre,
-                main_characters=main_characters,
-                key_locations=key_locations,
-                tone=tone,
-                author_name=user.email.split('@')[0] if user.email else ""  # Use email prefix as author name
-            )
-            
-            prompt = prompt_result["prompt"]
-            logger.info(f"📝 Generated DALL-E 3 prompt: {prompt[:100]}...")
-            
-            # Step 5: Generate image using DALL-E 3
-            logger.info(f"🚀 Calling OpenAI DALL-E 3 API for image generation")
-            dalle_result = await dalle_service.generate_image_with_text(
-                prompt=prompt_result["base_prompt"],
-                title=prompt_result["title"],
-                author_name=prompt_result["author_name"],
-                size="1024x1792",  # Book cover aspect ratio
-                quality="hd",
-                style="vivid"
-            )
-            
-            primary_image_url = dalle_result["primary_image_url"]
-            generation_id = dalle_result["generation_id"]
-            image_width = dalle_result.get("image_width", 1792)
-            image_height = dalle_result.get("image_height", 1024)
-            aspect_ratio = dalle_result.get("aspect_ratio", 1.75)
-            
-            # ── Make image permanent – upload to Supabase Storage ──
-            try:
-                # 1) download the temporary Azure / Leonardo image
-                img_bytes = requests.get(primary_image_url, timeout=60).content
-
-                # 2) choose a unique filename   e.g. 181_8d72a91e.png
-                ext       = "png" if primary_image_url.lower().endswith(".png") else "jpg"
-                filename  = f"{story_id}_{uuid.uuid4().hex}.{ext}"
-
-                # 3) upload to bucket "covers"
-                supabase.storage.from_("covers").upload(
-                    filename,
-                    img_bytes,
-                    { "content-type": f"image/{ext}" }
-                )
-
-                # 4) get permanent public URL and overwrite old link
-                permanent_url   = supabase.storage.from_("covers").get_public_url(filename)
-                primary_image_url = permanent_url
-                logger.info(f"🆕 Cover stored permanently: {permanent_url}")
-
-            except Exception as e:
-                # If upload fails keep temp URL (may expire later)
-                logger.error(f"⚠️  Storage upload failed, using temp URL: {e}")
-            
-            # Step 6: Update database with successful result including dimensions
-            update_data = {
-                "cover_image_url": primary_image_url,
-                "cover_generation_status": "completed",
-                "cover_generated_at": "now()",
-                "cover_prompt": prompt,
-                "cover_image_width": image_width,
-                "cover_image_height": image_height,
-                "cover_aspect_ratio": aspect_ratio
-            }
-            
-            supabase.table("Stories").update(update_data).eq("id", story_id).eq("user_id", user.id).execute()
-            
-            logger.info(f"✅ Cover generated successfully for story {story_id}")
-            logger.info(f"🖼️ Image URL: {primary_image_url}")
-            
-            return {
-                "success": True,
-                "story_id": story_id,
-                "cover_image_url": primary_image_url,
-                "image_width": image_width,
-                "image_height": image_height,
-                "aspect_ratio": aspect_ratio,
-                "generation_id": generation_id,
-                "prompt": prompt,
-                "prompt_reasoning": prompt_result["reasoning"],
-                "dalle_result": dalle_result,
-                "message": "Cover generated successfully with DALL-E 3!"
-            }
-            
-        except DalleAPIError as e:
-            # Handle DALL-E 3 specific errors
-            logger.error(f"❌ OpenAI DALL-E 3 API error for story {story_id}: {str(e)}")
-            
-            # Update status to failed
-            supabase.table("Stories").update({
-                "cover_generation_status": "failed"
-            }).eq("id", story_id).eq("user_id", user.id).execute()
-            
-            raise HTTPException(
-                status_code=503, 
-                detail=f"Image generation service error: {str(e)}"
-            )
-            
-        except Exception as e:
-            # Handle other errors
-            logger.error(f"❌ Unexpected error during cover generation for story {story_id}: {str(e)}")
-            
-            # Update status to failed
-            supabase.table("Stories").update({
-                "cover_generation_status": "failed"
-            }).eq("id", story_id).eq("user_id", user.id).execute()
-            
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Cover generation failed: {str(e)}"
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Critical error in cover generation endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.get("/story/{story_id}/cover_status")
-async def get_cover_status_endpoint(
-    story_id: int,
-    user = Depends(get_authenticated_user)
-):
-    """
-    Get the current cover generation status for a story.
-    
-    Returns status and cover URL if available.
-    """
-    try:
-        story_response = supabase.table("Stories").select(
-            "cover_image_url, cover_generation_status, cover_generated_at, cover_image_width, cover_image_height, cover_aspect_ratio"
-        ).eq("id", story_id).eq("user_id", user.id).execute()
-        
-        if not story_response.data:
-            raise HTTPException(status_code=404, detail="Story not found")
-        
-        story = story_response.data[0]
-        
-        return {
-            "success": True,
-            "story_id": story_id,
-            "cover_image_url": story.get("cover_image_url"),
-            "image_width": story.get("cover_image_width"),
-            "image_height": story.get("cover_image_height"),
-            "aspect_ratio": story.get("cover_aspect_ratio"),
-            "status": story.get("cover_generation_status", "none"),
-            "generated_at": story.get("cover_generated_at")
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error getting cover status for story {story_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to get cover status")
 
 @app.post("/rewrite_text")
 async def rewrite_text_endpoint(request: RewriteTextRequest, user = Depends(get_authenticated_user_optional)):

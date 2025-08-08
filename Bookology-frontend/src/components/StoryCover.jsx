@@ -93,7 +93,7 @@ const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
     let pollInterval;
     let pollAttempts = 0;
     let consecutiveFailures = 0;
-    const maxPollAttempts = 20; // Maximum 1 minute of polling (20 * 3 seconds)
+    const maxPollAttempts = 60; // Maximum 1 minute of polling (20 * 3 seconds)
     const maxConsecutiveFailures = 3;
     
     const pollCoverStatus = async () => {
