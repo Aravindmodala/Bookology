@@ -213,7 +213,10 @@ async def get_user_stories_optimized(user = Depends(get_authenticated_user)):
                     "genre": story.genre or "Fiction",
                     # For backwards compatibility
                     "story_title": story.title,
-                    "story_outline": story.outline or ""
+                    "story_outline": story.outline or "",
+                    # Cover image support
+                    "cover_image_url": getattr(story, 'cover_image_url', None),
+                    "cover_generation_status": getattr(story, 'cover_generation_status', None)
                 }
                 story_list.append(story_data)
             except Exception as e:

@@ -51,186 +51,102 @@ const EnhancedStoryCard = ({ story, onLike, onComment, onShare }) => {
   const getReadingTime = (wordCount) => {
     const wordsPerMinute = 200;
     const minutes = Math.ceil(wordCount / wordsPerMinute);
-    if (minutes < 5) return 'Quick Read';
-    if (minutes < 30) return `${minutes} min read`;
-    if (minutes < 120) return 'Weekend Binge';
-    return 'Epic Saga';
-  };
-
-  const getCompletionStatus = (totalChapters, completedChapters) => {
-    if (completedChapters === 0) return 'New';
-    if (completedChapters === totalChapters) return 'Completed';
-    if (completedChapters > totalChapters * 0.8) return 'Nearly Done';
-    return 'Ongoing';
-  };
-
-  const getCommunityBuzz = (views, likes, comments) => {
-    const engagement = (likes + comments) / views;
-    if (engagement > 0.1) return 'Trending';
-    if (views > 10000) return 'Popular';
-    if (engagement > 0.05) return 'Hidden Gem';
-    return 'New';
+    if (minutes < 5) return 'Quick';
+    if (minutes < 30) return `${minutes}m`;
+    if (minutes < 120) return 'Long';
+    return 'Epic';
   };
 
   return (
     <motion.div
-      className={`relative group cursor-pointer overflow-hidden rounded-xl bg-gradient-to-br ${getMoodColor(story.genre)} border-2 border-white/20 shadow-xl`}
+      className={`relative group cursor-pointer overflow-hidden rounded-none bg-gradient-to-br ${getMoodColor(story.genre)} border border-white/10 shadow-lg`}
       whileHover={{ 
-        scale: 1.02, 
-        y: -8,
-        rotateY: 5,
-        transition: { duration: 0.3, ease: "easeOut" }
+        scale: 1.05, 
+        y: -4,
+        transition: { duration: 0.2, ease: "easeOut" }
       }}
       onHoverStart={() => setIsHovered(true)}
       onHoverEnd={() => setIsHovered(false)}
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+      transition={{ duration: 0.3 }}
     >
-      {/* Mood Indicator */}
-      <div className="absolute top-3 left-3 z-10">
-        <div className="flex items-center space-x-1 bg-black/30 backdrop-blur-sm rounded-full px-2 py-1">
-          <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-          <span className="text-xs text-white font-medium">{story.genre}</span>
-        </div>
-      </div>
-
-      {/* Story Cover/Image */}
-      <div className="relative h-48 bg-gradient-to-br from-black/20 to-transparent">
-        {story.cover_image ? (
+      {/* Story Cover/Image - Netflix style rectangular */}
+      <div className="relative h-32 bg-gradient-to-br from-black/20 to-transparent">
+        {story.cover_image_url ? (
           <img 
-            src={story.cover_image} 
+            src={story.cover_image_url} 
             alt={story.story_title}
             className="w-full h-full object-cover"
+            onError={(e) => {
+              console.error('Failed to load cover image:', story.cover_image_url);
+              e.target.style.display = 'none';
+            }}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <BookOpen className="w-16 h-16 text-white/50" />
+            <BookOpen className="w-8 h-8 text-white/50" />
           </div>
         )}
         
-        {/* Overlay on hover */}
+        {/* Netflix-style overlay on hover */}
         <motion.div
-          className="absolute inset-0 bg-black/50 flex items-center justify-center"
+          className="absolute inset-0 bg-black/60 flex items-center justify-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: isHovered ? 1 : 0 }}
           transition={{ duration: 0.2 }}
         >
-          <Play className="w-12 h-12 text-white" />
-        </motion.div>
-      </div>
-
-      {/* Story Content */}
-      <div className="p-4 space-y-3">
-        {/* Title and Author */}
-        <div>
-          <h3 className="text-lg font-bold text-white mb-1 line-clamp-2">
-            {story.story_title}
-          </h3>
-          <div className="flex items-center space-x-2 text-white/80">
-            <User className="w-4 h-4" />
-            <span className="text-sm">{story.author_name || 'Anonymous'}</span>
-          </div>
-        </div>
-
-        {/* Description */}
-        <p className="text-white/90 text-sm line-clamp-3 leading-relaxed">
-          {story.description || story.story_outline || 'A captivating story waiting to be discovered...'}
-        </p>
-
-        {/* Stats Row */}
-        <div className="flex items-center justify-between text-white/70 text-xs">
           <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-1">
-              <Eye className="w-3 h-3" />
-              <span>{story.views || 0}</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <Heart className="w-3 h-3" />
-              <span>{likeCount}</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <MessageCircle className="w-3 h-3" />
-              <span>{story.comment_count || 0}</span>
-            </div>
-          </div>
-          <div className="flex items-center space-x-1">
-            <Clock className="w-3 h-3" />
-            <span>{getReadingTime(story.word_count || 0)}</span>
-          </div>
-        </div>
-
-        {/* Progress and Status */}
-        <div className="space-y-2">
-          {/* Reading Progress */}
-          <div className="w-full bg-white/20 rounded-full h-2">
-            <motion.div
-              className="bg-white h-2 rounded-full"
-              initial={{ width: 0 }}
-              animate={{ width: `${(story.completed_chapters || 0) / (story.total_chapters || 1) * 100}%` }}
-              transition={{ duration: 1, delay: 0.5 }}
-            />
-          </div>
-          
-          {/* Status Badges */}
-          <div className="flex items-center space-x-2">
-            <span className="px-2 py-1 bg-white/20 rounded-full text-xs text-white">
-              {getCompletionStatus(story.total_chapters || 0, story.completed_chapters || 0)}
-            </span>
-            <span className="px-2 py-1 bg-white/20 rounded-full text-xs text-white">
-              {getCommunityBuzz(story.views || 0, likeCount, story.comment_count || 0)}
-            </span>
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-2">
-          <div className="flex items-center space-x-2">
+            <button className="p-2 bg-white/20 rounded-full hover:bg-white/30 transition-colors">
+              <Play className="w-5 h-5 text-white" />
+            </button>
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               onClick={handleLike}
-              className={`p-2 rounded-lg transition-colors ${
+              className={`p-2 rounded-full transition-colors ${
                 isLiked 
-                  ? 'bg-red-500/20 text-red-400' 
-                  : 'bg-white/10 text-white/70 hover:bg-white/20'
+                  ? 'bg-red-500/80 text-white' 
+                  : 'bg-white/20 text-white hover:bg-white/30'
               }`}
             >
               <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
             </motion.button>
-            
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => onComment && onComment(story.id)}
-              className="p-2 rounded-lg bg-white/10 text-white/70 hover:bg-white/20 transition-colors"
-            >
-              <MessageCircle className="w-4 h-4" />
-            </motion.button>
-            
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => onShare && onShare(story)}
-              className="p-2 rounded-lg bg-white/10 text-white/70 hover:bg-white/20 transition-colors"
-            >
-              <Share2 className="w-4 h-4" />
-            </motion.button>
           </div>
-          
-          <Link
-            to={`/story/${story.id}`}
-            className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white font-medium rounded-lg transition-colors flex items-center space-x-2"
-          >
-            <span>Read More</span>
-            <BookOpen className="w-4 h-4" />
-          </Link>
+        </motion.div>
+
+        {/* Genre Badge - Top Left */}
+        <div className="absolute top-2 left-2">
+          <span className="px-2 py-1 bg-black/70 text-white text-xs rounded font-medium">
+            {story.genre || 'Fiction'}
+          </span>
         </div>
+
+        {/* Stats - Top Right */}
+        <div className="absolute top-2 right-2 flex items-center space-x-1">
+          <div className="flex items-center space-x-1 bg-black/70 px-2 py-1 rounded text-xs text-white">
+            <Eye className="w-3 h-3" />
+            <span>{story.views || 0}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom bar: only Title and Read */}
+      <div className="p-2 flex items-center justify-between bg-black/30">
+        <h3 className="text-sm font-semibold text-white line-clamp-1 flex-1 mr-2">
+          {story.story_title}
+        </h3>
+        <Link
+          to={`/story/${story.id}`}
+          className="px-2 py-1 text-xs bg-white/20 hover:bg-white/30 text-white rounded-sm"
+        >
+          Read
+        </Link>
       </div>
 
       {/* Hover Effects */}
       <motion.div
-        className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0"
+        className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent opacity-0"
         animate={{ opacity: isHovered ? 1 : 0 }}
         transition={{ duration: 0.2 }}
       />

@@ -18,6 +18,13 @@ class Story(BaseModel):
     updated_at: Optional[datetime] = None
     total_chapters: Optional[int] = None
     current_chapter: Optional[int] = None
+    # Cover image fields
+    cover_image_url: Optional[str] = None
+    cover_generation_status: Optional[str] = None
+    cover_generated_at: Optional[datetime] = None
+    cover_image_width: Optional[int] = None
+    cover_image_height: Optional[int] = None
+    cover_aspect_ratio: Optional[float] = None
     source_table: str = "Stories"  # Track which table this came from
     
     class Config:
@@ -35,6 +42,13 @@ class Story(BaseModel):
             updated_at=data.get("updated_at"),
             total_chapters=data.get("total_chapters"),
             current_chapter=data.get("current_chapter"),
+            # Cover image fields
+            cover_image_url=data.get("cover_image_url"),
+            cover_generation_status=data.get("cover_generation_status"),
+            cover_generated_at=data.get("cover_generated_at"),
+            cover_image_width=data.get("cover_image_width"),
+            cover_image_height=data.get("cover_image_height"),
+            cover_aspect_ratio=data.get("cover_aspect_ratio"),
             source_table="Stories"
         )
     
@@ -48,6 +62,13 @@ class Story(BaseModel):
             outline=data.get("outline"),
             created_at=data["created_at"],
             updated_at=data.get("updated_at"),
+            # Cover image fields
+            cover_image_url=data.get("cover_image_url"),
+            cover_generation_status=data.get("cover_generation_status"),
+            cover_generated_at=data.get("cover_generated_at"),
+            cover_image_width=data.get("cover_image_width"),
+            cover_image_height=data.get("cover_image_height"),
+            cover_aspect_ratio=data.get("cover_aspect_ratio"),
             source_table="Stories"
         )
 

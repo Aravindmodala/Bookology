@@ -304,9 +304,21 @@ function StoryCard({ story, type = "trending" }) {
     >
       {/* Cover Image */}
       <div className={`relative h-48 bg-gradient-to-br ${getCoverGradient(story.genre)} overflow-hidden`}>
-        <div className="w-full h-full flex items-center justify-center">
-          <BookOpen className="w-16 h-16 text-white/60" />
-        </div>
+        {story.cover_image_url ? (
+          <img 
+            src={story.cover_image_url} 
+            alt={story.story_title || 'Story cover'}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            onError={(e) => {
+              console.error('Failed to load cover image:', story.cover_image_url);
+              e.target.style.display = 'none';
+            }}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <BookOpen className="w-16 h-16 text-white/60" />
+          </div>
+        )}
         
         {/* Glass morphism overlay */}
         <div className="absolute inset-0 bg-white/5 backdrop-blur-sm"></div>

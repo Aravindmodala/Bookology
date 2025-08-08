@@ -273,7 +273,7 @@ const StoryDashboard = ({ onStartNewStory }) => {
     };
 
     return (
-      <div className="bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group overflow-hidden relative">
+      <div className="bg-gray-800 rounded-none border border-gray-700 hover:border-gray-600 transition-all duration-200 hover:scale-[1.02] group overflow-hidden relative">
         {/* Public/Private Toggle - Top Left */}
         <div className="absolute top-3 left-3 z-20">
           <button
@@ -306,14 +306,18 @@ const StoryDashboard = ({ onStartNewStory }) => {
           </div>
         )}
 
-        {/* Cover Image Section */}
-        <div className="relative h-48 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 overflow-hidden">
-          {coverImage ? (
+        {/* Cover Image Section - Netflix style, image dominates card */}
+        <div className="relative h-45 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 overflow-hidden">
+          {(coverImage || story.cover_image_url) ? (
             <img 
-              src={coverImage} 
+              src={coverImage || story.cover_image_url} 
               alt={story.story_title || 'Story cover'}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer"
               onClick={() => setShowImageModal(true)}
+              onError={(e) => {
+                console.error('Failed to load cover image:', coverImage || story.cover_image_url);
+                e.target.style.display = 'none';
+              }}
             />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-blue-600/20 via-purple-600/20 to-pink-600/20">
@@ -365,124 +369,18 @@ const StoryDashboard = ({ onStartNewStory }) => {
           </div>
         </div>
 
-        {/* Content Section */}
-        <div className="p-4">
-          <div className="flex justify-between items-start mb-3">
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-white mb-2 group-hover:text-blue-400 transition-colors line-clamp-1">
-                {story.story_title || 'Untitled Story'}
-              </h3>
-              <p className="text-gray-400 text-sm line-clamp-2">
-                {story.story_outline || 'No description available'}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-4 text-sm text-gray-400">
-            <div className="flex items-center space-x-3">
-              <span className="flex items-center">
-                <FileText className="w-3 h-3 mr-1" />
-                {story.total_chapters || 0}
-              </span>
-              <span className="flex items-center">
-                <Calendar className="w-3 h-3 mr-1" />
-                {formatDate(story.created_at)}
-              </span>
-              {story.is_public && story.published_at && (
-                <span className="flex items-center text-green-400">
-                  <Globe className="w-3 h-3 mr-1" />
-                  {formatDate(story.published_at)}
-                </span>
-              )}
-            </div>
-            <span className="text-blue-400 font-medium text-xs">
-              {story.genre || 'Fiction'}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <button 
-              className="flex items-center text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
-              onClick={() => handleContinueReading(story)}
-            >
-              Continue Reading
-              <ChevronRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
-            </button>
-            
-            {/* More options menu */}
-            <Menu as="div" className="relative">
-              <Menu.Button className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-all">
-                <MoreVertical className="w-4 h-4" />
-              </Menu.Button>
-              <Transition
-                as={React.Fragment}
-                enter="transition ease-out duration-100"
-                enterFrom="transform opacity-0 scale-95"
-                enterTo="transform opacity-100 scale-100"
-                leave="transition ease-in duration-75"
-                leaveFrom="transform opacity-100 scale-100"
-                leaveTo="transform opacity-0 scale-95"
-              >
-                <Menu.Items className="absolute right-0 z-10 mt-2 w-36 origin-top-right rounded-md bg-gray-900 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
-                  <div className="py-1">
-                    <Menu.Item>
-                      {({ active }) => (
-                        <button
-                          onClick={() => handleToggleVisibility(story)}
-                          className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-blue-600 text-white' : 'text-blue-400'}`}
-                        >
-                          {story.is_public ? (
-                            <>
-                              <Lock className="w-4 h-4 mr-2" /> Make Private
-                            </>
-                          ) : (
-                            <>
-                              <Globe className="w-4 h-4 mr-2" /> Make Public
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </Menu.Item>
-                    {!coverImage && (
-                      <Menu.Item>
-                        {({ active }) => (
-                          <button
-                            onClick={handleGenerateCover}
-                            disabled={coverLoading}
-                            className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-blue-600 text-white' : 'text-blue-400'} disabled:opacity-50`}
-                          >
-                            <Palette className="w-4 h-4 mr-2" /> Generate Cover
-                          </button>
-                        )}
-                      </Menu.Item>
-                    )}
-                    {story.is_public && (
-                      <Menu.Item>
-                        {({ active }) => (
-                          <button
-                            onClick={handleCopyLink}
-                            className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-green-600 text-white' : 'text-green-400'}`}
-                          >
-                            <Share2 className="w-4 h-4 mr-2" /> Copy Public Link
-                          </button>
-                        )}
-                      </Menu.Item>
-                    )}
-                    <Menu.Item>
-                      {({ active }) => (
-                        <button
-                          onClick={() => handleDeleteStory(story)}
-                          className={`w-full flex items-center px-4 py-2 text-sm text-left ${active ? 'bg-red-600 text-white' : 'text-red-400'}`}
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" /> Delete
-                        </button>
-                      )}
-                    </Menu.Item>
-                  </div>
-                </Menu.Items>
-              </Transition>
-            </Menu>
-          </div>
+        {/* Bottom bar: only Title and Continue */}
+        <div className="p-2 flex items-center justify-between bg-black/30">
+          <h3 className="text-sm font-semibold text-white line-clamp-1 flex-1 mr-2">
+            {story.story_title || 'Untitled Story'}
+          </h3>
+          <button 
+            className="flex items-center text-xs text-blue-400 hover:text-blue-300 transition-colors font-medium"
+            onClick={() => handleContinueReading(story)}
+          >
+            Read
+            <ChevronRight className="w-3 h-3 ml-1" />
+          </button>
         </div>
 
         {/* Cover Image Modal */}
@@ -623,7 +521,7 @@ const StoryDashboard = ({ onStartNewStory }) => {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
               {filteredStories.map((story) => (
                 <StoryCard key={story.id} story={story} />
               ))}
