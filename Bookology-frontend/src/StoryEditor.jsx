@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import EditorToolbar from './components/EditorToolbar';
 import AIAssistantPanel from './components/AIAssistantPanel';
+import RichTextEditor from './components/RichTextEditor';
 // OPTIMIZATION: Lazy load heavy components
 const StoryTree = React.lazy(() => import('./components/StoryTree'));
 const StoryCover = React.lazy(() => import('./components/StoryCover'));
@@ -1351,8 +1352,19 @@ const StoryEditor = () => {
       const data = await response.json();
       
       if (data.success && data.rewritten_text) {
-        // Replace the selected text with the rewritten version
-        replaceSelectedText(data.rewritten_text);
+        // Prefer TipTap replacement if available
+        if (rte) {
+          try {
+            rte.chain().focus().deleteSelection().insertContent(data.rewritten_text).run();
+            handleContentChange(rte.getHTML());
+          } catch (e) {
+            console.error('TipTap replace failed, falling back:', e);
+            replaceSelectedText(data.rewritten_text);
+          }
+        } else {
+          // Replace the selected text with the rewritten version (legacy)
+          replaceSelectedText(data.rewritten_text);
+        }
         
         // Clear selection
         setSelectedText('');
@@ -1779,23 +1791,25 @@ const StoryEditor = () => {
     }
   };
 
-  // FIXED: Accept AI suggestion with proper error handling
+  // FIXED: Accept AI suggestion with TipTap support
+  const [rte, setRTE] = useState(null);
   const handleAcceptSuggestion = () => {
-    if (aiSuggestion) {
-      const newContent = content + '\n\n' + aiSuggestion;
-      const htmlContent = convertTextToHtml(newContent);
-      setContent(htmlContent);
-      if (editorRef.current) {
-        try {
-          safeUpdateEditorContent(htmlContent, true); // Force update for new content
-        } catch (error) {
-          console.error('Failed to update editor content:', error);
-          // Fallback: direct update
-          editorRef.current.innerHTML = htmlContent;
-        }
+    if (!aiSuggestion) return;
+    if (rte) {
+      try {
+        rte.chain().focus().insertContent(`<p>${aiSuggestion}</p>`).run();
+        const html = rte.getHTML?.() || '';
+        handleImmediateContentChange(html);
+      } catch (e) {
+        console.error('TipTap insert failed, falling back:', e);
+        const htmlContent = convertTextToHtml((content || '') + '\n\n' + aiSuggestion);
+        setContent(htmlContent);
       }
-      setAiSuggestion('');
+    } else {
+      const htmlContent = convertTextToHtml((content || '') + '\n\n' + aiSuggestion);
+      setContent(htmlContent);
     }
+    setAiSuggestion('');
   };
 
   // NEW: Reject AI suggestion
@@ -2489,52 +2503,17 @@ const StoryEditor = () => {
                 </div>
               </div>
 
-              {/* Basic Editor */}
+              {/* TipTap Editor */}
               <div className="relative">
-                <div
-                  ref={editorRef}
-                  contentEditable={!editorBlocked && !storyStructure.chapters[activeChapter]?.isGenerating}
-                  className="w-full min-h-[700px] bg-gray-800 border border-gray-700 rounded-lg p-8 text-white text-lg leading-relaxed focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-all duration-200"
-                  onInput={(e) => handleImmediateContentChange(e.target.innerHTML)}
-                  onSelect={handleTextSelection}
-                  onKeyDown={(e) => {
-                    // Track keyboard-based selection
-                    if (e.shiftKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
-                      isUserSelectingRef.current = true;
-                      console.log('⌨️ Keyboard selection started');
-                      // Reset selection flag after longer delay
-                      clearTimeout(selectionTimeoutRef.current);
-                      selectionTimeoutRef.current = setTimeout(() => {
-                        isUserSelectingRef.current = false;
-                        console.log('⌨️ Keyboard selection timeout ended');
-                      }, 500); // Longer timeout for keyboard selection
-                    }
-                    // Basic keyboard shortcuts
-                    if (e.ctrlKey || e.metaKey) {
-                      switch (e.key) {
-                        case 's':
-                          e.preventDefault();
-                          handleSave();
-                          break;
-                        case 'Enter':
-                          e.preventDefault();
-                          handleGenerateAISuggestion();
-                          break;
-                        case 'f':
-                          if (e.shiftKey) {
-                            e.preventDefault();
-                            setIsFocusMode(!isFocusMode);
-                          }
-                          break;
-                      }
-                    }
-                  }}
-                  aria-label="Story editor content area"
-                  role="textbox"
-                  aria-multiline="true"
-                  spellCheck={true}
+                <RichTextEditor
+                  value={content}
+                  onChange={handleImmediateContentChange}
+                  disabled={editorBlocked || !!storyStructure.chapters[activeChapter]?.isGenerating}
+                  onSelectionChange={(text) => setSelectedText(text)}
+                  onReady={(ed) => setRTE(ed)}
+                  className="w-full min-h-[700px] bg-gray-800 border border-gray-700 rounded-lg p-8 text-white text-lg leading-relaxed focus:outline-none"
                 />
-                
+
                 {/* AI Suggestion Overlay */}
                 {aiSuggestion && (
                   <div className="absolute bottom-4 right-4 bg-blue-900/90 backdrop-blur-sm border border-blue-700 rounded-lg p-4 max-w-md shadow-xl">
