@@ -2661,6 +2661,19 @@ async def generate_next_chapter_endpoint(
         story = story_response.data[0]
         story_title = story.get("story_title", "Untitled Story")
         story_outline = story.get("story_outline", chapter_input.story_outline)
+
+        # Determine planned chapter title from outline_json, fallback to "Chapter N"
+        planned_chapter_title = f"Chapter {chapter_input.chapter_number}"
+        try:
+            outline_json_raw = story.get("outline_json")
+            if outline_json_raw:
+                outline_obj = json.loads(outline_json_raw) if isinstance(outline_json_raw, str) else outline_json_raw
+                chapters_list = outline_obj.get("chapters") or outline_obj.get("Chapters") or []
+                if isinstance(chapters_list, list) and len(chapters_list) >= chapter_input.chapter_number:
+                    planned = chapters_list[chapter_input.chapter_number - 1] or {}
+                    planned_chapter_title = planned.get("title", planned_chapter_title)
+        except Exception as e:
+            logger.warning(f"Failed to parse outline_json for planned chapter title: {e}")
         # Get previous chapters with ALL context (content, summary, DNA)
         max_context_chapter = chapter_input.chapter_number - 1
         previous_chapters_response = supabase.table("Chapters").select(
@@ -2689,37 +2702,34 @@ async def generate_next_chapter_endpoint(
                             user_choice = "{}: {}".format(choice.get('title', ''), choice.get('description', ''))
                             break
         logger.info("User choice context: {}...".format(user_choice[:100]) if user_choice else "No specific user choice")
-        # Use enhanced chapter generator with DNA and summaries
-        # Use original lc_next_chapter_generator system for subsequent chapters
-        from lc_next_chapter_generator import generate_next_chapter_with_dna
+        # Use service with rolling context policy (last-2 compact DNA + hierarchical super-summary)
+        # This delegates to story_service.generate_next_chapter_with_dna which applies rolling context
         
         # Determine if this is game mode based on user choice
         is_game_mode = bool(user_choice)
         logger.info(f"🎮 Game Mode: {is_game_mode}")
         
-        # Extract DNA contexts from previous chapters
-        story_dna_contexts = []
-        previous_chapter_summaries = []
+        # Prepare selected_choice for service (format expected by service)
+        selected_choice = {"title": user_choice or "", "description": ""}
+        if user_choice and ":" in user_choice:
+            parts = user_choice.split(":", 1)
+            selected_choice = {"title": parts[0].strip(), "description": parts[1].strip()}
         
-        for chapter in previous_chapters:
-            if chapter.get("dna"):
-                try:
-                    dna_data = json.loads(chapter["dna"]) if isinstance(chapter["dna"], str) else chapter["dna"]
-                    story_dna_contexts.append(str(dna_data))
-                except:
-                    pass
-            if chapter.get("summary"):
-                previous_chapter_summaries.append(chapter["summary"])
+        # Log endpoint inputs (service will log its own rolling context details)
+        logger.info(
+            "[ENDPOINT] Next-chapter generation inputs: chapter=%s, chapter_title='%s', previous_chapters=%s",
+            chapter_input.chapter_number,
+            (planned_chapter_title or "")[:80],
+            len(previous_chapters)
+        )
         
-        # Generate chapter using original system
-        generation_result = generate_next_chapter_with_dna(
-            story_title=story_title,
-            story_outline=story_outline,
-            story_dna_contexts=story_dna_contexts,
-            chapter_number=chapter_input.chapter_number,
-            user_choice=user_choice,
-            is_game_mode=is_game_mode,
-            previous_chapter_summaries=previous_chapter_summaries  # Pass summaries
+        # Generate chapter using service (applies rolling context policy)
+        generation_result = await story_service.generate_next_chapter_with_dna(
+            story=story,
+            previous_Chapters=previous_chapters,
+            selected_choice=selected_choice,
+            next_chapter_number=chapter_input.chapter_number,
+            user_id=user.id
         )
         logger.info("âœ… ENHANCED Chapter {} generated successfully!".format(chapter_input.chapter_number))
         logger.info("📊 Word count: {} words".format(len(generation_result['chapter_content'].split())))

@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize the LLM for next chapter generation with optimized settings
-llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o-mini', temperature=0.5, max_tokens=8000)
+llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o', temperature=0.7, max_tokens=15000)
 
 # Quality scoring LLM with different temperature for more consistent scoring
 quality_llm = ChatOpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4o-mini', temperature=0.3, max_tokens=1000)
@@ -55,8 +55,18 @@ class ChapterVersion:
 
 # Base chapter generation prompt - enhanced for quality AND variety
 base_chapter_prompt = PromptTemplate(
-    input_variables=["story_title", "story_outline", "story_dna_context", "chapter_number", "user_choice", "generation_focus", "quality_instructions", "previous_openings"],
-    template="""You are a New York Times bestselling author known for creating emotionally gripping, page-turning stories that readers can't put down.
+    input_variables=["story_title", "next_chapter_title", "story_outline", "story_dna_context", "chapter_number", "user_choice", "generation_focus", "quality_instructions", "previous_openings"],
+    template="""🚨 ABSOLUTE REQUIREMENTS:
+Chapter Title: "{story_title}" | Next Chapter: "{next_chapter_title}"
+
+CRITICAL COMPLIANCE:
+✅ Chapter MUST justify title "{story_title}" completely
+✅ IF user choice provided: MUST show consequences of that choice
+✅ Chapter ending MUST set up "{next_chapter_title}" naturally
+✅ User choice + chapter title must align perfectly
+✅ NEVER ignore user choice - make it central to the story
+
+You are a New York Times bestselling author known for creating emotionally gripping, page-turning stories that readers can't put down.
 
 🎭 EXPERT AUTHOR IDENTITY:
 You write with the emotional depth of Suzanne Collins, the world-building of Brandon Sanderson, the character development of George R.R. Martin, and the pacing of Stephen King.
@@ -178,12 +188,18 @@ CHOICE THINKING PROCESS:
 - Create fresh metaphors and descriptions
 
 STORY CONTEXT:
-Title: "{story_title}"
-Outline: {story_outline}
+Chapter Title: "{story_title}"
+Story Outline: {story_outline}
 
 🧬 STORY DNA: {story_dna_context}
 
 USER'S CHOICE: {user_choice}
+
+TITLE ALIGNMENT (CRITICAL):
+- The chapter MUST strongly align with the Chapter Title: "{story_title}"
+- The opening sections should clearly justify or embody this title
+- If the title implies an event, theme, or location, ensure it appears on-page
+- Avoid generic openings that ignore or contradict the title
 
 📌 ABSOLUTE REQUIREMENT - JSON OUTPUT ONLY:
 You MUST return ONLY valid JSON in exactly this format. Any deviation will cause system failure.
@@ -334,6 +350,91 @@ class BestsellerChapterGenerator:
         self.enhancement_chain = enhancement_prompt | enhancement_llm
         
         logger.info("🏆 BestsellerChapterGenerator initialized - Multi-version quality system enabled")
+
+    def _validate_dna_quality(self, dna_contexts: List[str]) -> Dict[str, Any]:
+        """Assess DNA quality for emptiness, fallback markers, and usefulness.
+        Returns a dict: {is_valid, issues, empty_ratio, has_fallback_flags, total_items, length}
+        """
+        issues: List[str] = []
+        if not dna_contexts:
+            return {"is_valid": False, "issues": ["no_contexts"], "empty_ratio": 1.0, "has_fallback_flags": False, "total_items": 0, "length": 0}
+
+        total_items = len(dna_contexts)
+        empties = 0
+        has_fallback_flags = False
+        total_length = 0
+
+        for ctx in dna_contexts:
+            if not ctx or not str(ctx).strip():
+                empties += 1
+                continue
+            s = str(ctx)
+            total_length += len(s)
+            lower = s.lower()
+            if 'fallback' in lower or 'partial_fallback' in lower or 'error' in lower:
+                has_fallback_flags = True
+            # Heuristics for useless JSON fields
+            if '"active_characters": []' in s or '"active_plot_threads": []' in s or '"locations": []' in s:
+                issues.append("empty_arrays")
+
+        empty_ratio = empties / float(total_items) if total_items else 1.0
+        if empty_ratio > 0.6:
+            issues.append("mostly_empty")
+        if total_length < 200:  # extremely small overall context
+            issues.append("too_short")
+        if has_fallback_flags:
+            issues.append("fallback_flagged")
+
+        is_valid = len(issues) == 0
+        return {
+            "is_valid": is_valid,
+            "issues": list(set(issues)),
+            "empty_ratio": empty_ratio,
+            "has_fallback_flags": has_fallback_flags,
+            "total_items": total_items,
+            "length": total_length,
+        }
+
+    def _extract_summaries_from_contexts(self, dna_contexts: List[str]) -> str:
+        """Return the appended summaries block if present in contexts."""
+        header = "=== PREVIOUS CHAPTER SUMMARIES ==="
+        for ctx in dna_contexts or []:
+            if isinstance(ctx, str) and header in ctx:
+                return ctx.strip()
+        return ""
+
+    def _create_fallback_context(self, summaries_block: str) -> str:
+        """Construct a minimal, robust fallback context block prioritizing summaries.
+        The prompt already includes the Story Outline above.
+        """
+        if summaries_block:
+            return (
+                "DNA unavailable or low-quality. Use the Story Outline above and prioritize these previous chapter summaries to continue with perfect continuity.\n\n"
+                + summaries_block
+            )
+        return (
+            "DNA unavailable or low-quality. Use the Story Outline above to continue the story with perfect continuity from the prior state."
+        )
+
+    def _check_title_alignment(self, chapter_title: str, content: str) -> float:
+        """Compute a simple alignment score based on overlap of meaningful title words
+        within the opening segment of the content. Returns 0..1.
+        """
+        try:
+            if not chapter_title or not content:
+                return 0.0
+            import re
+            # Use first ~500 words for alignment check
+            words = re.split(r"\s+", content)
+            opening = " ".join(words[:500]).lower()
+            # Keep only words length >=4 from title
+            title_words = [w.lower() for w in re.findall(r"[A-Za-z']+", chapter_title) if len(w) >= 4]
+            if not title_words:
+                return 0.5  # neutral
+            hits = sum(1 for w in title_words if w in opening)
+            return hits / float(len(title_words))
+        except Exception:
+            return 0.0
     
     def generate_bestseller_chapter(
         self, 
@@ -344,7 +445,8 @@ class BestsellerChapterGenerator:
         user_choice: str = "",
         target_quality: float = 8.5,
         max_enhancement_attempts: int = 0,
-        is_game_mode: bool = False  # NEW: Game mode flag
+        is_game_mode: bool = False,  # NEW: Game mode flag
+        next_chapter_title: str = ""
     ) -> Dict[str, Any]:
         """
         🚀 Generate a chapter - SINGLE VERSION for speed.
@@ -367,8 +469,20 @@ class BestsellerChapterGenerator:
         logger.info(f"🎮 Game Mode: {is_game_mode}")
         
         try:
-            # Format DNA context
+            # Assess DNA quality and format context with fallback when needed
+            dna_quality = self._validate_dna_quality(story_dna_contexts)
+            logger.info(
+                "🧬 DNA quality → valid=%s, issues=%s, empty_ratio=%.2f, items=%s, length=%s",
+                dna_quality.get("is_valid"),
+                ",".join(dna_quality.get("issues", [])) or "none",
+                dna_quality.get("empty_ratio", 0.0),
+                dna_quality.get("total_items", 0),
+                dna_quality.get("length", 0),
+            )
             combined_dna_context = self._format_dna_contexts(story_dna_contexts)
+            if not dna_quality.get("is_valid"):
+                summaries_block = self._extract_summaries_from_contexts(story_dna_contexts)
+                combined_dna_context = self._create_fallback_context(summaries_block)
             choice_context = self._validate_user_choice(user_choice, combined_dna_context, chapter_number) if is_game_mode else ""
             
             # STEP 1: Generate single version - FAST
@@ -379,7 +493,8 @@ class BestsellerChapterGenerator:
                 story_dna_context=combined_dna_context,
                 chapter_number=chapter_number,
                 user_choice=choice_context,
-                is_game_mode=is_game_mode  # Pass game mode flag
+                is_game_mode=is_game_mode,  # Pass game mode flag
+                next_chapter_title=next_chapter_title
             )
             
             if not version:
@@ -387,6 +502,10 @@ class BestsellerChapterGenerator:
             
             logger.info(f"✅ Chapter {chapter_number} generated successfully")
             logger.info(f"📊 Content length: {len(version.content)} characters")
+            # Title alignment metric for transparency
+            title_alignment_score = self._check_title_alignment(story_title, version.content)
+            if title_alignment_score < 0.2:
+                logger.warning(f"⚠️ Title alignment appears weak (score={title_alignment_score:.2f}) for title='{story_title}'")
             
             generation_time = time.time() - start_time
             logger.info(f"⏱️ Generation time: {generation_time:.2f}s")
@@ -400,7 +519,8 @@ class BestsellerChapterGenerator:
                     "generation_time": generation_time,
                     "versions_generated": 1,
                     "enhancement_attempts": 0,
-                    "generation_method": "SINGLE_VERSION_FAST"
+                    "generation_method": "SINGLE_VERSION_FAST",
+                    "title_alignment_score": title_alignment_score,
                 },
                 "success": True,
                 "generation_method": "SINGLE_VERSION_FAST",
@@ -426,7 +546,8 @@ class BestsellerChapterGenerator:
         story_dna_context: str,
         chapter_number: int,
         user_choice: str,
-        is_game_mode: bool
+        is_game_mode: bool,
+        next_chapter_title: str = ""
     ) -> Optional[ChapterVersion]:
         """Generate a single version of the chapter - FAST with CoT reasoning."""
         try:
@@ -440,17 +561,24 @@ class BestsellerChapterGenerator:
             # Get previous chapter openings to avoid repetition
             previous_openings = self._extract_previous_openings(story_dna_context)
             
-            # Prepare context based on game mode
-            if is_game_mode:
-                choice_context = f"\n\nUSER'S PREVIOUS CHOICE: {user_choice}\nThis choice should directly influence the events and outcomes in this chapter."
-                mode_instructions = "GAME MODE: Generate 3 meaningful choices at the end that will significantly impact the story's direction."
+            # Prepare context based on game mode and ensure consequences are enforced
+            if user_choice and str(user_choice).strip():
+                choice_context = f"""
+🎯 USER'S CHOSEN ACTION: {user_choice}
+CRITICAL: Show consequences of this choice. Make it drive the chapter events that justify title "{story_title}".
+""".strip()
             else:
                 choice_context = ""
-                mode_instructions = "NORMAL MODE: Generate 3 meaningful choices at the end that will significantly impact the story's direction. (User can switch to game mode later)"
+            mode_instructions = (
+                "GAME MODE: Generate 3 meaningful choices at the end that will significantly impact the story's direction."
+                if is_game_mode else
+                "NORMAL MODE: Generate 3 meaningful choices at the end that will significantly impact the story's direction. (User can switch to game mode later)"
+            )
             
             # Generate single version with CoT reasoning
-            result = self.base_chain.invoke({
+            llm_vars = {
                 "story_title": story_title,
+                "next_chapter_title": next_chapter_title,
                 "story_outline": story_outline,
                 "story_dna_context": story_dna_context,
                 "chapter_number": chapter_number,
@@ -460,7 +588,31 @@ class BestsellerChapterGenerator:
                 "previous_openings": previous_openings,
                 "mode_instructions": mode_instructions,
                 "is_game_mode": is_game_mode
-            })
+            }
+
+            # Log exactly what we send to the LLM (summary by default; full with LOG_FULL_LLM_INPUT=1)
+            try:
+                if os.getenv("LOG_FULL_LLM_INPUT") == "1":
+                    json_payload = json.dumps(llm_vars, ensure_ascii=False)
+                    preview = json_payload[:4000]
+                    suffix = "..." if len(json_payload) > 4000 else ""
+                    logger.info(f"[LLM-NEXT][FULL] Payload JSON (truncated to 4k): {preview}{suffix}")
+                else:
+                    logger.info(
+                        "[LLM-NEXT] Vars summary: title='%s', next_title='%s', chapter=%s, game_mode=%s, outline_chars=%s, dna_chars=%s, prev_openings=%s, user_choice_chars=%s",
+                        story_title[:80],
+                        (next_chapter_title or "")[:80],
+                        chapter_number,
+                        is_game_mode,
+                        len(story_outline or ""),
+                        len(story_dna_context or ""),
+                        len(previous_openings or []),
+                        len(choice_context or "")
+                    )
+            except Exception as e:
+                logger.warning(f"[LLM-NEXT] Failed to log input vars: {e}")
+
+            result = self.base_chain.invoke(llm_vars)
             
             # After LLM call, log the raw output for debugging
             llm_output = result.content
@@ -585,8 +737,8 @@ class BestsellerChapterGenerator:
             # Common repetitive patterns we've seen in your story
             known_repetitive_patterns = [
                 "The key turned in",
-                "Temüjin stood at",
-                "Temüjin felt the weight of",
+                "He stood at",
+                "She felt the weight of",
                 "The sun hung low",
                 "The air was thick with",
                 "Inside, the atmosphere",
@@ -599,7 +751,7 @@ class BestsellerChapterGenerator:
             logger.warning(f"Could not extract openings from DNA: {e}")
             patterns_to_avoid = [
                 "The key turned in",
-                "Temüjin stood at", 
+                "He stood at", 
                 "The air was thick with",
                 "Inside, the atmosphere"
             ]
@@ -610,12 +762,12 @@ class BestsellerChapterGenerator:
             warning_text += f"{i}. NEVER start with '{pattern}...'\n"
         
         warning_text += "\n✅ REQUIRED: Use these DIFFERENT opening techniques:\n"
-        warning_text += "1. DIALOGUE: \"We must act quickly,\" Batu said urgently.\n"
-        warning_text += "2. ACTION: The hoofbeats thundered across the steppes.\n"
-        warning_text += "3. INTERNAL THOUGHT: Something had changed in Temüjin overnight.\n"
-        warning_text += "4. SENSORY DETAIL: The smoke from burning camps filled the morning air.\n"
+        warning_text += "1. DIALOGUE: \"We must act quickly,\" someone said urgently.\n"
+        warning_text += "2. ACTION: Footsteps thundered down the corridor.\n"
+        warning_text += "3. INTERNAL THOUGHT: Something had changed overnight.\n"
+        warning_text += "4. SENSORY DETAIL: Smoke hung low in the morning air.\n"
         warning_text += "5. MYSTERY: The messenger arrived at dawn with blood on his hands.\n"
-        warning_text += "6. EMOTION: Fear gripped the camp like ice.\n"
+        warning_text += "6. EMOTION: Fear tightened like a knot in the chest.\n"
         
         return warning_text
     
@@ -923,7 +1075,8 @@ class NextChapterGeneratorWithDNA:
         previous_chapter_summaries: List[str] = None,
         is_game_mode: bool = False,  # NEW: Game mode flag
         generation_focus: str = "enhanced_continuity",
-        quality_instructions: str = ""
+        quality_instructions: str = "",
+        next_chapter_title: str = ""
     ) -> Dict[str, Any]:
         """
         Generate chapter using the bestseller system with CoT reasoning.
@@ -945,6 +1098,22 @@ class NextChapterGeneratorWithDNA:
         if formatted_summaries:
             enhanced_dna_contexts.append(formatted_summaries)
         
+        # Log a concise summary of inputs forwarded to the bestseller generator
+        try:
+            logger.info(
+                "[GENERATOR] Inputs summary → chapter_title='%s', next_title='%s', chapter=%s, game_mode=%s, outline_chars=%s, dna_ctx_count=%s, summaries_count=%s, user_choice_chars=%s",
+                story_title[:80],
+                (next_chapter_title or "")[:80],
+                chapter_number,
+                is_game_mode,
+                len(story_outline or ""),
+                len(enhanced_dna_contexts or []),
+                len(previous_chapter_summaries or []),
+                len(user_choice or "")
+            )
+        except Exception as e:
+            logger.warning(f"[GENERATOR] Failed to log input summary: {e}")
+
         # Use the new bestseller generator with game mode support
         result = self.bestseller_generator.generate_bestseller_chapter(
             story_title=story_title,
@@ -953,7 +1122,8 @@ class NextChapterGeneratorWithDNA:
             chapter_number=chapter_number,
             user_choice=user_choice if is_game_mode else "",  # Only include choice in game mode
             target_quality=8.5,
-            is_game_mode=is_game_mode  # Pass game mode flag
+            is_game_mode=is_game_mode,  # Pass game mode flag
+            next_chapter_title=next_chapter_title
         )
         
         # Convert to legacy format for backward compatibility
@@ -983,7 +1153,8 @@ def generate_next_chapter_with_dna(
     chapter_number: int,
     user_choice: str = "",
     is_game_mode: bool = False,  # NEW: Game mode flag
-    previous_chapter_summaries: List[str] = None  # NEW: Chapter summaries
+    previous_chapter_summaries: List[str] = None,  # NEW: Chapter summaries
+    next_chapter_title: str = ""
 ) -> Dict[str, Any]:
     """Generate chapter with backward compatibility and game mode support."""
     return next_chapter_generator_with_dna.generate_next_chapter(
@@ -993,7 +1164,8 @@ def generate_next_chapter_with_dna(
         chapter_number=chapter_number,
         user_choice=user_choice,
         is_game_mode=is_game_mode,
-        previous_chapter_summaries=previous_chapter_summaries
+        previous_chapter_summaries=previous_chapter_summaries,
+        next_chapter_title=next_chapter_title
     )
 
 def generate_bestseller_chapter(
@@ -1003,7 +1175,8 @@ def generate_bestseller_chapter(
     chapter_number: int,
     user_choice: str = "",
     target_quality: float = 8.5,
-    is_game_mode: bool = False  # NEW: Game mode flag
+    is_game_mode: bool = False,  # NEW: Game mode flag
+    next_chapter_title: str = ""
 ) -> Dict[str, Any]:
     """Generate chapter with explicit bestseller quality control and game mode support."""
     return bestseller_generator.generate_bestseller_chapter(
@@ -1013,7 +1186,8 @@ def generate_bestseller_chapter(
         chapter_number=chapter_number,
         user_choice=user_choice,
         target_quality=target_quality,
-        is_game_mode=is_game_mode
+        is_game_mode=is_game_mode,
+        next_chapter_title=next_chapter_title
     )
 
 if __name__ == "__main__":

@@ -1,23 +1,50 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
-import BookologyHome from './bookologyhome';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
+// Removed old BookologyHome landing in favor of new cinematic page
+import LandingPage from './components/LandingPage';
 import Auth from './Auth';
+// Legacy editor kept only for fallback; not used by default
 import StoryEditor from './StoryEditor';
+import MinimalEditor from './MinimalEditor';
 import StoryDashboard from './components/StoryDashboard';
 import StoryCreator from './StoryCreator';
 import ExplorePage from './components/ExplorePage';
+import Page from './components/Page';
+import Layout from './components/Layout';
+import EditorLayout from './components/EditorLayout';
 import { AuthProvider } from './AuthContext';
 import ErrorBoundary from './ErrorBoundary';
 import './styles/enhancedComponents.css';
 
-function HomeWrapper() {
-  const navigate = useNavigate();
-  return <BookologyHome onStart={() => navigate('/create')} />;
-}
-
 function StoriesWrapper() {
   const navigate = useNavigate();
   return <StoryDashboard onStartNewStory={() => navigate('/create')} />;
+}
+
+function AppRoutes() {
+  const location = useLocation();
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <Routes location={location} key={location.pathname}>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Page><LandingPage /></Page>} />
+          <Route path="/stories" element={<Page><StoriesWrapper /></Page>} />
+          <Route path="/create" element={<Page><StoryCreator /></Page>} />
+          <Route path="/explore" element={<Page><ExplorePage /></Page>} />
+          <Route path="/login" element={<Page><Auth /></Page>} />
+        </Route>
+        <Route element={<EditorLayout />}>
+          {/* MinimalEditor becomes the main editor */}
+          <Route path="/editor" element={<Page><MinimalEditor /></Page>} />
+          <Route path="/editor-legacy" element={<Page><StoryEditor /></Page>} />
+          <Route path="/minimal-editor" element={<Page><MinimalEditor /></Page>} />
+          <Route path="/minimal-editor/:storyId" element={<Page><MinimalEditor /></Page>} />
+          <Route path="/story/:storyId" element={<Page><MinimalEditor /></Page>} />
+        </Route>
+      </Routes>
+    </AnimatePresence>
+  );
 }
 
 function App() {
@@ -25,15 +52,7 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <Router>
-          <Routes>
-            <Route path="/" element={<HomeWrapper />} />
-            <Route path="/stories" element={<StoriesWrapper />} />
-            <Route path="/create" element={<StoryCreator />} />
-            <Route path="/editor" element={<StoryEditor />} />
-            <Route path="/explore" element={<ExplorePage />} />
-            <Route path="/story/:storyId" element={<StoryEditor />} />
-            <Route path="/login" element={<Auth />} />
-          </Routes>
+          <AppRoutes />
         </Router>
       </AuthProvider>
     </ErrorBoundary>

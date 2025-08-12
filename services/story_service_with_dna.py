@@ -5,6 +5,7 @@ Fixed integration with the enhanced DNA extractor for perfect continuity.
 
 import uuid
 from typing import List, Optional
+import json
 from datetime import timedelta
 
 from models.story_models import Story, Chapter, StoryWithChapters
@@ -122,6 +123,129 @@ class StoryService:
             "dna_extraction_method": "ENHANCED_LLM"  # Updated feature flag
         }
 
+    # === Rolling context helpers ===
+    def _compact_dna_json(self, dna_json_str: str, max_threads: int = 3, max_anchors: int = 4) -> str:
+        """Create a compact, priority-preserving representation of a chapter DNA JSON.
+
+        Keeps critical continuity details and trims verbose/low-priority fields.
+        """
+        try:
+            data = json.loads(dna_json_str) if isinstance(dna_json_str, str) else dna_json_str
+        except Exception:
+            # Fallback: return a safe slice of raw text
+            return str(dna_json_str)[:2000]
+
+        compact = {}
+
+        # Always keep continuity anchors and ending genetics (no trim)
+        continuity_anchors = data.get("continuity_anchors")
+        if continuity_anchors:
+            compact["continuity_anchors"] = continuity_anchors[:max_anchors]
+
+        ending = data.get("ending_genetics")
+        if ending:
+            compact["ending_genetics"] = {
+                k: ending.get(k, "") for k in [
+                    "final_scene_context",
+                    "last_dialogue",
+                    "last_action",
+                    "immediate_situation"
+                ]
+            }
+
+        # Plot genetics: keep top active_plot_threads with next_action_needed + pending_decisions
+        plot = data.get("plot_genetics", {}) or {}
+        if plot:
+            threads = plot.get("active_plot_threads", []) or []
+            trimmed_threads = []
+            for t in threads[:max_threads]:
+                if isinstance(t, dict):
+                    trimmed_threads.append({
+                        "description": t.get("description", str(t)),
+                        "next_action_needed": t.get("next_action_needed", "")
+                    })
+                else:
+                    trimmed_threads.append({"description": str(t), "next_action_needed": ""})
+            compact["plot_genetics"] = {
+                "active_plot_threads": trimmed_threads,
+                "pending_decisions": (plot.get("pending_decisions", []) or [])[:max_threads],
+            }
+
+            # Include promises/deadlines if present (bounded)
+            if plot.get("promises_made") or plot.get("deadlines_mentioned"):
+                compact["plot_genetics"]["promises_made"] = (plot.get("promises_made", []) or [])[:max_threads]
+                compact["plot_genetics"]["deadlines_mentioned"] = (plot.get("deadlines_mentioned", []) or [])[:max_threads]
+
+        # Character genetics: active characters and their current states
+        char = data.get("character_genetics", {}) or {}
+        if char:
+            active = (char.get("active_characters", []) or [])[:8]
+            states_all = char.get("character_states", {}) or {}
+            states = {name: states_all.get(name, "") for name in active}
+            compact["character_genetics"] = {
+                "active_characters": active,
+                "character_states": states,
+            }
+
+        # Minimal scene snapshot (who/where/when vibes)
+        scene = data.get("scene_genetics", {}) or {}
+        if scene:
+            compact["scene_snapshot"] = {
+                "location_type": scene.get("location_type", ""),
+                "time_context": scene.get("time_context", ""),
+                "atmosphere": scene.get("atmosphere", ""),
+            }
+
+        # Final compaction pass
+        text = json.dumps(compact, ensure_ascii=False)
+        return text[:2000]  # soft cap per DNA chunk
+
+    def _build_generation_context(self, previous_Chapters: List[dict], next_chapter_number: int):
+        """Build rolling context: last-2 compact DNAs + hierarchical super-summary when deep.
+
+        Returns a tuple (recent_dna_list, summaries_payload, summaries_mode)
+        - recent_dna_list: List[str]
+        - summaries_payload: List[str]
+        - summaries_mode: "list" or "super"
+        """
+        if not previous_Chapters:
+            return [], [], "list"
+
+        # Ensure sorted by chapter_number
+        prev_sorted = sorted(previous_Chapters, key=lambda c: c.get("chapter_number", 0))
+
+        # Last-2 DNA (most recent)
+        lower_bound = max(1, next_chapter_number - 2)
+        recent = [c for c in prev_sorted if c.get("chapter_number", 0) >= lower_bound]
+        recent_dna: List[str] = []
+        for ch in recent[-2:]:
+            dna_raw = ch.get("dna")
+            if dna_raw:
+                compacted = self._compact_dna_json(dna_raw)
+                recent_dna.append(f"CHAPTER {ch.get('chapter_number')} DNA:\n{compacted}")
+
+        # If next_chapter_number <= 5, return list of individual summaries
+        if next_chapter_number <= 5:
+            summaries = [c.get("summary", "") for c in prev_sorted if c.get("summary")]
+            return recent_dna, summaries, "list"
+
+        # Otherwise produce one hierarchical super-summary for 1..N-3
+        older = [c for c in prev_sorted if c.get("chapter_number", 0) <= next_chapter_number - 3]
+        older_summaries = [c.get("summary", "") for c in older if c.get("summary")]
+        super_summary = ""
+        try:
+            # Use existing summarizer module (note filename spelling in repo)
+            from hierarchial_summarizer import HierarchicalSummarizer
+            hs = HierarchicalSummarizer()
+            start = 1
+            end = max(1, next_chapter_number - 3)
+            super_summary = hs.generate_super_summary(older_summaries, start, end)
+        except Exception as e:
+            logger.warning(f"[SERVICE] Super-summary generation failed, fallback to concatenation: {e}")
+            super_summary = " ".join(older_summaries)[:1200]
+
+        return recent_dna, [super_summary], "super"
+
     async def generate_next_chapter_with_dna(
         self, 
         story, 
@@ -147,16 +271,8 @@ class StoryService:
         Returns:
             dict with generated chapter content, choices, and enhanced metrics
         """
-        # Build DNA and summary context from DB fields, do not re-extract
-        story_dna_contexts = []
-        summaries = []
-        for i, chapter in enumerate(previous_Chapters, 1):
-            summary = chapter.get('summary', '')
-            dna = chapter.get('dna', '')
-            if dna:
-                story_dna_contexts.append(f"CHAPTER {i} DNA:\n{dna}")
-            if summary:
-                summaries.append(summary)
+        # Build DNA and summary context using rolling policy
+        story_dna_contexts, summaries, summaries_mode = self._build_generation_context(previous_Chapters, next_chapter_number)
         
         # Compose user choice string
         user_choice_made = selected_choice.get('title', '')
@@ -165,8 +281,26 @@ class StoryService:
             user_choice_made = f"{user_choice_made}: {choice_description}"
         
         # Prepare LLM input context
-        story_title = story.get('story_title', 'Untitled Story')
         story_outline = story.get('story_outline', '')
+
+        # Resolve planned chapter title from outline_json; fallback to "Chapter N"
+        planned_chapter_title = f"Chapter {next_chapter_number}"
+        next_planned_chapter_title = ""
+        try:
+            outline_json_raw = story.get('outline_json')
+            if outline_json_raw:
+                outline_obj = json.loads(outline_json_raw) if isinstance(outline_json_raw, str) else outline_json_raw
+                chapters_list = outline_obj.get('chapters') or outline_obj.get('Chapters') or []
+                if isinstance(chapters_list, list) and len(chapters_list) >= next_chapter_number:
+                    planned = chapters_list[next_chapter_number - 1] or {}
+                    planned_chapter_title = planned.get('title', planned_chapter_title)
+                # Next chapter to be set up by this chapter's ending
+                next_idx = next_chapter_number  # 0-based index for the next chapter after this one
+                if isinstance(chapters_list, list) and len(chapters_list) > next_idx:
+                    next_planned = chapters_list[next_idx] or {}
+                    next_planned_chapter_title = next_planned.get('title', "")
+        except Exception as e:
+            logger.warning(f"[SERVICE] Failed to parse outline_json for planned title: {e}")
         
         # Call the generator with saved DNA and summary context
         from lc_next_chapter_generator import NextChapterGeneratorWithDNA
@@ -174,9 +308,36 @@ class StoryService:
         import asyncio
         loop = asyncio.get_event_loop()
         try:
+            # Log exact inputs that will be forwarded into the generator
+            try:
+                logger.info(
+                    "[SERVICE] Forwarding to generator → chapter_title='%s', next_chapter_title='%s', chapter=%s, dna_ctx_count=%s, summaries_mode=%s, summaries_count=%s, user_choice_chars=%s",
+                    planned_chapter_title[:80],
+                    (next_planned_chapter_title or "")[:80],
+                    next_chapter_number,
+                    len(story_dna_contexts or []),
+                    summaries_mode,
+                    len(summaries or []),
+                    len(user_choice_made or "")
+                )
+            except Exception as log_err:
+                logger.warning(f"[SERVICE] Logging inputs failed: {log_err}")
+
             logger.info(f"🚀 Invoking NextChapterGeneratorWithDNA with saved DNA and summary context from DB")
-            result = await loop.run_in_executor(None, generator.generate_next_chapter,
-                story_title, story_outline, story_dna_contexts, next_chapter_number, user_choice_made, summaries)
+            # Ensure keyword args are forwarded (including is_game_mode)
+            result = await loop.run_in_executor(
+                None,
+                lambda: generator.generate_next_chapter(
+                    story_title=planned_chapter_title,
+                    story_outline=story_outline,
+                    story_dna_contexts=story_dna_contexts,
+                    chapter_number=next_chapter_number,
+                    user_choice=user_choice_made,
+                    previous_chapter_summaries=summaries,
+                    is_game_mode=bool(selected_choice),
+                    next_chapter_title=next_planned_chapter_title
+                )
+            )
             logger.info(f"✅ Chapter {next_chapter_number} generated successfully with saved DNA and summary context")
             return result
         except Exception as e:

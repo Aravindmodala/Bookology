@@ -28,7 +28,15 @@ import {
   X,
   Sparkles,
   Gamepad2,
-  RefreshCw
+  RefreshCw,
+  Bold as IconBold,
+  Italic as IconItalic,
+  Underline as IconUnderline,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  List as IconList,
+  ListOrdered as IconListOrdered
 } from 'lucide-react';
 import EditorToolbar from './components/EditorToolbar';
 import AIAssistantPanel from './components/AIAssistantPanel';
@@ -97,6 +105,7 @@ const StoryEditor = () => {
   const [isAIPanelOpen, setIsAIPanelOpen] = useState(true);
   const [activeChapter, setActiveChapter] = useState(null);
   const [showComments, setShowComments] = useState(false);
+  const [rte, setRTE] = useState(null); // TipTap editor instance
   const editorRef = useRef(null);
 
   // Debounced update refs
@@ -1488,6 +1497,29 @@ const StoryEditor = () => {
   const storyTitle = storyData?.story_title || storyData?.title || 'Untitled Story';
   const storyGenre = storyData?.genre || 'Fiction';
 
+  // Progress computation based on current chapter position
+  const totalChapters = useMemo(() => {
+    const declaredTotal = storyData?.chapter_count;
+    const derivedTotal = Object.keys(currentStoryStructure.chapters || {}).length;
+    return declaredTotal || derivedTotal || 1;
+  }, [storyData, currentStoryStructure.chapters]);
+
+  const currentChapterNumber = useMemo(() => {
+    const active = activeChapter && currentStoryStructure.chapters?.[activeChapter];
+    if (active?.chapterNumber) return active.chapterNumber;
+    if (typeof activeChapter === 'string' && activeChapter.startsWith('chapter-')) {
+      const num = parseInt(activeChapter.split('-')[1], 10);
+      return Number.isFinite(num) ? num : 0;
+    }
+    return 0;
+  }, [activeChapter, currentStoryStructure.chapters]);
+
+  const completion = useMemo(() => {
+    if (!totalChapters) return 0;
+    const pct = Math.round(((currentChapterNumber || 0) / totalChapters) * 100);
+    return Math.max(0, Math.min(100, pct));
+  }, [currentChapterNumber, totalChapters]);
+
   const [expandedSections, setExpandedSections] = useState({
     frontMatter: true,
     chapters: true,
@@ -1637,6 +1669,20 @@ const StoryEditor = () => {
   const handleRedo = () => {
     document.execCommand('redo', false, null);
   };
+
+  // TipTap toolbar action helpers
+  const tt = useCallback(() => (rte ? rte.chain().focus() : null), [rte]);
+
+  const onBold = useCallback(() => tt()?.toggleBold().run(), [tt]);
+  const onItalic = useCallback(() => tt()?.toggleItalic().run(), [tt]);
+  const onUnderline = useCallback(() => tt()?.toggleUnderline?.().run(), [tt]);
+  const onBullet = useCallback(() => tt()?.toggleBulletList().run(), [tt]);
+  const onNumber = useCallback(() => tt()?.toggleOrderedList().run(), [tt]);
+  const onAlignLeft = useCallback(() => tt()?.setTextAlign('left').run(), [tt]);
+  const onAlignCenter = useCallback(() => tt()?.setTextAlign('center').run(), [tt]);
+  const onAlignRight = useCallback(() => tt()?.setTextAlign('right').run(), [tt]);
+  const onUndoTT = useCallback(() => tt()?.undo().run(), [tt]);
+  const onRedoTT = useCallback(() => tt()?.redo().run(), [tt]);
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({
@@ -1792,7 +1838,6 @@ const StoryEditor = () => {
   };
 
   // FIXED: Accept AI suggestion with TipTap support
-  const [rte, setRTE] = useState(null);
   const handleAcceptSuggestion = () => {
     if (!aiSuggestion) return;
     if (rte) {
@@ -2107,30 +2152,23 @@ const StoryEditor = () => {
                   storyId={storyData.id} 
                   storyTitle={storyData.story_title || storyData.title || "Untitled Story"} 
                 />
-    </React.Suspense>
+              </React.Suspense>
             )}
-            
-            {/* Outline Option */}
-            <div>
-              <button
-                onClick={() => setActiveChapter('outline')}
-                className={`flex items-center w-full text-left text-sm font-medium px-3 py-2 rounded-lg mb-2 ${activeChapter === 'outline' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:text-white hover:bg-gray-700'}`}
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                Outline
-              </button>
+
+            {/* Progress Card */}
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-gray-300">Progress</span>
+                <span className="text-sm text-gray-400">{completion}%</span>
+              </div>
+              <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500" style={{ width: `${completion}%` }} />
+              </div>
+              <div className="mt-2 text-xs text-gray-500">
+                {(currentChapterNumber || 0)}/{totalChapters} chapters
+              </div>
             </div>
-            
-            {/* Story Tree Option */}
-            <div>
-              <button
-                onClick={() => setActiveChapter('story-tree')}
-                className={`flex items-center w-full text-left text-sm font-medium px-3 py-2 rounded-lg mb-2 ${activeChapter === 'story-tree' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:text-white hover:bg-gray-700'}`}
-              >
-                <TreePine className="w-4 h-4 mr-2" />
-                Story Tree
-              </button>
-            </div>
+
             {/* Chapters */}
             <div>
               <button
@@ -2293,26 +2331,7 @@ const StoryEditor = () => {
               )}
             </div>
 
-            {/* Back Matter */}
-            <div>
-              <button
-                onClick={() => toggleSection('backMatter')}
-                className="flex items-center w-full text-left text-sm font-medium text-gray-300 hover:text-white mb-2"
-              >
-                {expandedSections.backMatter ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
-                Back Matter
-              </button>
-              {expandedSections.backMatter && (
-                <div className="ml-5 space-y-2">
-                  {Object.entries(currentStoryStructure.backMatter).map(([key, section]) => (
-                    <div key={key} className="flex items-center text-sm text-gray-400 hover:text-white cursor-pointer py-1">
-                      <FileText className="w-4 h-4 mr-2" />
-                      {section.title}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* Note: Outline/Story Tree/Back Matter removed for minimal layout */}
           </div>
         )}
       </div>

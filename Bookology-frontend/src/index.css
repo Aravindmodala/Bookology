@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 /* Modern Black & White Design System */
+:root, html, body, #root {
+  margin: 0;
+  padding: 0;
+}
 :root {
   /* Color Palette */
   --color-black: #000000;
@@ -681,3 +685,116 @@ a:hover {
     color: black !important;
   }
 }
+
+/* Light editor overrides (scoped) */
+.editor-light {
+  /* Book paper (recycled/acid-free) */
+  background: #F5EDE2;
+  color: #0a0a0a;
+}
+
+.editor-light p,
+.editor-light div,
+.editor-light span,
+.editor-light li,
+.editor-light h1,
+.editor-light h2,
+.editor-light h3,
+.editor-light h4,
+.editor-light h5,
+.editor-light h6 {
+  color: #0a0a0a !important;
+}
+
+.editor-light a {
+  color: #1d4ed8;
+}
+
+/* Paragraph spacing inside TipTap content */
+.editor-light .ProseMirror p {
+  margin: 0 0 1rem 0;
+}
+.editor-light .ProseMirror div {
+  /* fallback if content uses divs */
+  margin-bottom: 1rem;
+}
+.editor-light .ProseMirror > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Header/hero seam protections */
+.site-header, .site-nav {
+  margin-bottom: 0;
+  border-bottom: 0;
+  box-shadow: none;
+}
+.hero { display: flow-root; }
+.hero > *:first-child { margin-top: 0; }
+
+/* Premium Landing Page (scoped) */
+.font-sora { font-family: 'Sora', system-ui, sans-serif; }
+.text-off { color: #EDEFF6; }
+.text-off-90 { color: rgba(237,239,246,0.9); }
+.text-off-80 { color: rgba(237,239,246,0.8); }
+.text-off-75 { color: rgba(237,239,246,0.75); }
+.text-off-70 { color: rgba(237,239,246,0.7); }
+.text-off-60 { color: rgba(237,239,246,0.6); }
+
+.deep-space { position: relative; min-height: 100vh; background: #0B0E14; }
+.starfield {
+  background-image:
+    radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,0.20), transparent 2px),
+    radial-gradient(1px 1px at 80px 120px, rgba(255,255,255,0.15), transparent 2px),
+    radial-gradient(1px 1px at 160px 220px, rgba(255,255,255,0.12), transparent 2px);
+  background-size: 240px 240px, 260px 260px, 280px 280px;
+  background-attachment: fixed;
+}
+.glow { position:absolute; inset:0; pointer-events:none; }
+.glow-violet { background: radial-gradient(800px circle at 15% 5%, rgba(124,58,237,0.16), transparent 60%); }
+.glow-cyan { background: radial-gradient(900px circle at 85% 15%, rgba(34,211,238,0.12), transparent 65%); }
+
+.card-soft {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  backdrop-filter: blur(8px);
+}
+.btn-violet {
+  background: #7C3AED;
+  color: #0b0e14;
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(124,58,237,0.25);
+  transition: transform .15s ease, box-shadow .2s ease, filter .2s ease;
+}
+.btn-violet:hover { transform: translateY(-1px) scale(1.02); filter: brightness(1.05); }
+.btn-outline {
+  background: transparent;
+  color: #EDEFF6;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-weight: 600;
+  transition: transform .15s ease, border-color .2s ease, background .2s ease;
+}
+.btn-outline:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.35); background: rgba(255,255,255,0.05); }
+.btn-ghost-soft { background: transparent; color: rgba(237,239,246,0.8); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:8px 12px; }
+.nav-soft { color: rgba(237,239,246,0.75); }
+.nav-soft:hover { color: #EDEFF6; }
+.shadow-violet { box-shadow: 0 10px 30px rgba(124,58,237,0.25); }
+.chip { padding:6px 12px; border-radius:9999px; border:1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); font-size: 0.9rem; }
+.chip-active { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.1); color: #fff; }
+
+/* Roman logo styling */
+.logo-roman { font-family: 'Marcellus', Georgia, 'Times New Roman', serif; letter-spacing: 0.18em; }
+/* Roman nav styling (tighter tracking for small text) */
+.nav-roman { font-family: 'Marcellus', Georgia, 'Times New Roman', serif; letter-spacing: 0.06em; font-weight: 500; }
+
+.carousel { display:grid; grid-auto-flow: column; grid-auto-columns: minmax(240px, 1fr); gap:16px; overflow-x:auto; scroll-snap-type: x mandatory; padding-bottom:4px; }
+.carousel > * { scroll-snap-align: start; }
+.story-card { padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); }
+
+.progress-dots::after { content:"\25CF \25CF \25CF"; letter-spacing: .25em; color: rgba(255,255,255,0.25); display:inline-block; }

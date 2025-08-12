@@ -36,7 +36,18 @@ const EditorToolbar = ({
   showWordCount,
   onToggleWordCount,
   gameMode,
-  onToggleGameMode
+  onToggleGameMode,
+  // TipTap command handlers (optional)
+  onBold,
+  onItalic,
+  onUnderline,
+  onBullet,
+  onNumber,
+  onAlignLeft,
+  onAlignCenter,
+  onAlignRight,
+  onUndo,
+  onRedo
 }) => {
   const handleFormat = (command) => {
     document.execCommand(command, false, null);
@@ -48,10 +59,12 @@ const EditorToolbar = ({
   };
 
   const handleUndo = () => {
+    if (onUndo) return onUndo();
     document.execCommand('undo', false, null);
   };
 
   const handleRedo = () => {
+    if (onRedo) return onRedo();
     document.execCommand('redo', false, null);
   };
 
@@ -129,21 +142,21 @@ const EditorToolbar = ({
           {/* Text Formatting */}
           <div className="flex items-center space-x-1 bg-gray-700 rounded-lg p-1">
             <button
-              onClick={() => handleFormat('bold')}
+              onClick={onBold ?? (() => handleFormat('bold'))}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
               title="Bold (Ctrl+B)"
             >
               <Bold className="w-4 h-4" />
             </button>
             <button
-              onClick={() => handleFormat('italic')}
+              onClick={onItalic ?? (() => handleFormat('italic'))}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
               title="Italic (Ctrl+I)"
             >
               <Italic className="w-4 h-4" />
             </button>
             <button
-              onClick={() => handleFormat('underline')}
+              onClick={onUnderline ?? (() => handleFormat('underline'))}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
               title="Underline (Ctrl+U)"
             >
@@ -154,21 +167,21 @@ const EditorToolbar = ({
           {/* Alignment */}
           <div className="flex items-center space-x-1 bg-gray-700 rounded-lg p-1 ml-2">
             <button
-              onClick={() => handleFormat('justifyLeft')}
+              onClick={onAlignLeft ?? (() => handleFormat('justifyLeft'))}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
               title="Align Left"
             >
               <AlignLeft className="w-4 h-4" />
             </button>
             <button
-              onClick={() => handleFormat('justifyCenter')}
+              onClick={onAlignCenter ?? (() => handleFormat('justifyCenter'))}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
               title="Align Center"
             >
               <AlignCenter className="w-4 h-4" />
             </button>
             <button
-              onClick={() => handleFormat('justifyRight')}
+              onClick={onAlignRight ?? (() => handleFormat('justifyRight'))}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
               title="Align Right"
             >
@@ -179,14 +192,14 @@ const EditorToolbar = ({
           {/* Lists */}
           <div className="flex items-center space-x-1 bg-gray-700 rounded-lg p-1 ml-2">
             <button
-              onClick={() => handleFormat('insertUnorderedList')}
+              onClick={onBullet ?? (() => handleFormat('insertUnorderedList'))}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
               title="Bullet List"
             >
               <List className="w-4 h-4" />
             </button>
             <button
-              onClick={() => handleFormat('insertOrderedList')}
+              onClick={onNumber ?? (() => handleFormat('insertOrderedList'))}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-600 rounded transition-colors"
               title="Numbered List"
             >
