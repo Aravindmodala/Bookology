@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-import requests
+import aiohttp
 from typing import Dict, Any
 
 from app.core.logger_config import setup_logger
@@ -145,7 +145,11 @@ async def _persist_and_update(inputs: Dict[str, Any]) -> Dict[str, Any]:
     # Attempt to store permanently
     try:
         logger.info("[COVER][LCEL] downloading temp image for storage upload…")
-        img_bytes = requests.get(primary_image_url, timeout=60).content
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+            async with session.get(primary_image_url) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"download failed status={response.status}")
+                img_bytes = await response.read()
         ext = "png" if primary_image_url.lower().endswith(".png") else "jpg"
         filename = f"{story_id}_{uuid.uuid4().hex}.{ext}"
         supabase.storage.from_("covers").upload(filename, img_bytes, {"content-type": f"image/{ext}"})
