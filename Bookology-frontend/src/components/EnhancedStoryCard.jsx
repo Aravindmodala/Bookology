@@ -78,6 +78,9 @@ const EnhancedStoryCard = ({ story, onLike, onComment, onShare }) => {
             src={story.cover_image_url} 
             alt={story.story_title}
             className="w-full h-full object-cover"
+            loading="lazy"
+            decoding="async"
+            fetchpriority="low"
             onError={(e) => {
               console.error('Failed to load cover image:', story.cover_image_url);
               e.target.style.display = 'none';

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
 
 from app.dependencies.supabase import (
     get_authenticated_user,
@@ -106,11 +106,12 @@ async def get_story_details(story_id: int, user = Depends(get_authenticated_user
 
 @router.get("/story/{story_id}/chapters")
 async def get_story_chapters(
-    story_id: int, response: Response, user = Depends(get_authenticated_user_optional)
+    story_id: int, response: Response, request: Request, user = Depends(get_authenticated_user_optional)
 ):
     """Get all chapters for a specific story."""
     supabase = deps_get_supabase_client()
     try:
+        # Strong no-store for now, but allow client validation via ETag
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -135,18 +136,39 @@ async def get_story_chapters(
         )
 
         chapters = []
+        total_words = 0
+        latest_updated_at = ""
         for chapter in chapters_response.data or []:
+            content = chapter["content"] or ""
+            word_count = len(content.split()) if content else 0
+            total_words += word_count
+            updated_at = chapter.get("updated_at") or chapter.get("created_at") or ""
+            if updated_at and updated_at > latest_updated_at:
+                latest_updated_at = updated_at
             chapters.append(
                 {
                     "id": chapter["id"],
                     "chapter_number": chapter["chapter_number"],
-                    "title": chapter.get("title", f"Chapter {chapter['chapter_number']}"),
-                    "content": chapter["content"],
+                    "title": chapter.get("title", f"Chapter {chapter['chapter_number']}")
+                    or f"Chapter {chapter['chapter_number']}",
+                    "content": content,
                     "summary": chapter.get("summary", ""),
                     "created_at": chapter["created_at"],
-                    "word_count": len(chapter["content"].split()) if chapter["content"] else 0,
+                    "word_count": word_count,
                 }
             )
+
+        # Compute a simple ETag from count, total words and latest update timestamp
+        from hashlib import sha256
+        etag_payload = f"{len(chapters)}:{total_words}:{latest_updated_at}".encode("utf-8")
+        etag_value = sha256(etag_payload).hexdigest()[:32]
+        response.headers["ETag"] = etag_value
+
+        # Handle conditional request
+        if request.headers.get("If-None-Match") == etag_value:
+            # Not modified since client's last fetch
+            response.status_code = status.HTTP_304_NOT_MODIFIED
+            return
 
         return {"chapters": chapters}
 

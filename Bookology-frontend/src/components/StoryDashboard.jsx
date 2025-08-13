@@ -313,6 +313,10 @@ const StoryDashboard = ({ onStartNewStory }) => {
               src={coverImage || story.cover_image_url} 
               alt={story.story_title || 'Story cover'}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer"
+              width="1200" height="675"
+              loading="eager"
+              decoding="async"
+              fetchpriority="high"
               onClick={() => setShowImageModal(true)}
               onError={(e) => {
                 console.error('Failed to load cover image:', coverImage || story.cover_image_url);
@@ -398,6 +402,9 @@ const StoryDashboard = ({ onStartNewStory }) => {
                 src={coverImage} 
                 alt={story.story_title || 'Story cover'}
                 className="w-full h-full object-contain rounded-lg"
+                width="1200" height="675"
+                loading="lazy"
+                decoding="async"
                 onClick={(e) => e.stopPropagation()}
               />
             </div>

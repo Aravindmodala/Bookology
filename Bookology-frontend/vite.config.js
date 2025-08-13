@@ -8,12 +8,14 @@ export default defineConfig({
     sourcemap: false,
     target: 'es2019',
     cssCodeSplit: true,
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 250,
+    brotliSize: true,
     rollupOptions: {
       output: {
         manualChunks: {
           react: ['react', 'react-dom'],
-          vendor: ['@tanstack/react-query']
+          vendor: ['@tanstack/react-query'],
+          editor: ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-placeholder']
         }
       }
     }

@@ -37,17 +37,36 @@ def create_app() -> FastAPI:
         # HSTS (only if not DEBUG)
         if not settings.DEBUG:
             response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
-        # Basic CSP (relaxed in DEBUG)
+        # CSP (configurable)
         if settings.DEBUG:
-            csp = "default-src 'self'; img-src 'self' data: blob: *; media-src 'self' data: blob: *; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' *; font-src 'self' data:; frame-ancestors 'none'"
+            csp = (
+                "default-src 'self'; "
+                "img-src 'self' data: blob: *; "
+                "media-src 'self' data: blob: *; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "connect-src 'self' *; "
+                "font-src 'self' data:; "
+                "frame-ancestors 'none'"
+            )
         else:
-            csp = "default-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'"
+            allowed_connect = ["'self'"] + [o for o in settings.ALLOWED_ORIGINS]
+            csp = (
+                "default-src 'self'; "
+                "img-src 'self' data: blob:; "
+                "media-src 'self' data: blob:; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                f"connect-src {' '.join(allowed_connect)}; "
+                "font-src 'self' data:; "
+                "frame-ancestors 'none'"
+            )
         response.headers.setdefault("Content-Security-Policy", csp)
         return response
 
     app.include_router(api_router)
     return app
-                      
+                       
 app = create_app()
 
 

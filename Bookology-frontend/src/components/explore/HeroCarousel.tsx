@@ -28,6 +28,8 @@ export default function HeroCarousel({ stories }: Props) {
 				alt={current.title}
 				className="absolute inset-0 w-full h-full object-cover"
 				style={{ x: springX, y: springY }}
+				decoding="async"
+				fetchpriority="high"
 				onMouseMove={(e) => {
 					const rect = (e.currentTarget as HTMLImageElement).getBoundingClientRect();
 					x.set((e.clientX - rect.left - rect.width / 2) / 8);

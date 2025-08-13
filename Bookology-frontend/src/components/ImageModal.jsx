@@ -121,6 +121,10 @@ const ImageModal = ({
               maxWidth: displayWidth,
               maxHeight: displayHeight
             }}
+            width={imageWidth || undefined}
+            height={imageHeight || undefined}
+            loading="lazy"
+            decoding="async"
             onLoad={() => {
               // Optional: Add loading state handling here
             }}
