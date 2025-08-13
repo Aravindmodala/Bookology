@@ -6,7 +6,7 @@ export default function Layout() {
   return (
     <>
       <Header variant="default" />
-      <div className="pt-20">
+      <div className="pt-16">
         <Outlet />
       </div>
     </>

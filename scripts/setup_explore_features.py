@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from supabase import create_client, Client
-from config import get_settings
+from app.core.config import get_settings
 
 def setup_explore_features():
     """Set up the database tables and columns for explore features"""

@@ -9,8 +9,8 @@ import asyncio
 import aiohttp
 import time
 from typing import Dict, Any, Optional, Tuple
-from config import settings
-from logger_config import setup_logger
+from app.core.config import settings
+from app.core.logger_config import setup_logger
 
 logger = setup_logger(__name__)
 

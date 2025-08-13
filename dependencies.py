@@ -3,8 +3,8 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer
 from supabase import create_client, Client
-from logger_config import setup_logger
-from config import settings
+from app.core.logger_config import setup_logger
+from app.core.config import settings
 from collections import defaultdict
 import base64
 import json

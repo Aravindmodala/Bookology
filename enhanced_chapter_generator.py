@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"), 
     model_name='gpt-4o-mini', 
-    temperature=0.8, 
+    #temperature=0.8, 
     max_tokens=15000
 )
 

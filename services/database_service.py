@@ -8,9 +8,9 @@ import psycopg
 from typing import List, Optional, Dict, Any, Union
 from contextlib import asynccontextmanager
 import uuid
-from config import settings
-from logger_config import setup_logger
-from models.story_models import Story, Chapter
+from app.core.config import settings
+from app.core.logger_config import setup_logger
+from app.models.story_models import Story, Chapter
 
 logger = setup_logger(__name__)
 

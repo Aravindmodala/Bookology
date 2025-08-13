@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../AuthContext';
@@ -36,6 +36,8 @@ const StoryView = () => {
   const [commentCount, setCommentCount] = useState(0);
   const [newComment, setNewComment] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     fetchStoryDetails();
@@ -73,12 +75,14 @@ const StoryView = () => {
 
   const fetchStoryStats = async () => {
     try {
-      // Fetch likes
-      const likesResponse = await fetch(createApiUrl(API_ENDPOINTS.GET_STORY_LIKES.replace('{story_id}', storyId)), {
-        headers: user ? {
-          'Authorization': `Bearer ${user.access_token}`
-        } : {}
-      });
+      // Fetch likes (only attach auth header if we have a valid session token)
+      const token = session?.access_token;
+      const likesResponse = await fetch(
+        createApiUrl(API_ENDPOINTS.GET_STORY_LIKES.replace('{story_id}', storyId)),
+        {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        }
+      );
       
       if (likesResponse.ok) {
         const likesData = await likesResponse.json();
@@ -173,6 +177,25 @@ const StoryView = () => {
     return date.toLocaleDateString();
   };
 
+  // compute current chapter safely
+  const currentChapter = useMemo(() => chapters[currentChapterIndex] || null, [chapters, currentChapterIndex]);
+
+  // reading progress based on scroll within main content
+  useEffect(() => {
+    const onScroll = () => {
+      const el = document.getElementById('reader-main');
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const total = rect.height - window.innerHeight;
+      const passed = Math.min(Math.max(-rect.top, 0), total > 0 ? total : 0);
+      const pct = total > 0 ? (passed / total) * 100 : 0;
+      setProgress(pct);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [currentChapterIndex]);
+
   const getGenreColor = (genre) => {
     const colors = {
       'Fantasy': 'from-purple-500 to-pink-500',
@@ -191,7 +214,7 @@ const StoryView = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-pink-900">
+      <div className="min-h-screen bg-page">
         <div className="flex items-center justify-center min-h-screen">
           <div className="flex items-center space-x-3">
             <Loader2 className="w-6 h-6 text-white animate-spin" />
@@ -204,7 +227,7 @@ const StoryView = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-pink-900">
+      <div className="min-h-screen bg-page">
         <div className="max-w-4xl mx-auto px-4 py-8">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-white mb-4">Story Not Found</h1>
@@ -222,9 +245,9 @@ const StoryView = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-pink-900">
+    <div className="min-h-screen bg-page">
       {/* Header */}
-      <div className="bg-black/20 backdrop-blur-xl border-b border-white/10">
+      <div className="glass">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -239,7 +262,10 @@ const StoryView = () => {
                 <p className="text-gray-400 text-sm">by {story?.author_name || 'Anonymous Author'}</p>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-3">
+              <div className="hidden md:flex items-center text-white/70 text-sm">
+                <span className="mr-3">Chapter {currentChapterIndex + 1} / {chapters.length || 1}</span>
+              </div>
               <button
                 onClick={handleLike}
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
@@ -300,35 +326,46 @@ const StoryView = () => {
               </div>
             </motion.div>
 
-            {/* Chapters */}
+            {/* Reader: Single chapter view */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="space-y-6"
+              className="glass rounded-xl p-6" id="reader-main"
             >
-              <h3 className="text-xl font-bold text-white mb-4">Chapters</h3>
               {chapters.length === 0 ? (
                 <div className="text-center py-12">
                   <BookOpen className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-400">No chapters available yet.</p>
                 </div>
               ) : (
-                chapters.map((chapter, index) => (
-                  <div
-                    key={chapter.id}
-                    className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6"
-                  >
-                    <h4 className="text-lg font-semibold text-white mb-3">
-                      {chapter.title || `Chapter ${chapter.chapter_number}`}
-                    </h4>
-                    <div className="prose prose-invert max-w-none">
-                      <p className="text-gray-300 leading-relaxed">
-                        {chapter.content}
-                      </p>
-                    </div>
+                <div>
+                  <h4 className="text-xl font-semibold text-white mb-2 tracking-wide">
+                    {(chapters[currentChapterIndex]?.title) || `Chapter ${chapters[currentChapterIndex]?.chapter_number}`}
+                  </h4>
+                  <div className="prose-novel text-white/90">
+                    <p className="drop-cap">{(chapters[currentChapterIndex]?.content || '').split('\n\n')[0]}</p>
+                    {((chapters[currentChapterIndex]?.content || '').split('\n\n').slice(1)).map((para, i) => (
+                      <p key={i}>{para}</p>
+                    ))}
                   </div>
-                ))
+                  <div className="mt-6 flex items-center justify-between">
+                    <button
+                      disabled={currentChapterIndex === 0}
+                      onClick={() => setCurrentChapterIndex(i => Math.max(0, i - 1))}
+                      className="px-3 py-2 rounded-lg border border-white/10 text-white/80 hover:bg-white/10 disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      disabled={currentChapterIndex >= chapters.length - 1}
+                      onClick={() => setCurrentChapterIndex(i => Math.min(chapters.length - 1, i + 1))}
+                      className="px-3 py-2 rounded-lg border border-white/10 text-white/80 hover:bg-white/10 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
               )}
             </motion.div>
           </div>
@@ -340,7 +377,7 @@ const StoryView = () => {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 }}
-              className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6"
+              className="glass rounded-xl p-6"
             >
               <h3 className="text-lg font-semibold text-white mb-4">About the Author</h3>
               <div className="flex items-center space-x-3 mb-4">
@@ -354,12 +391,33 @@ const StoryView = () => {
               </div>
             </motion.div>
 
+            {/* TOC */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.25 }}
+              className="glass rounded-xl p-6"
+            >
+              <h3 className="text-lg font-semibold text-white mb-4">Chapters</h3>
+              <div className="space-y-2">
+                {chapters.map((c, idx) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setCurrentChapterIndex(idx)}
+                    className={`w-full text-left px-3 py-2 rounded-lg ${idx === currentChapterIndex ? 'bg-white/10 text-white' : 'text-white/80 hover:bg-white/5'}`}
+                  >
+                    {c.title || `Chapter ${c.chapter_number}`}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+
             {/* Comments */}
             <motion.div
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.3 }}
-              className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6"
+              className="glass rounded-xl p-6"
             >
               <h3 className="text-lg font-semibold text-white mb-4">Comments ({commentCount})</h3>
               

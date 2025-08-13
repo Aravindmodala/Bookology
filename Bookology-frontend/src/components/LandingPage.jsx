@@ -65,7 +65,7 @@ export default function LandingPage() {
       {/* Header now provided globally via Layout/Header */}
 
       {/* Hero */}
-      <section className="hero container pt-10 pb-16 lg:pt-20 lg:pb-24 grid lg:grid-cols-2 gap-10 items-center">
+      <section className="hero container pt-10 md:pt-12 lg:pt-16 pb-16 lg:pb-24 grid lg:grid-cols-2 gap-10 items-center">
         <div>
           <motion.h1
             initial={{ opacity: 0, y: 18 }}
@@ -149,43 +149,9 @@ export default function LandingPage() {
             </div>
           ))}
         </div>
-
-        <div className="mt-6 rounded-2xl overflow-hidden border border-white/10 bg-white/5">
-          <img
-            src="https://images.unsplash.com/photo-1515879218367-8466d910aaa4?q=80&w=2000&auto=format&fit=crop"
-            alt="Writer Workspace"
-            className="w-full h-[420px] object-cover opacity-95"
-          />
-        </div>
       </section>
 
-      {/* For Readers */}
-      <section id="readers" className="container section">
-        <SectionHeading
-          eyebrow="For Readers"
-          title="Featured stories"
-          subtitle="Swipe through a few worlds we love."
-        />
-        <div className="carousel">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="story-card">
-              <div className="h-40 rounded-xl overflow-hidden mb-3 bg-white/5 border border-white/10">
-                <img
-                  className="w-full h-full object-cover"
-                  src={`https://picsum.photos/seed/bookology-${i}/640/360`}
-                  alt="Cover"
-                />
-              </div>
-              <div className="font-medium text-off">The Arc of Night {i + 1}</div>
-              <div className="text-sm text-off-70 line-clamp-1">A heist beneath a shattered moon.</div>
-              <div className="text-xs text-off-60 mt-1">18 min read</div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-5 text-center">
-          <Link to="/explore" className="btn-outline">Read Featured</Link>
-        </div>
-      </section>
+      {/* Readers section removed as requested */}
 
       {/* Social Proof */}
       <section className="container section">

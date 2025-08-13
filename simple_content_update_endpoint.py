@@ -8,8 +8,8 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
-from logger_config import setup_logger
-from dependencies import get_supabase_client, get_authenticated_user
+from app.core.logger_config import setup_logger
+from app.dependencies.supabase import get_supabase_client, get_authenticated_user
 
 logger = setup_logger(__name__)
 

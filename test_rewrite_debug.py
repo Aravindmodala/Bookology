@@ -90,7 +90,7 @@ def test_rewrite_function_directly():
     print("Testing rewrite function directly")
     
     try:
-        from lc_book_generator_prompt import rewrite_text_with_context
+        from app.flows.generation.outline_generator import rewrite_text_with_context
         
         # Test with sample text
         original_text = "This is a test sentence that needs to be rewritten."

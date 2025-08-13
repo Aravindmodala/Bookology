@@ -6,7 +6,7 @@ import sys
 sys.path.append('.')
 
 from supabase import create_client, Client
-from config import get_settings
+from app.core.config import get_settings
 
 # Get settings
 settings = get_settings()

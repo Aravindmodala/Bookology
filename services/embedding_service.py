@@ -11,13 +11,13 @@ from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 
-from config import settings
-from models.story_models import StoryWithChapters, EmbeddingChunk
+from app.core.config import settings
+from app.models.story_models import StoryWithChapters, EmbeddingChunk
 # Use the DNA-based service instead
 from .story_service_with_dna import StoryService
 story_service = StoryService()
 from .cache_service import cache_service
-from logger_config import setup_logger
+from app.core.logger_config import setup_logger
 
 logger = setup_logger(__name__)
 

@@ -54,7 +54,7 @@ async def generate_and_save_chapter_endpoint(
         logger.info(f' Summary: {"generated" if generation_result.get("summary") else "none"}')
         
         # STEP 2: Save using optimized service (DNA + summaries + vectors)
-        from services.fixed_optimized_chapter_service import fixed_optimized_chapter_service
+        from app.services.fixed_optimized_chapter_service import fixed_optimized_chapter_service
         
         # Prepare chapter data for optimized save
         chapter_dict = {

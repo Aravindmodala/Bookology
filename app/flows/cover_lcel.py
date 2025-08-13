@@ -7,9 +7,9 @@ import uuid
 import requests
 from typing import Dict, Any
 
-from logger_config import setup_logger
-from dependencies import get_supabase_client
-from services.dalle_service import dalle_service
+from app.core.logger_config import setup_logger
+from app.dependencies.supabase import get_supabase_client
+from app.services.dalle_service import dalle_service
 
 # LangChain LCEL
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough

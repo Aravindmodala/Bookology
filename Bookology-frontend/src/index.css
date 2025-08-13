@@ -224,6 +224,10 @@ a:hover {
   }
 }
 
+/* Utility: hide scrollbars while preserving scroll (for editor columns) */
+.no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* Utility Classes */
 @layer utilities {
   .text-gradient {
@@ -722,6 +726,17 @@ a:hover {
   margin-bottom: 0;
 }
 
+/* Spacing-only utility (no background or color changes) */
+.editor-paragraphs .ProseMirror p {
+  margin: 0 0 1rem 0;
+}
+.editor-paragraphs .ProseMirror div {
+  margin-bottom: 1rem;
+}
+.editor-paragraphs .ProseMirror > *:last-child {
+  margin-bottom: 0;
+}
+
 /* Header/hero seam protections */
 .site-header, .site-nav {
   margin-bottom: 0;
@@ -798,3 +813,22 @@ a:hover {
 .story-card { padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); }
 
 .progress-dots::after { content:"\25CF \25CF \25CF"; letter-spacing: .25em; color: rgba(255,255,255,0.25); display:inline-block; }
+
+/* Explore theme utilities */
+.bg-page { background-image: theme('backgroundImage.page-gradient'); background-color: #0C0A1A; background-attachment: fixed; }
+.glass { background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); }
+.card-surface { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
+.card-surface:hover { background: rgba(255,255,255,0.06); }
+.gold-ring { box-shadow: 0 0 0 2px rgba(251,191,36,0.5); }
+
+/* Reader: novel-style typography */
+.prose-novel { max-width: 72ch; line-height: 1.9; font-size: 1.05rem; }
+.prose-novel p { margin: 0 0 1.1em; }
+.prose-novel p + p { text-indent: 1.25em; }
+.prose-novel h2, .prose-novel h3 { margin: 2.2em 0 1.1em; letter-spacing: .02em; }
+.prose-novel .scene-break { text-align: center; opacity: .75; margin: 2em 0; }
+.drop-cap:first-letter { float: left; font-family: "Playfair Display", serif; font-size: 3.2em; line-height: .8; padding-right: .15em; padding-top: .1em; color: #fff; }
+
+/* Sticky reading progress bar */
+.reading-progress { position: fixed; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,0.08); z-index: 60; }
+.reading-progress > span { display: block; height: 100%; background: linear-gradient(90deg, #7C3AED, #22D3EE); width: 0%; transition: width .1s linear; }

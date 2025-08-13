@@ -4,7 +4,7 @@ Script to create the necessary database tables for Bookology.
 """
 
 import psycopg
-from config import settings
+from app.core.config import settings
 
 def create_tables():
     """Create the necessary database tables."""

@@ -15,14 +15,8 @@ Successfully migrated from Leonardo.ai to OpenAI DALL-E 3 for book cover image g
   - Proper error handling and retry logic
   - Rate limiting support with exponential backoff
 
-### 2. Updated Cover Prompt Service (`services/cover_prompt_service.py`)
-- **Added**: `generate_cover_prompt_for_dalle()` method
-- **Features**:
-  - DALL-E 3 optimized prompt generation
-  - Text generation instructions for book titles
-  - Author name positioning
-  - Professional typography specifications
-  - Enhanced quality terms for better results
+### 2. Cover Prompt Service (removed)
+The previous helper `services/cover_prompt_service.py` has been removed. The LCEL flow in `app/flows/cover_lcel.py` now generates prompts directly from the story outline using `ChatOpenAI` and passes them to `services/dalle_service.py`.
 
 ### 3. Updated Main Application (`main.py`)
 - **Replaced**: Leonardo.ai imports with DALL-E 3 imports
@@ -127,7 +121,7 @@ If issues arise, the Leonardo.ai service can be restored by:
 ## Files Modified
 
 - ✅ `services/dalle_service.py` (new)
-- ✅ `services/cover_prompt_service.py` (updated)
+- ❌ `services/cover_prompt_service.py` (removed)
 - ✅ `main.py` (updated)
 - ✅ `config.py` (updated)
 - ✅ `services/leonardo_service.py` (deleted)

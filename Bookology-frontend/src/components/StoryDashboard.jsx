@@ -359,6 +359,13 @@ const StoryDashboard = ({ onStartNewStory }) => {
             >
               <Edit3 className="w-3 h-3" />
             </button>
+            <button
+              className="p-1.5 bg-red-600/70 hover:bg-red-600 rounded-lg text-white transition-all"
+              onClick={(e) => { e.stopPropagation(); handleDeleteStory(story); }}
+              title="Delete Story"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
           </div>
 
           {/* Status badge */}
@@ -440,12 +447,6 @@ const StoryDashboard = ({ onStartNewStory }) => {
                 <p className="text-gray-400">
                   Welcome back! Continue your literary journey or start a new adventure.
                 </p>
-                {/* Debug info for development */}
-                {process.env.NODE_ENV === 'development' && (
-                  <div className="text-xs text-gray-500 mt-2">
-                    Debug: User: {user ? '✅' : '❌'} | Stories: {stories.length} | Loading: {loading ? 'Yes' : 'No'}
-                  </div>
-                )}
               </div>
               
               <button

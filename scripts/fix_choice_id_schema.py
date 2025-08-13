@@ -13,7 +13,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from supabase import create_client
-from config import settings
+from app.core.config import settings
 
 def fix_choice_id_schema():
     """Fix the user_choice_id column type from INTEGER to TEXT."""

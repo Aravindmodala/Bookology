@@ -7,7 +7,7 @@ with the correct schema for the current version of langchain.
 """
 
 import psycopg
-from config import settings
+from app.core.config import settings
 
 def fix_vector_schema():
     """Fix the vector database schema by recreating tables."""

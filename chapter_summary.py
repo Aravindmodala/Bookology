@@ -5,7 +5,7 @@ from openai import OpenAI
 import logging
 
 # Setup logging
-from logger_config import setup_summary_logger
+from app.core.logger_config import setup_summary_logger
 logger = setup_summary_logger()
 
 class EnhancedChapterSummarizer:

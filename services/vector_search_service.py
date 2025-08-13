@@ -9,8 +9,8 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 import torch
 
-from config import settings
-from logger_config import setup_logger
+from app.core.config import settings
+from app.core.logger_config import setup_logger
 
 logger = setup_logger(__name__)
 

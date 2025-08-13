@@ -30,8 +30,8 @@ from langchain_postgres import PGVector
 from supabase import create_client, Client
 
 # Local imports
-from config import settings
-from logger_config import logger
+from app.core.config import settings
+from app.core.logger_config import logger
 from exceptions import (
     ChatbotError, AuthorizationError, StoryNotFoundError,
     VectorStoreError, DatabaseConnectionError

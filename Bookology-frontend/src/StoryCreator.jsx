@@ -32,6 +32,8 @@ const StoryCreator = () => {
   const [saveOutlineLoading, setSaveOutlineLoading] = useState(false);
   const [saveOutlineError, setSaveOutlineError] = useState('');
   const [storyId, setStoryId] = useState(null);
+  const [chaptersDetail, setChaptersDetail] = useState([]);
+  const [openChapterIdx, setOpenChapterIdx] = useState(null);
 
   // Success state
   const [saveSuccess, setSaveSuccess] = useState('');
@@ -140,6 +142,8 @@ const StoryCreator = () => {
     setStoryTone('');
     setChapterTitles([]);
     setStoryTitle('');
+    setChaptersDetail([]);
+    setOpenChapterIdx(null);
 
     // Save idea to recent
     saveIdeaToRecent(idea);
@@ -183,6 +187,7 @@ const StoryCreator = () => {
             chapter.title || chapter.chapter_title || `Chapter ${chapter.chapter_number}`
           );
           setChapterTitles(titles);
+          setChaptersDetail(data.chapters);
         }
         
         // 🔧 STORE CHARACTERS AND LOCATIONS FROM API RESPONSE
@@ -263,14 +268,14 @@ const StoryCreator = () => {
     }
   };
 
-  // Navigate to StoryEditor for Chapter 1 generation
+  // Navigate to MinimalEditor for Chapter 1 generation
   const handleGenerateChapter = () => {
     if (!outlineSaved || !storyId) {
       setError('Please save your outline first.');
       return;
     }
 
-    // Navigate to StoryEditor with the story data
+    // Navigate to MinimalEditor with the story data
     navigate('/editor', { 
       state: { 
         story: {
@@ -499,105 +504,112 @@ const StoryCreator = () => {
                 )}
               </div>
 
-              {/* Generated Result */}
-                {result && (
+              {/* Generated Result - Title full-width + split layout */}
+              {result && (
                 <div className="mt-8 space-y-6">
-                  <hr className="border-white/10" />
-                  
-                  {/* Story Title */}
-                  <div>
-                    <h3 className="text-lg font-semibold text-off mb-4">📖 Story Title</h3>
+                  {/* Full-width Title Bar */}
+                  <div className="card-soft p-5 md:p-6">
                     <input
                       type="text"
                       value={storyTitle}
                       onChange={(e) => setStoryTitle(e.target.value)}
-                      placeholder="Enter your story title..."
-                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-off placeholder-off-60 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                      placeholder="Untitled Story"
+                      className="bg-transparent w-full font-sora text-2xl md:text-3xl lg:text-4xl outline-none text-off text-center"
                       maxLength={100}
                     />
-                      <p className="text-off-60 text-xs mt-2">{storyTitle.length}/100 characters</p>
                   </div>
 
-                  {/* Story Details */}
-                  {(storyGenre || storyTone || chapterTitles.length > 0) && (
-                    <div>
-                        <h3 className="text-lg font-semibold text-off mb-4">📋 Story Details</h3>
-                        <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
-                        {storyGenre && (
-                          <div>
-                              <span className="text-sm font-medium text-off-80">Genre:</span>
-                              <span className="ml-2 px-3 py-1 bg-violet-600 text-white text-sm rounded-full">
-                              {storyGenre}
-                            </span>
+                  {/* Two-column content below title */}
+                  <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-10 lg:gap-16">
+                    {/* Left column */}
+                    <div className="space-y-6">
+                      {/* Outline (collapsible) */}
+                      <details open className="card-soft p-5">
+                      <summary className="flex items-center justify-between cursor-pointer">
+                        <span className="font-medium">Story Outline</span>
+                        <div className="flex items-center gap-2">
+                          <button className="btn-ghost-soft text-xs" onClick={() => navigator.clipboard.writeText(result || '')}>Copy</button>
+                          <button className="btn-ghost-soft text-xs" onClick={() => setError('Refine coming soon')}>Refine</button>
+                          <button className="btn-ghost-soft text-xs" onClick={() => setError('Export coming soon')}>Export</button>
+                        </div>
+                      </summary>
+                      <p className="text-off-80 leading-relaxed mt-4 whitespace-pre-wrap">{result}</p>
+                    </details>
+
+                      {/* Chapters (stacked list) */}
+                      {chapterTitles.length > 0 && (
+                        <div className="card-soft p-5">
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="font-medium">Chapters</h3>
                           </div>
-                        )}
-                        {storyTone && (
-                          <div>
-                              <span className="text-sm font-medium text-off-80">Tone:</span>
-                              <span className="ml-2 px-3 py-1 bg-violet-600 text-white text-sm rounded-full">
-                              {storyTone}
-                            </span>
-                          </div>
-                        )}
-                        {chapterTitles.length > 0 && (
-                          <div>
-                              <span className="text-sm font-medium text-off-80 block mb-2">
-                              Chapter Breakdown ({chapterTitles.length} chapters):
-                            </span>
-                            <div className="space-y-1">
-                              {chapterTitles.map((title, index) => (
-                                  <div key={index} className="flex items-center text-off-80">
-                                    <span className="text-violet-400 font-mono text-sm w-8">{index + 1}.</span>
-                                  <span className="text-sm">{title}</span>
+                          <div className="divide-y divide-white/10">
+                            {chapterTitles.map((t, i) => {
+                              const ch = chaptersDetail?.[i];
+                              const isOpen = openChapterIdx === i;
+                              const canExpand = Array.isArray(ch?.key_events) && ch.key_events.length > 0;
+                              return (
+                                <div key={`${i}-${t}`} className="py-3">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <span className="text-violet-300 font-mono text-xs w-8 text-right">{String(i + 1).padStart(2, '0')}</span>
+                                      <span className="text-off truncate">{t}</span>
+                                    </div>
+                                    {canExpand && (
+                                      <div className="hidden sm:flex gap-1">
+                                        <button
+                                          className="btn-ghost-soft text-xs"
+                                          onClick={() => setOpenChapterIdx(isOpen ? null : i)}
+                                        >
+                                          {isOpen ? 'Hide' : 'Expand'}
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                  {isOpen && canExpand && (
+                                    <ul className="mt-2 pl-11 list-disc list-inside text-off-80 text-sm space-y-1">
+                                      {ch.key_events.map((e, k) => (
+                                        <li key={k}>{e}</li>
+                                      ))}
+                                    </ul>
+                                  )}
                                 </div>
-                              ))}
-                            </div>
+                              );
+                            })}
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Story Outline */}
-                  <div>
-                      <h3 className="text-lg font-semibold text-off mb-4">📝 Story Outline</h3>
-                      <div className="bg-white/5 border border-white/10 rounded-lg p-4">
-                        <p className="text-off-80 leading-relaxed whitespace-pre-wrap">{result}</p>
-                    </div>
-                  </div>
-
-                  {/* Save Outline */}
-                  {!outlineSaved ? (
-                    <div className="text-center">
-                      <button 
-                        onClick={handleSaveOutline} 
-                        disabled={saveOutlineLoading || !user}
-                        className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-200 hover:scale-105 flex items-center space-x-2 mx-auto disabled:cursor-not-allowed disabled:hover:scale-100"
-                      >
-                        <Save className="w-5 h-5" />
-                        <span>{saveOutlineLoading ? 'Saving...' : 'Save Outline & Continue'}</span>
-                      </button>
-                      {!user && (
-                        <p className="text-yellow-400 text-sm mt-2">Please log in to save your outline.</p>
-                      )}
-                      {saveOutlineError && (
-                        <div className="text-red-400 text-sm mt-3 p-3 bg-red-900/20 border border-red-800 rounded-lg">
-                          {saveOutlineError}
                         </div>
                       )}
                     </div>
-                  ) : (
-                    <div className="text-center">
-                      <p className="text-green-400 font-medium mb-4">✅ Outline saved! Ready to start writing your story.</p>
-                      <button 
-                        onClick={handleGenerateChapter} 
-                        className="btn-violet px-6 py-3 text-lg flex items-center space-x-2 mx-auto"
-                      >
-                        <BookOpen className="w-5 h-5" />
-                        <span>Generate Chapter 1</span>
-                      </button>
-                    </div>
-                  )}
+
+                    {/* Right HUD (sticky) */}
+                    <aside className="space-y-4 lg:sticky lg:top-24 h-fit">
+                      <div className="card-soft p-5">
+                        <div className="text-sm text-off-70 mb-1">Story DNA</div>
+                        <div className="flex flex-wrap gap-2">
+                          {storyGenre && <span className="chip">Genre: {storyGenre}</span>}
+                          {storyTone && <span className="chip">Tone: {storyTone}</span>}
+                          <span className="chip">Chapters: {chapterTitles.length}</span>
+                        </div>
+                      </div>
+                      <div className="card-soft p-5">
+                        <div className="text-sm text-off-70 mb-2">Next</div>
+                        <button
+                          className="btn-outline w-full mb-2"
+                          onClick={handleSaveOutline}
+                          disabled={saveOutlineLoading || !user}
+                        >
+                          {saveOutlineLoading ? 'Saving…' : 'Save Outline'}
+                        </button>
+                        <button
+                          className="btn-violet w-full"
+                          onClick={handleGenerateChapter}
+                          disabled={!outlineSaved || !storyId}
+                        >
+                          Generate Chapter 1
+                        </button>
+                        <button className="btn-outline w-full mt-2" onClick={() => setError('Refine coming soon')}>Refine Outline</button>
+                      </div>
+                    </aside>
+                  </div>
                 </div>
               )}
 

@@ -8,7 +8,7 @@ from typing import Any, Optional, Union, Dict
 from datetime import datetime, timedelta
 import hashlib
 from functools import wraps
-from logger_config import setup_logger
+from app.core.logger_config import setup_logger
 
 logger = setup_logger(__name__)
 

@@ -11,7 +11,7 @@ import os
 # Add parent directory to path to import config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import settings
+from app.core.config import settings
 
 def fix_foreign_key_constraints():
     """Fix foreign key constraints to use CASCADE deletion."""

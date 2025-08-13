@@ -1,7 +1,7 @@
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
-from logger_config import setup_logger
-from dependencies import get_authenticated_user, get_supabase_client
+from app.core.logger_config import setup_logger
+from app.dependencies.supabase import get_authenticated_user, get_supabase_client
 from app.flows.cover_lcel import run_cover_flow
 
 

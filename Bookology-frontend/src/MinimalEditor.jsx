@@ -5,17 +5,8 @@ import { useAuth } from './AuthContext';
 import RichTextEditor from './components/RichTextEditor';
 import { createApiUrl, API_ENDPOINTS } from './config';
 import StoryCover from './components/StoryCover';
-import {
-  ArrowLeft,
-  Save,
-  Image as ImageIcon,
-  Sparkles,
-  Edit3,
-  MessageSquare,
-  Lightbulb,
-  Zap,
-  Type
-} from 'lucide-react';
+import { ArrowLeft, Save, Sparkles, Edit3, MessageSquare, Lightbulb, Zap, Type } from 'lucide-react';
+import RightSidebar from './components/RightSidebar';
 
 function DNASection({ title, children }) {
   return (
@@ -487,58 +478,56 @@ export default function MinimalEditor() {
   };
 
   return (
-    <div className="h-screen w-screen bg-[#F5EDE2] text-slate-900 flex flex-col">
-      <div className="h-12 px-4 border-b border-gray-200 flex items-center justify-between">
+    <div className="h-screen w-screen relative overflow-hidden bg-gradient-to-b from-[#0a0f1a] to-[#0b1220] text-[#E6E9F2] flex flex-col">
+      {/* Atmosphere */}
+      <div className="starfield absolute inset-0 opacity-20 pointer-events-none" />
+      <div className="glow glow-violet" />
+      <div className="glow glow-cyan" />
+
+      {/* TopBar */}
+      <div className="sticky top-0 z-40 px-4 h-14 backdrop-blur-xl bg-white/5 border-b border-white/10 flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded" aria-label="Back">
-            <ArrowLeft className="w-4 h-4 text-slate-700" />
+          <button onClick={() => navigate(-1)} className="p-2 hover:bg-white/10 rounded" aria-label="Back">
+            <ArrowLeft className="w-4 h-4 text-off" />
           </button>
-          <div className="text-sm text-slate-600">Chapter {activeChapter?.chapter_number || 1}</div>
+          <div className="text-sm text-[#A9B1C7]">Chapter {activeChapter?.chapter_number || 1}</div>
         </div>
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-sm text-slate-700">
-            <span className="font-semibold text-slate-900">{title}</span>
-            <span className="mx-3 text-slate-400">|</span>
-            <span className="text-slate-600">{wordCount} words</span>
-            <span className="mx-3 text-slate-400">|</span>
-            <span className="text-slate-600">{readMinutes} min read</span>
+          <div className="text-sm text-[#A9B1C7] truncate">
+            <span className="font-semibold text-[#E6E9F2]">{title}</span>
+            <span className="mx-3 text-white/30">|</span>
+            <span>{wordCount} words</span>
+            <span className="mx-3 text-white/30">|</span>
+            <span>{readMinutes} min read</span>
           </div>
         </div>
         <div className="flex items-center space-x-4">
-          {/* Story Picker */}
-          <select
-            value={storyId || ''}
-            onChange={handleStoryChange}
-            className="text-sm border border-gray-300 rounded-lg px-2 py-1 bg-white text-slate-700"
-            title="Switch story"
-          >
-            <option value="" disabled>Select story…</option>
-            {stories.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.story_title || s.title || `Story ${s.id}`}
-              </option>
-            ))}
-          </select>
           <div className="flex items-center space-x-2">
-            <span className="text-xs text-slate-500">Game Mode</span>
+            <span className="text-xs text-[#A9B1C7]">Game Mode</span>
             <button
               onClick={() => setGameMode(v => !v)}
-              className={`w-10 h-6 rounded-full transition-colors ${gameMode ? 'bg-blue-600' : 'bg-gray-300'}`}
               aria-label="Toggle Game Mode"
-            />
+              aria-pressed={gameMode}
+              className={`relative w-12 h-6 rounded-full border border-violet-400/40 transition-all focus:outline-none focus:ring-2 focus:ring-violet-400/40 ${gameMode ? 'bg-violet-500/60' : 'bg-violet-500/20'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${gameMode ? 'translate-x-6' : ''}`} />
+            </button>
           </div>
           <div className="flex items-center space-x-2">
-            <span className="text-xs text-slate-500">Focus</span>
+            <span className="text-xs text-[#A9B1C7]">Focus</span>
             <button
               onClick={() => setFocus(v => !v)}
-              className={`w-10 h-6 rounded-full transition-colors ${focus ? 'bg-blue-600' : 'bg-gray-300'}`}
               aria-label="Toggle Focus Mode"
-            />
+              aria-pressed={focus}
+              className={`relative w-12 h-6 rounded-full border border-violet-400/40 transition-all focus:outline-none focus:ring-2 focus:ring-violet-400/40 ${focus ? 'bg-violet-500/60' : 'bg-violet-500/20'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${focus ? 'translate-x-6' : ''}`} />
+            </button>
           </div>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-sm font-medium text-white flex items-center space-x-2"
+            className="px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-sm font-medium text-white flex items-center space-x-2 shadow-[0_8px_40px_rgba(0,0,0,0.45)]"
           >
             <Save className="w-4 h-4" />
             <span>{saving ? 'Saving…' : 'Save'}</span>
@@ -546,41 +535,43 @@ export default function MinimalEditor() {
         </div>
       </div>
 
-      <div className="h-1 bg-blue-600" />
+      <div className="h-px bg-white/10" />
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-72 border-r border-gray-200 p-4 overflow-y-auto bg-[#F5EDE2]">
+      <div className={`flex-1 flex overflow-hidden transition-all ${focus ? 'bg-black/20' : ''}`}>
+        {/* Left Sidebar */}
+        <div className={`w-[280px] border-r border-white/10 p-4 overflow-y-auto no-scrollbar ${focus ? 'hidden lg:block opacity-0 scale-95 translate-y-1' : ''}`}>
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md shadow-[0_8px_40px_rgba(0,0,0,0.45)]">
           <StoryCover 
             storyId={story?.id || (storyId ? parseInt(storyId) : undefined)} 
             storyTitle={title} 
           />
 
           <div className="mt-6">
-            <div className="text-sm font-semibold mb-2 text-slate-800">Progress</div>
-            <div className="text-xs text-slate-500 mb-2">{progressPct}%</div>
-            <div className="w-full h-2 bg-gray-200 rounded">
-              <div className="h-2 rounded bg-blue-600 transition-all" style={{ width: `${progressPct}%` }} />
+            <div className="text-sm font-semibold mb-2 text-off">Progress</div>
+            <div className="text-xs text-white/60 mb-2">{progressPct}%</div>
+            <div className="w-full h-2 bg-white/10 rounded">
+              <div className="h-2 rounded bg-violet-500 transition-all" style={{ width: `${progressPct}%` }} />
             </div>
-            <div className="mt-2 text-xs text-slate-500">
+            <div className="mt-2 text-xs text-white/60">
               {chaptersCount}/{totalChapters} chapters
             </div>
           </div>
 
-          <DNASection title={<span className="text-slate-600">Story DNA</span>}>
+          <DNASection title={<span className="text-white/70">Story DNA</span>}>
             {Array.isArray(characters) && characters.length > 0 && (
               <div>
-                <div className="text-xs text-slate-500 mb-1">Characters</div>
+                <div className="text-xs text-white/60 mb-1">Characters</div>
                 <div className="flex flex-wrap gap-2">
                   {characters.map((c, i) => (
-                    <span key={i} className="px-2 py-1 bg-gray-100 border border-gray-200 rounded text-xs text-slate-700">{c?.name || c}</span>
+                    <span key={i} className="px-2 py-1 bg-white/10 border border-white/10 rounded text-xs text-off">{c?.name || c}</span>
                   ))}
                 </div>
               </div>
             )}
             {setting && (
               <div className="mt-3">
-                <div className="text-xs text-slate-500 mb-1">Setting</div>
-                <div className="text-sm text-slate-700">{typeof setting === 'string' ? setting : JSON.stringify(setting)}</div>
+                <div className="text-xs text-white/60 mb-1">Setting</div>
+                <div className="text-sm text-off/90">{typeof setting === 'string' ? setting : JSON.stringify(setting)}</div>
               </div>
             )}
           </DNASection>
@@ -588,49 +579,51 @@ export default function MinimalEditor() {
           {/* Planned Chapters from Outline */}
           {sidebarChapters.length > 0 && (
             <div className="mt-8">
-              <div className="text-sm font-semibold mb-2 text-slate-800">Chapters</div>
+              <div className="text-sm font-semibold mb-2 text-off">Chapters</div>
               <div className="space-y-1">
                 {sidebarChapters.map(ch => (
                   <button
                     key={ch.chapter_number}
                     onClick={() => handleLoadChapter(ch.chapter_number)}
-                    className={`w-full text-left px-3 py-2 rounded border ${
+                    className={`w-full text-left px-3 py-2 rounded border backdrop-blur-md ${
                       activeChapter?.chapter_number === ch.chapter_number
-                        ? 'bg-white border-blue-500 text-slate-900'
+                        ? 'bg-white/10 border-violet-400/40 text-off'
                         : ch.exists
-                          ? 'bg-white border-gray-200 text-slate-800 hover:bg-gray-50'
-                          : 'bg-transparent border-gray-200 text-slate-600 hover:bg-white'
+                          ? 'bg-white/5 border-white/10 text-off hover:bg-white/10'
+                          : 'bg-transparent border-white/10 text-white/60 hover:bg-white/5'
                     }`}
                     title={ch.exists ? 'Open chapter' : 'Planned (not yet written)'}
                   >
                     <span className="text-sm">Chapter {ch.chapter_number}: {ch.title}</span>
-                    {!ch.exists && <span className="ml-2 text-xs text-yellow-700">(planned)</span>}
+                    {!ch.exists && <span className="ml-2 text-xs text-yellow-300/90">(planned)</span>}
                   </button>
                 ))}
               </div>
             </div>
           )}
+          </div>
         </div>
 
-        <div className="flex-1 p-10 overflow-y-auto bg-[#F5EDE2]">
+        {/* Editor Center */}
+        <div className="flex-1 p-8 md:p-10 overflow-y-auto no-scrollbar">
           {!activeChapter ? (
-            <div className="border border-gray-200 rounded-xl p-12 text-center bg-white">
-              <div className="mx-auto w-14 h-14 rounded-lg bg-blue-50 flex items-center justify-center text-blue-500 mb-6">
+            <div className="border border-white/10 rounded-xl p-12 text-center bg-white/5 backdrop-blur-md shadow-[0_8px_40px_rgba(0,0,0,0.45)]">
+              <div className="mx-auto w-14 h-14 rounded-lg bg-violet-500/15 flex items-center justify-center text-violet-400 mb-6">
                 <BookIcon />
               </div>
-              <div className="text-2xl font-semibold mb-2 text-slate-900">Ready to Write Chapter 1?</div>
-              <div className="text-slate-600 mb-8">Generate your chapter with AI or start writing from scratch.</div>
+              <div className="text-2xl font-semibold mb-2 text-off">Ready to Write Chapter 1?</div>
+              <div className="text-white/70 mb-8">Generate your chapter with AI or start writing from scratch.</div>
               <div className="flex items-center justify-center gap-4">
                 <button
                   onClick={handleGenerateAI}
-                  className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-sm font-medium text-white flex items-center space-x-2"
+                  className="px-4 py-2 rounded bg-violet-600 hover:bg-violet-500 text-sm font-medium text-white flex items-center space-x-2 shadow-[0_8px_40px_rgba(0,0,0,0.45)]"
                 >
                   <Sparkles className="w-4 h-4" />
                   <span>Generate with AI</span>
                 </button>
                 <button
                   onClick={handleStartScratch}
-                  className="px-4 py-2 rounded bg-gray-100 hover:bg-gray-200 text-sm font-medium text-slate-800 flex items-center space-x-2 border border-gray-200"
+                  className="px-4 py-2 rounded bg-white/5 hover:bg-white/10 text-sm font-medium text-off flex items-center space-x-2 border border-white/10 backdrop-blur-md"
                 >
                   <Edit3 className="w-4 h-4" />
                   <span>Start from Scratch</span>
@@ -638,10 +631,12 @@ export default function MinimalEditor() {
               </div>
             </div>
           ) : (
-            <div className="max-w-5xl mx-auto">
+            <div className={`${focus ? 'max-w-[900px]' : 'max-w-[820px]'} mx-auto`}>
               <div className="mb-6">
-                <h1 className="text-3xl font-semibold text-slate-900">{title}</h1>
-                <div className="mt-1 text-sm text-slate-600">Chapter {activeChapter.chapter_number}</div>
+                <h1 className="text-3xl font-semibold text-off">{title}</h1>
+                <div className="mt-1 text-sm text-white/70">
+                  {activeChapter?.title ? activeChapter.title : `Chapter ${activeChapter?.chapter_number ?? ''}`}
+                </div>
               </div>
               <RichTextEditor
                 value={editorHtml}
@@ -652,36 +647,36 @@ export default function MinimalEditor() {
                   setWordCount(words);
                   setReadMinutes(Math.max(1, Math.ceil(words / 200)));
                 }}
-                className="editor-light w-full min-h-[700px] bg-white border border-gray-200 rounded-lg p-8 text-slate-900 text-lg leading-relaxed focus:outline-none"
+                className={`${gameMode ? 'outline outline-1 outline-violet-400/40' : ''} editor-paragraphs relative w-full min-h-[700px] bg-white/5 border border-white/10 rounded-2xl p-8 text-off text-[18px] leading-8 focus:outline-none backdrop-blur-md before:content-[''] before:absolute before:inset-0 before:rounded-2xl before:pointer-events-none`}
               />
 
               {/* Game Mode: Choices Under Editor */}
               {gameMode && (
                 <div className="mt-8">
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-md">
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-slate-900">Story Choices</h3>
+                      <h3 className="text-lg font-semibold text-off">Story Choices</h3>
                       <div className="flex items-center space-x-2">
-                        <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-                        <span className="text-sm text-purple-700">Game Mode Active</span>
+                        <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse"></div>
+                        <span className="text-sm text-violet-300">Game Mode Active</span>
                       </div>
                     </div>
 
                     {choicesLoading && (
-                      <div className="flex items-center justify-center py-8 text-slate-600">
-                        <div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin mr-3"></div>
+                      <div className="flex items-center justify-center py-8 text-white/70">
+                        <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mr-3"></div>
                         Loading choices...
                       </div>
                     )}
 
                     {choicesError && (
-                      <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-4">
+                      <div className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg p-4 mb-4">
                         {choicesError}
                       </div>
                     )}
 
                     {!choicesLoading && !choicesError && choices.length === 0 && (
-                      <div className="text-center py-8 text-slate-500">
+                      <div className="text-center py-8 text-white/60">
                         No choices available for this chapter yet.
                       </div>
                     )}
@@ -692,22 +687,22 @@ export default function MinimalEditor() {
                           <button
                             key={choice.id}
                             onClick={() => setSelectedChoiceId(choice.id)}
-                            className={`w-full text-left p-4 rounded-lg border transition-colors ${
+                            className={`w-full text-left p-4 rounded-2xl border transition-colors backdrop-blur-md ${
                               selectedChoiceId === choice.id
-                                ? 'border-purple-600 bg-purple-50'
-                                : 'border-gray-200 bg-white hover:bg-gray-50'
+                                ? 'border-violet-500/50 bg-violet-500/10'
+                                : 'border-white/10 bg-white/5 hover:bg-white/10'
                             }`}
                           >
                             <div className="flex items-start space-x-3">
                               <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                                selectedChoiceId === choice.id ? 'bg-purple-600 text-white' : 'bg-gray-100 text-slate-700'
+                                selectedChoiceId === choice.id ? 'bg-violet-600 text-white' : 'bg-white/10 text-off'
                               }`}>
                                 {selectedChoiceId === choice.id ? '✓' : '?' }
                               </div>
                               <div>
-                                <h4 className="text-slate-900 font-medium">{choice.title || 'Choice'}</h4>
+                                <h4 className="text-off font-medium">{choice.title || 'Choice'}</h4>
                                 {choice.description && (
-                                  <p className="text-sm text-slate-600 leading-relaxed">{choice.description}</p>
+                                  <p className="text-sm text-white/70 leading-relaxed">{choice.description}</p>
                                 )}
                               </div>
                             </div>
@@ -715,7 +710,7 @@ export default function MinimalEditor() {
                         ))}
 
                         {selectedChoiceId && (
-                          <div className="mt-4 pt-4 border-t border-gray-200">
+                          <div className="mt-4 pt-4 border-t border-white/10">
                             <ActionButton
                               icon={Zap}
                               label={generateWithChoiceLoading ? 'Continuing…' : 'Continue with Selected Choice'}
@@ -733,26 +728,14 @@ export default function MinimalEditor() {
           )}
         </div>
 
-        <div className="w-80 border-l border-gray-200 p-4 overflow-y-auto bg-[#F5EDE2]">
-          <div className="text-sm font-semibold mb-4 flex items-center gap-2 text-slate-800">
-            <Sparkles className="w-4 h-4 text-blue-500" />
-            AI Assistant
-          </div>
-          <div className="space-y-3">
-            <ActionButton icon={Zap} label="Continue Chapter" onClick={handleGenerateNextChapter} />
-            <ActionButton icon={Type} label="Improve Writing" />
-            <ActionButton icon={MessageSquare} label="Add Dialogue" />
-            <ActionButton icon={Lightbulb} label="Brainstorm Ideas" />
-          </div>
-          <div className="mt-6">
-            <div className="text-sm font-semibold mb-3 text-slate-800">Quick Actions</div>
-            <div className="space-y-2">
-              <ActionButton small icon={Zap} label="Continue Chapter" onClick={handleGenerateNextChapter} />
-              <ActionButton small icon={Type} label="Improve Writing" />
-              <ActionButton small icon={MessageSquare} label="Add Dialogue" />
-            </div>
-          </div>
-        </div>
+        {/* Right Sidebar */}
+        <RightSidebar
+          focusCollapsed={focus}
+          onContinue={handleGenerateNextChapter}
+          onImprove={() => {}}
+          onDialogue={() => {}}
+          onBrainstorm={() => {}}
+        />
       </div>
     </div>
   );

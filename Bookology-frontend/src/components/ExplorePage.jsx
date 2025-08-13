@@ -1,33 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { createApiUrl, API_ENDPOINTS } from '../config';
 import { 
-  Heart, 
-  MessageCircle, 
-  Eye, 
   BookOpen, 
-  User, 
-  Calendar,
-  Filter,
-  Search,
-  TrendingUp,
-  Clock,
-  Star,
-  Share2,
-  Bookmark,
-  MoreHorizontal,
   ChevronLeft,
   ChevronRight,
-  Loader2,
-  Sparkles,
-  Users,
-  Zap,
-  Target
+  Sparkles
 } from 'lucide-react';
 import EnhancedStoryCard from './EnhancedStoryCard';
-import AdvancedFilters from './AdvancedFilters';
 
 const ExplorePage = () => {
   const { user, session } = useAuth();
@@ -37,15 +19,7 @@ const ExplorePage = () => {
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  
-  // Enhanced filter states
-  const [selectedGenre, setSelectedGenre] = useState('');
-  const [selectedMood, setSelectedMood] = useState('all');
-  const [selectedReadingTime, setSelectedReadingTime] = useState('all');
-  const [selectedCompletion, setSelectedCompletion] = useState('all');
-  const [selectedCommunity, setSelectedCommunity] = useState('all');
-  const [sortBy, setSortBy] = useState('published_at');
-  const [searchQuery, setSearchQuery] = useState('');
+
 
   const fetchPublicStories = async () => {
     try {
@@ -53,28 +27,8 @@ const ExplorePage = () => {
       const params = new URLSearchParams({
         page: page.toString(),
         limit: '12',
-        sort_by: sortBy
+        sort_by: 'published_at'
       });
-
-      // Add all filter parameters
-      if (selectedGenre && selectedGenre !== 'All') {
-        params.append('genre', selectedGenre);
-      }
-      if (selectedMood !== 'all') {
-        params.append('mood', selectedMood);
-      }
-      if (selectedReadingTime !== 'all') {
-        params.append('reading_time', selectedReadingTime);
-      }
-      if (selectedCompletion !== 'all') {
-        params.append('completion_status', selectedCompletion);
-      }
-      if (selectedCommunity !== 'all') {
-        params.append('community_filter', selectedCommunity);
-      }
-      if (searchQuery.trim()) {
-        params.append('search', searchQuery.trim());
-      }
 
       const response = await fetch(createApiUrl(`${API_ENDPOINTS.GET_PUBLIC_STORIES}?${params}`));
       
@@ -96,7 +50,7 @@ const ExplorePage = () => {
 
   useEffect(() => {
     fetchPublicStories();
-  }, [page, selectedGenre, selectedMood, selectedReadingTime, selectedCompletion, selectedCommunity, sortBy, searchQuery]);
+  }, [page]);
 
   const handleLike = async (storyId) => {
     if (!user || !session) {
@@ -207,7 +161,7 @@ const ExplorePage = () => {
       <div className="bg-black/20 backdrop-blur-xl border-b border-white/10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-4">
               <button
                 onClick={() => navigate(-1)}
                 className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -219,37 +173,12 @@ const ExplorePage = () => {
                 <p className="text-gray-400 text-sm">Discover amazing stories from our community</p>
               </div>
             </div>
-            {user && (
-              <Link
-                to="/create"
-                className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-medium rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200"
-              >
-                Create Story
-              </Link>
-            )}
+            {/* Create Story button removed as requested */}
           </div>
         </div>
       </div>
 
-      {/* Advanced Filters */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <AdvancedFilters
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          selectedGenre={selectedGenre}
-          setSelectedGenre={setSelectedGenre}
-          selectedMood={selectedMood}
-          setSelectedMood={setSelectedMood}
-          selectedReadingTime={selectedReadingTime}
-          setSelectedReadingTime={setSelectedReadingTime}
-          selectedCompletion={selectedCompletion}
-          setSelectedCompletion={setSelectedCompletion}
-          selectedCommunity={selectedCommunity}
-          setSelectedCommunity={setSelectedCommunity}
-          sortBy={sortBy}
-          setSortBy={setSortBy}
-        />
-      </div>
+      {/* Filters removed as requested */}
 
       {/* Stories Grid */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
@@ -290,7 +219,7 @@ const ExplorePage = () => {
               >
                 <BookOpen className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-white mb-2">No stories found</h3>
-                <p className="text-gray-400">Try adjusting your filters or check back later for new stories.</p>
+                <p className="text-gray-400">Please check back later for new stories.</p>
               </motion.div>
             ) : (
               <motion.div

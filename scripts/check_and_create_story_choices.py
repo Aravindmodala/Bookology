@@ -4,7 +4,7 @@ Script to check if story_choices table exists and create it if needed.
 """
 
 import psycopg
-from config import settings
+from app.core.config import settings
 
 def check_and_create_story_choices_table():
     """Check if story_choices table exists and create it if needed."""

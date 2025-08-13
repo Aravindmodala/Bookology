@@ -6,7 +6,7 @@ with the increased token limit and improved prompt.
 
 import os
 import sys
-from chapter_summary import generate_chapter_summary
+from app.services.chapter_summary import generate_chapter_summary
 
 # Test chapter content (your Chapter 1)
 test_chapter_content = """

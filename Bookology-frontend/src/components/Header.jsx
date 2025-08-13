@@ -34,7 +34,7 @@ function AvatarMenu() {
         <div className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0E131B] shadow-2xl overflow-hidden z-50">
           <div className="px-4 py-3 text-sm text-off-70 border-b border-white/10">{user?.email}</div>
           <button className="w-full text-left px-4 py-2 text-off hover:bg-white/5" onClick={() => navigate('/stories')}>Dashboard</button>
-          <button className="w-full text-left px-4 py-2 text-off hover:bg-white/5" onClick={() => navigate('/create')}>Create New</button>
+          {/* Create New removed as requested */}
           <button className="w-full text-left px-4 py-2 text-off hover:bg-white/5" onClick={() => navigate('/editor')}>Open Editor</button>
           <div className="border-t border-white/10" />
           <button className="w-full text-left px-4 py-2 text-red-300 hover:bg-red-500/10" onClick={signOut}>Sign out</button>
@@ -53,7 +53,6 @@ export default function Header({ variant = 'default' }) {
         <div className="container py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Brand />
-            <Link to="/stories" className="btn-ghost-soft text-sm">Back to Stories</Link>
           </div>
           <div className="flex items-center gap-3">
             {/* Save status placeholder could be inserted here */}
@@ -72,6 +71,7 @@ export default function Header({ variant = 'default' }) {
           <a href="#how" className="nav-soft">How it works</a>
           <a href="#pricing" className="nav-soft">Pricing</a>
           <Link to="/explore" className="nav-soft">Explore</Link>
+          <Link to="/stories" className="nav-soft">Library</Link>
         </nav>
         <div className="flex items-center gap-3 relative">
           {!session ? (
