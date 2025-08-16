@@ -1,13 +1,16 @@
 """
 Vector Search Service for Enhanced Context Retrieval
+
+Production note:
+- Heavy ML dependencies (torch, sentence-transformers) are optional and gated by
+  settings.ENABLE_LOCAL_VECTOR_SEARCH. When disabled, the service becomes a no-op
+  that returns empty results instead of importing heavy packages.
 """
 
 import asyncio
 from typing import List, Dict, Any, Optional
 from sqlalchemy import create_engine, text
-from sentence_transformers import SentenceTransformer
-import numpy as np
-import torch
+from typing import TYPE_CHECKING, List
 
 from app.core.config import settings
 from app.core.logger_config import setup_logger
@@ -18,11 +21,29 @@ class VectorSearchService:
     """Enhanced vector search for finding relevant context from previous chapters"""
     
     def __init__(self):
-        self.model = SentenceTransformer('all-mpnet-base-v2')
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model.to(self.device)
-        self.engine = create_engine(settings.DATABASE_URL)
-        logger.info(f"VectorSearchService initialized on device: {self.device}")
+        self.enabled = bool(settings.ENABLE_LOCAL_VECTOR_SEARCH)
+        self.model = None
+        self.device = 'cpu'
+        self.engine = None
+        if self.enabled:
+            try:
+                # Import heavy deps lazily only when enabled
+                from sentence_transformers import SentenceTransformer  # type: ignore
+                import torch  # type: ignore
+                self.device = 'cuda' if getattr(torch, 'cuda', None) and torch.cuda.is_available() else 'cpu'
+                self.model = SentenceTransformer('all-mpnet-base-v2')
+                self.model.to(self.device)
+                if getattr(settings, 'DATABASE_URL', None):
+                    self.engine = create_engine(settings.DATABASE_URL)
+                logger.info(f"VectorSearchService initialized (enabled) on device: {self.device}")
+            except Exception as e:
+                # If initialization fails, disable gracefully
+                self.enabled = False
+                self.model = None
+                self.engine = None
+                logger.warning(f"VectorSearchService disabled (initialization failed): {e}")
+        else:
+            logger.info("VectorSearchService disabled (ENABLE_LOCAL_VECTOR_SEARCH is false)")
 
     async def find_relevant_context(
         self,
@@ -32,6 +53,8 @@ class VectorSearchService:
         similarity_threshold: float = 0.7
     ) -> List[Dict[str, Any]]:
         """Find most relevant chapter chunks for a given query"""
+        if not self.enabled or not self.model or not self.engine:
+            return []
         try:
             query_embedding = self.model.encode(query_text, convert_to_tensor=False)
             results = await asyncio.to_thread(
@@ -44,12 +67,14 @@ class VectorSearchService:
 
     def _search_vectors(
         self,
-        query_embedding: np.ndarray,
+        query_embedding: List[float],
         story_id: int,
         top_k: int,
         similarity_threshold: float
     ) -> List[Dict[str, Any]]:
         """Synchronous vector search"""
+        if not self.enabled or not self.engine:
+            return []
         try:
             with self.engine.connect() as conn:
                 if not isinstance(story_id, int) or story_id <= 0:
@@ -78,7 +103,7 @@ class VectorSearchService:
                         """
                     ),
                     {
-                        "query_embedding": query_embedding.tolist(),
+                        "query_embedding": query_embedding,
                         "story_id": story_id,
                         "threshold": similarity_threshold,
                         "top_k": top_k,

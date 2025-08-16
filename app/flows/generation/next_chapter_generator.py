@@ -217,7 +217,7 @@ CRITICAL VALIDATION RULES:
 
 EXACT REQUIRED FORMAT:
 {{
-  "chapter": "Full immersive chapter content (2500+ words) - write the complete chapter as one continuous string with proper paragraph breaks using \\n\\n between paragraphs",
+  "chapter": "Full immersive chapter content (1500 - 2000 words) - write the complete chapter as one continuous string with proper paragraph breaks using \\n\\n between paragraphs",
   "choices": [
     {{
       "id": "choice_1",
@@ -345,10 +345,10 @@ class BestsellerChapterGenerator:
         self.quality_llm = quality_llm
         self.enhancement_llm = enhancement_llm
         
-        # Build chains
-        self.base_chain = base_chapter_prompt | llm
-        self.quality_chain = quality_scoring_prompt | quality_llm
-        self.enhancement_chain = enhancement_prompt | enhancement_llm
+        # Build chains (enforce strict JSON outputs from the model)
+        self.base_chain = base_chapter_prompt | llm.bind(response_format={"type": "json_object"})
+        self.quality_chain = quality_scoring_prompt | quality_llm.bind(response_format={"type": "json_object"})
+        self.enhancement_chain = enhancement_prompt | enhancement_llm.bind(response_format={"type": "json_object"})
         
         logger.info("🏆 BestsellerChapterGenerator initialized - Multi-version quality system enabled")
 

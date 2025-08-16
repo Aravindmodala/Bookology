@@ -1,8 +1,10 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from app.core.logger_config import setup_logger
 from app.dependencies.supabase import get_authenticated_user, get_supabase_client
 from app.flows.cover_lcel import run_cover_flow
+from datetime import datetime
+from app.services.cover_upload_service import CoverUploadService
 
 
 
@@ -110,3 +112,84 @@ async def generate_cover_sync_debug(
     logger.info("[COVER][LCEL][DEBUG] starting synchronous flow story_id=%s", story_id)
     result = await run_cover_flow(story_id, str(user.id), user.email or "")
     return {"ok": True, "result": result}
+
+
+@router.post("/story/{story_id}/upload_cover")
+async def upload_cover_endpoint(
+    story_id: int,
+    file: UploadFile = File(...),
+    user = Depends(get_authenticated_user)
+):
+    """Upload a user-provided cover image, validate/resize, store to Supabase, and persist URL."""
+    try:
+        supabase = get_supabase_client()
+
+        # Verify ownership
+        story_resp = supabase.table("Stories").select("id").eq("id", story_id).eq("user_id", user.id).execute()
+        if not story_resp.data:
+            raise HTTPException(status_code=404, detail="Story not found or access denied")
+
+        # Read and validate file
+        blob = await file.read()
+        processed = CoverUploadService.validate_and_process(blob, file.content_type or "")
+
+        # Upload to storage
+        public_url = CoverUploadService.upload_to_supabase(supabase, str(user.id), story_id, processed)
+
+        # Persist to DB
+        supabase.table("Stories").update({
+            "cover_image_url": public_url,
+            "cover_generation_status": "uploaded",
+            "cover_generated_at": datetime.utcnow().isoformat(),
+            "cover_image_width": processed.width,
+            "cover_image_height": processed.height,
+            "cover_aspect_ratio": processed.aspect_ratio,
+        }).eq("id", story_id).eq("user_id", user.id).execute()
+
+        logger.info("[COVER][UPLOAD] Success story_id=%s url=%s", story_id, public_url)
+        return {
+            "success": True,
+            "story_id": story_id,
+            "cover_image_url": public_url,
+            "image_width": processed.width,
+            "image_height": processed.height,
+            "aspect_ratio": processed.aspect_ratio,
+            "status": "uploaded",
+        }
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error("[COVER][UPLOAD] Failed story_id=%s err=%s", story_id, e)
+        raise HTTPException(status_code=500, detail="Failed to upload cover")
+
+
+@router.delete("/story/{story_id}/cover")
+async def remove_cover_endpoint(
+    story_id: int,
+    user = Depends(get_authenticated_user)
+):
+    """Remove/reset the cover image metadata for a story (does not delete storage file)."""
+    try:
+        supabase = get_supabase_client()
+        # Verify ownership
+        story_resp = supabase.table("Stories").select("id").eq("id", story_id).eq("user_id", user.id).execute()
+        if not story_resp.data:
+            raise HTTPException(status_code=404, detail="Story not found or access denied")
+
+        supabase.table("Stories").update({
+            "cover_image_url": None,
+            "cover_generation_status": "none",
+            "cover_generated_at": None,
+            "cover_image_width": None,
+            "cover_image_height": None,
+            "cover_aspect_ratio": None,
+        }).eq("id", story_id).eq("user_id", user.id).execute()
+
+        return {"success": True, "story_id": story_id, "status": "none"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[COVER][REMOVE] Failed story_id=%s err=%s", story_id, e)
+        raise HTTPException(status_code=500, detail="Failed to remove cover")

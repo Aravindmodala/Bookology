@@ -19,7 +19,7 @@ import './styles/enhancedComponents.css';
 
 function StoriesWrapper() {
   const navigate = useNavigate();
-  return <StoryDashboard onStartNewStory={() => navigate('/create')} />;
+  return <StoryDashboard onStartNewStory={() => navigate('/create', { state: { flow: 'ai' } })} />;
 }
 
 function AppRoutes() {

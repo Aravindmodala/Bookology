@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, BookOpen, Wand2, Save, RefreshCw, Sparkles, PenTool, Brain, Zap } from 'lucide-react';
+import { Sparkles, Wand2, PenTool, BookOpen, RefreshCw } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { createApiUrl, API_ENDPOINTS } from './config';
 
@@ -8,13 +8,10 @@ const StoryCreator = () => {
   const navigate = useNavigate();
   const { user, session } = useAuth();
 
-  // Flow state
-  const [selectedFlow, setSelectedFlow] = useState(null); // 'ai' or 'manual'
-  const [recentIdeas, setRecentIdeas] = useState([]);
-
-  // Form state
+  // Flow and form state
+  const [selectedFlow, setSelectedFlow] = useState(null); // 'ai' | 'manual'
   const [idea, setIdea] = useState('');
-  // Removed format toggle (book/movie) per request
+  const [recentIdeas, setRecentIdeas] = useState([]);
 
   // Generation state
   const [loading, setLoading] = useState(false);
@@ -31,106 +28,48 @@ const StoryCreator = () => {
   const [outlineSaved, setOutlineSaved] = useState(false);
   const [saveOutlineLoading, setSaveOutlineLoading] = useState(false);
   const [saveOutlineError, setSaveOutlineError] = useState('');
-  const [storyId, setStoryId] = useState(null);
-  const [chaptersDetail, setChaptersDetail] = useState([]);
-  const [openChapterIdx, setOpenChapterIdx] = useState(null);
-
-  // Success state
   const [saveSuccess, setSaveSuccess] = useState('');
+  const [storyId, setStoryId] = useState(null);
 
-  // Load recent ideas from localStorage
+  // Load recent ideas
   useEffect(() => {
     const saved = localStorage.getItem('bookology_recent_ideas');
-    if (saved) {
-      try {
-        setRecentIdeas(JSON.parse(saved));
-      } catch (e) {
-        console.warn('Failed to load recent ideas:', e);
-      }
+    if (!saved) return;
+    try {
+      setRecentIdeas(JSON.parse(saved));
+    } catch (_) {
+      // ignore
     }
   }, []);
 
-  // Save idea to recent ideas
+  // Auto-select flow when navigated with state
+  useEffect(() => {
+    try {
+      const navState = window.history?.state?.usr || null;
+      const presetFlow = navState?.flow;
+      if (presetFlow === 'ai' || presetFlow === 'manual') setSelectedFlow(presetFlow);
+    } catch (_) {
+      // ignore
+    }
+  }, []);
+
+  const handleFlowSelection = (flow) => {
+    setSelectedFlow(flow);
+    localStorage.setItem('bookology_preferred_flow', flow);
+  };
+
   const saveIdeaToRecent = (newIdea) => {
     if (!newIdea.trim()) return;
-    
-    const updated = [newIdea, ...recentIdeas.filter(idea => idea !== newIdea)].slice(0, 5);
+    const updated = [newIdea, ...recentIdeas.filter((i) => i !== newIdea)].slice(0, 5);
     setRecentIdeas(updated);
     localStorage.setItem('bookology_recent_ideas', JSON.stringify(updated));
   };
 
-  // Handle flow selection
-  const handleFlowSelection = (flow) => {
-    setSelectedFlow(flow);
-    // Cache user preference
-    localStorage.setItem('bookology_preferred_flow', flow);
-  };
-
-  // Handle manual story creation
-  const handleManualStory = async () => {
-    if (!user || !session?.access_token) {
-      setError('Please log in to create a story.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      // Create a new blank story
-      const response = await fetch(createApiUrl(API_ENDPOINTS.SAVE_OUTLINE), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({
-          summary: 'This is a blank story ready for your creativity. You can start writing from scratch and let your imagination flow freely. The story will develop as you write, and you can always use AI assistance later if you need help with suggestions or continuing your story.',
-          genre: 'Fiction',
-          tone: 'Creative',
-          title: 'Untitled Story',
-          chapters: [{ chapter_number: 1, title: 'Chapter 1' }],
-          reflection: '',
-          is_optimized: false,
-          main_characters: [],
-          key_locations: []
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        // Navigate directly to editor with blank story
-        navigate('/editor', { 
-          state: { 
-            story: {
-              id: data.story_id,
-              story_title: 'Untitled Story',
-              story_outline: 'A blank story ready for your creativity.',
-              genre: 'Fiction',
-              tone: 'Creative',
-              chapter_titles: ['Chapter 1'],
-              created_at: new Date().toISOString()
-            },
-            mode: 'manual_creation' // Tell editor this is a manual story
-          } 
-        });
-      } else {
-        throw new Error(data.detail || 'Failed to create story');
-      }
-    } catch (err) {
-      setError('Failed to create story: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Generate story outline
   const handleGenerate = async () => {
     if (!idea.trim()) {
       setError('Please enter a story idea');
       return;
     }
-
     setLoading(true);
     setError('');
     setResult('');
@@ -138,96 +77,45 @@ const StoryCreator = () => {
     setOutlineSaved(false);
     setSaveOutlineError('');
     setStoryId(null);
-    setStoryGenre('');
-    setStoryTone('');
-    setChapterTitles([]);
-    setStoryTitle('');
-    setChaptersDetail([]);
-    setOpenChapterIdx(null);
 
-    // Save idea to recent
     saveIdeaToRecent(idea);
 
-    const token = session?.access_token;
-
+    const headers = { 'Content-Type': 'application/json' };
+    if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
     try {
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
       const response = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_OUTLINE), {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          idea,
-          story_id: storyId
-        })
+        body: JSON.stringify({ idea })
       });
-
       const data = await response.json();
+      if (!response.ok) throw new Error(data?.detail || 'Failed to generate');
 
-      if (data.summary) {
-        setResult(data.summary);
-        
-        // Set story title
-        if (data.title) {
-          setStoryTitle(data.title);
-        } else {
-          const firstSentence = data.summary.split('.')[0];
-          const autoTitle = firstSentence.length > 50 ? firstSentence.substring(0, 50) + '...' : firstSentence;
-          setStoryTitle(autoTitle);
-        }
-        
-        // Set additional details
-        if (data.genre) setStoryGenre(data.genre);
-        if (data.tone) setStoryTone(data.tone);
-        if (data.chapters && Array.isArray(data.chapters)) {
-          const titles = data.chapters.map(chapter => 
-            chapter.title || chapter.chapter_title || `Chapter ${chapter.chapter_number}`
-          );
-          setChapterTitles(titles);
-          setChaptersDetail(data.chapters);
-        }
-        
-        // 🔧 STORE CHARACTERS AND LOCATIONS FROM API RESPONSE
-        if (data.main_characters && Array.isArray(data.main_characters)) {
-          setMainCharacters(data.main_characters);
-          console.log('📊 Frontend received main_characters:', data.main_characters);
-        }
-        if (data.key_locations && Array.isArray(data.key_locations)) {
-          setKeyLocations(data.key_locations);
-          console.log('📊 Frontend received key_locations:', data.key_locations);
-        }
-
-        setSaveSuccess('✨ Outline generated! Edit the title below and save to continue.');
-      } else if (data.error) {
-        setError(data.error);
-      } else {
-        setError('Unexpected response from backend');
-      }
-    } catch (err) {
-      setError('Error connecting to backend');
+      setResult(data.summary || '');
+      setStoryTitle(data.title || (data.summary ? (data.summary.split('.')[0] || 'Untitled Story') : 'Untitled Story'));
+      if (data.genre) setStoryGenre(data.genre);
+      if (data.tone) setStoryTone(data.tone);
+      if (Array.isArray(data.chapters)) setChapterTitles(data.chapters.map((c, i) => c.title || c.chapter_title || `Chapter ${i + 1}`));
+      if (Array.isArray(data.main_characters)) setMainCharacters(data.main_characters);
+      if (Array.isArray(data.key_locations)) setKeyLocations(data.key_locations);
+    } catch (e) {
+      setError(e.message || 'Error connecting to backend');
     } finally {
       setLoading(false);
     }
   };
 
-  // Save outline
   const handleSaveOutline = async () => {
     if (!user || !session?.access_token) {
       setSaveOutlineError('Please log in to save your outline.');
       return;
     }
-
     if (!result) {
       setSaveOutlineError('No outline data to save.');
       return;
     }
-
     setSaveOutlineLoading(true);
     setSaveOutlineError('');
-
     try {
       const response = await fetch(createApiUrl(API_ENDPOINTS.SAVE_OUTLINE), {
         method: 'POST',
@@ -240,44 +128,32 @@ const StoryCreator = () => {
           genre: storyGenre,
           tone: storyTone,
           title: storyTitle,
-          chapters: chapterTitles.map((title, index) => ({
-            chapter_number: index + 1,
-            title: title
-          })),
+          chapters: chapterTitles.map((t, i) => ({ chapter_number: i + 1, title: t })),
           reflection: '',
           is_optimized: true,
-          main_characters: mainCharacters, // 🔧 ADD MISSING FIELD
-          key_locations: keyLocations      // 🔧 ADD MISSING FIELD
+          main_characters: mainCharacters,
+          key_locations: keyLocations
         })
       });
-
       const data = await response.json();
-
-      if (data.success) {
-        setOutlineSaved(true);
-        setStoryId(data.story_id);
-        setSaveSuccess(`✅ Outline saved as "${data.story_title}"! Now you can generate Chapter 1.`);
-        setSaveOutlineError('');
-      } else {
-        setSaveOutlineError(data.detail || 'Failed to save outline');
-      }
-    } catch (err) {
-      setSaveOutlineError('Error connecting to server');
+      if (!response.ok || !data.success) throw new Error(data?.detail || 'Failed to save outline');
+      setOutlineSaved(true);
+      setStoryId(data.story_id);
+      setSaveSuccess(`Outline saved as "${data.story_title}"`);
+    } catch (e) {
+      setSaveOutlineError(e.message || 'Failed to save outline');
     } finally {
       setSaveOutlineLoading(false);
     }
   };
 
-  // Navigate to MinimalEditor for Chapter 1 generation
   const handleGenerateChapter = () => {
     if (!outlineSaved || !storyId) {
       setError('Please save your outline first.');
       return;
     }
-
-    // Navigate to MinimalEditor with the story data
-    navigate('/editor', { 
-      state: { 
+    navigate('/editor', {
+      state: {
         story: {
           id: storyId,
           story_title: storyTitle,
@@ -287,12 +163,59 @@ const StoryCreator = () => {
           chapter_titles: chapterTitles,
           created_at: new Date().toISOString()
         },
-        mode: 'generate_chapter_1' // Tell editor to start with Chapter 1 generation
-      } 
+        mode: 'generate_chapter_1'
+      }
     });
   };
 
-  // Reset form
+  const handleManualStory = async () => {
+    if (!user || !session?.access_token) {
+      setError('Please log in to create a story.');
+      return;
+    }
+    try {
+      setLoading(true);
+      const response = await fetch(createApiUrl(API_ENDPOINTS.SAVE_OUTLINE), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          summary: 'Blank story',
+          genre: 'Fiction',
+          tone: 'Creative',
+          title: 'Untitled Story',
+          chapters: [{ chapter_number: 1, title: 'Chapter 1' }],
+          reflection: '',
+          is_optimized: false,
+          main_characters: [],
+          key_locations: []
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data?.detail || 'Failed to create story');
+      navigate('/editor', {
+        state: {
+          story: {
+            id: data.story_id,
+            story_title: 'Untitled Story',
+            story_outline: 'A blank story ready for your creativity.',
+            genre: 'Fiction',
+            tone: 'Creative',
+            chapter_titles: ['Chapter 1'],
+            created_at: new Date().toISOString()
+          },
+          mode: 'manual_creation'
+        }
+      });
+    } catch (e) {
+      setError(e.message || 'Failed to create story');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleReset = () => {
     setSelectedFlow(null);
     setIdea('');
@@ -308,358 +231,19 @@ const StoryCreator = () => {
     setSaveOutlineError('');
   };
 
-  // Flow Selection Screen
+  // If no flow yet, default to AI to avoid extra click per memory 6217740
   if (!selectedFlow) {
-    return (
-      <div className="deep-space starfield text-off">
-        {/* Glow layers */}
-        <div className="glow glow-violet" />
-        <div className="glow glow-cyan" />
-
-        <div className="container py-8">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => navigate('/stories')}
-                className="flex items-center space-x-2 text-off-70 hover:text-off transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span>Back to Stories</span>
-              </button>
-            </div>
-            
-            <button
-              onClick={handleReset}
-              className="flex items-center space-x-2 text-off-70 hover:text-off transition-colors"
-            >
-              <RefreshCw className="w-5 h-5" />
-              <span>Start Over</span>
-            </button>
-          </div>
-
-          <div className="max-w-6xl mx-auto">
-            {/* Main Content */}
-            <div className="text-center mb-12">
-              <h1 className="font-sora text-4xl font-bold text-off mb-4">Create Your Story</h1>
-              <p className="text-off-70 text-xl">Choose how you'd like to start your creative journey</p>
-            </div>
-
-            {/* Flow Selection Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-              {/* Start with AI */}
-              <div 
-                onClick={() => handleFlowSelection('ai')}
-                className="card-soft rounded-2xl p-8 transition-all duration-300 hover:scale-105 hover:border-white/20 cursor-pointer group"
-              >
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-violet-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
-                    <Sparkles className="w-8 h-8 text-white" />
-                  </div>
-                  <h3 className="text-2xl font-bold text-off mb-4">Start with AI</h3>
-                  <p className="text-off-70 mb-6">
-                    Let AI help you develop your story idea into a compelling outline. Perfect for when you have a concept but need help expanding it.
-                  </p>
-                  <div className="flex items-center justify-center space-x-2 text-violet-300">
-                    <Brain className="w-4 h-4" />
-                    <span className="text-sm">AI-powered story development</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Write My Own Story */}
-              <div 
-                onClick={() => handleFlowSelection('manual')}
-                className="card-soft rounded-2xl p-8 transition-all duration-300 hover:scale-105 hover:border-white/20 cursor-pointer group"
-              >
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-cyan-500 to-teal-500 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
-                    <PenTool className="w-8 h-8 text-white" />
-                  </div>
-                  <h3 className="text-2xl font-bold text-off mb-4">Write My Own Story</h3>
-                  <p className="text-off-70 mb-6">
-                    Start with a blank canvas and let your creativity flow. You have full control over every aspect of your story.
-                  </p>
-                  <div className="flex items-center justify-center space-x-2 text-cyan-300">
-                    <Zap className="w-4 h-4" />
-                    <span className="text-sm">Complete creative freedom</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Ideas */}
-            {recentIdeas.length > 0 && (
-              <div className="mt-12 max-w-4xl mx-auto">
-                <h3 className="text-lg font-semibold text-off mb-4">Recent Ideas</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {recentIdeas.map((idea, index) => (
-                    <div 
-                      key={index}
-                      onClick={() => {
-                        setIdea(idea);
-                        handleFlowSelection('ai');
-                      }}
-                      className="card-soft rounded-lg p-4 transition-all cursor-pointer hover:scale-105 hover:border-white/20"
-                    >
-                      <p className="text-off-70 text-sm line-clamp-2">{idea}</p>
-                      <p className="text-off-60 text-xs mt-2">Click to use with AI</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+    setSelectedFlow('ai');
+    return null;
   }
 
-  // AI Flow - Original form
-  if (selectedFlow === 'ai') {
-    return (
-      <div className="deep-space starfield text-off">
-        {/* Glow layers */}
-        <div className="glow glow-violet" />
-        <div className="glow glow-cyan" />
-
-        <div className="container py-8">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => setSelectedFlow(null)}
-                className="flex items-center space-x-2 text-off-70 hover:text-off transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span>Back to Options</span>
-              </button>
-            </div>
-            
-            <button
-              onClick={handleReset}
-              className="flex items-center space-x-2 text-off-70 hover:text-off transition-colors"
-            >
-              <RefreshCw className="w-5 h-5" />
-              <span>Start Over</span>
-            </button>
-          </div>
-
-          <div className="max-w-4xl mx-auto">
-            {/* Main Content */}
-            <div className="card-soft p-8">
-              <div className="text-center mb-8">
-                <div className="flex items-center justify-center space-x-3 mb-4">
-                  <Sparkles className="w-8 h-8 text-violet-400" />
-                  <h1 className="font-sora text-4xl font-bold text-off">Start with AI</h1>
-                </div>
-                <p className="text-off-70">Transform your ideas into compelling narratives with AI assistance</p>
-              </div>
-
-              {/* Step 1: Story Idea */}
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-off-80 mb-3">
-                    What's your story idea?
-                  </label>
-                  <textarea
-                    placeholder="Enter your story idea... Be as detailed or brief as you like!"
-                    value={idea}
-                    onChange={e => setIdea(e.target.value)}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-off placeholder-off-60 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 resize-none"
-                    rows={4}
-                  />
-                </div>
-
-                {/* Format selector removed */}
-
-                {/* Generate Button */}
-                <div className="text-center pt-6">
-                  <button
-                    onClick={handleGenerate}
-                    disabled={loading || !idea.trim()}
-                    className="btn-violet disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed disabled:hover:scale-100 px-8 py-4 text-lg flex items-center space-x-3 mx-auto"
-                  >
-                    {loading ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Generating...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Wand2 className="w-5 h-5" />
-                        <span>Generate Story Outline</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Error Display */}
-                {error && (
-                  <div className="text-center">
-                    <div className="text-red-400 text-sm p-3 bg-red-900/20 border border-red-800 rounded-lg">
-                      {error}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Generated Result - Title full-width + split layout */}
-              {result && (
-                <div className="mt-8 space-y-6">
-                  {/* Full-width Title Bar */}
-                  <div className="card-soft p-5 md:p-6">
-                    <input
-                      type="text"
-                      value={storyTitle}
-                      onChange={(e) => setStoryTitle(e.target.value)}
-                      placeholder="Untitled Story"
-                      className="bg-transparent w-full font-sora text-2xl md:text-3xl lg:text-4xl outline-none text-off text-center"
-                      maxLength={100}
-                    />
-                  </div>
-
-                  {/* Two-column content below title */}
-                  <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-10 lg:gap-16">
-                    {/* Left column */}
-                    <div className="space-y-6">
-                      {/* Outline (collapsible) */}
-                      <details open className="card-soft p-5">
-                      <summary className="flex items-center justify-between cursor-pointer">
-                        <span className="font-medium">Story Outline</span>
-                        <div className="flex items-center gap-2">
-                          <button className="btn-ghost-soft text-xs" onClick={() => navigator.clipboard.writeText(result || '')}>Copy</button>
-                          <button className="btn-ghost-soft text-xs" onClick={() => setError('Refine coming soon')}>Refine</button>
-                          <button className="btn-ghost-soft text-xs" onClick={() => setError('Export coming soon')}>Export</button>
-                        </div>
-                      </summary>
-                      <p className="text-off-80 leading-relaxed mt-4 whitespace-pre-wrap">{result}</p>
-                    </details>
-
-                      {/* Chapters (stacked list) */}
-                      {chapterTitles.length > 0 && (
-                        <div className="card-soft p-5">
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="font-medium">Chapters</h3>
-                          </div>
-                          <div className="divide-y divide-white/10">
-                            {chapterTitles.map((t, i) => {
-                              const ch = chaptersDetail?.[i];
-                              const isOpen = openChapterIdx === i;
-                              const canExpand = Array.isArray(ch?.key_events) && ch.key_events.length > 0;
-                              return (
-                                <div key={`${i}-${t}`} className="py-3">
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                      <span className="text-violet-300 font-mono text-xs w-8 text-right">{String(i + 1).padStart(2, '0')}</span>
-                                      <span className="text-off truncate">{t}</span>
-                                    </div>
-                                    {canExpand && (
-                                      <div className="hidden sm:flex gap-1">
-                                        <button
-                                          className="btn-ghost-soft text-xs"
-                                          onClick={() => setOpenChapterIdx(isOpen ? null : i)}
-                                        >
-                                          {isOpen ? 'Hide' : 'Expand'}
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                  {isOpen && canExpand && (
-                                    <ul className="mt-2 pl-11 list-disc list-inside text-off-80 text-sm space-y-1">
-                                      {ch.key_events.map((e, k) => (
-                                        <li key={k}>{e}</li>
-                                      ))}
-                                    </ul>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Right HUD (sticky) */}
-                    <aside className="space-y-4 lg:sticky lg:top-24 h-fit">
-                      <div className="card-soft p-5">
-                        <div className="text-sm text-off-70 mb-1">Story DNA</div>
-                        <div className="flex flex-wrap gap-2">
-                          {storyGenre && <span className="chip">Genre: {storyGenre}</span>}
-                          {storyTone && <span className="chip">Tone: {storyTone}</span>}
-                          <span className="chip">Chapters: {chapterTitles.length}</span>
-                        </div>
-                      </div>
-                      <div className="card-soft p-5">
-                        <div className="text-sm text-off-70 mb-2">Next</div>
-                        <button
-                          className="btn-outline w-full mb-2"
-                          onClick={handleSaveOutline}
-                          disabled={saveOutlineLoading || !user}
-                        >
-                          {saveOutlineLoading ? 'Saving…' : 'Save Outline'}
-                        </button>
-                        <button
-                          className="btn-violet w-full"
-                          onClick={handleGenerateChapter}
-                          disabled={!outlineSaved || !storyId}
-                        >
-                          Generate Chapter 1
-                        </button>
-                        <button className="btn-outline w-full mt-2" onClick={() => setError('Refine coming soon')}>Refine Outline</button>
-                      </div>
-                    </aside>
-                  </div>
-                </div>
-              )}
-
-              {/* Success Messages */}
-              {saveSuccess && (
-                <div className="mt-6 text-center">
-                  <div className="text-green-400 text-sm p-3 bg-green-900/20 border border-green-800 rounded-lg">
-                    {saveSuccess}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Manual Flow - Direct to editor
   if (selectedFlow === 'manual') {
     return (
       <div className="deep-space starfield text-off">
-        {/* Glow layers */}
         <div className="glow glow-violet" />
         <div className="glow glow-cyan" />
-
         <div className="container py-8">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => setSelectedFlow(null)}
-                className="flex items-center space-x-2 text-off-70 hover:text-off transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span>Back to Options</span>
-              </button>
-            </div>
-            
-            <button
-              onClick={handleReset}
-              className="flex items-center space-x-2 text-off-70 hover:text-off transition-colors"
-            >
-              <RefreshCw className="w-5 h-5" />
-              <span>Start Over</span>
-            </button>
-          </div>
-
           <div className="max-w-4xl mx-auto">
-            {/* Main Content */}
             <div className="card-soft p-8">
               <div className="text-center mb-8">
                 <div className="flex items-center justify-center space-x-3 mb-4">
@@ -668,41 +252,20 @@ const StoryCreator = () => {
                 </div>
                 <p className="text-off-70">Start with a blank canvas and let your creativity flow</p>
               </div>
-
               <div className="text-center space-y-6">
                 <div className="card-soft p-8">
                   <div className="w-16 h-16 bg-gradient-to-r from-cyan-500 to-teal-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <PenTool className="w-8 h-8 text-white" />
+                    <BookOpen className="w-8 h-8 text-white" />
                   </div>
                   <h3 className="text-2xl font-bold text-off mb-4">Ready to Create?</h3>
-                  <p className="text-off-70 mb-6">
-                    You'll start with a blank story and can write freely. You can always use AI assistance later if you need help with suggestions or continuing your story.
-                  </p>
-                  <button
-                    onClick={handleManualStory}
-                    disabled={loading}
-                    className="btn-violet px-8 py-4 text-lg flex items-center space-x-3 mx-auto disabled:cursor-not-allowed disabled:hover:scale-100"
-                  >
-                    {loading ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Creating...</span>
-                      </>
-                    ) : (
-                      <>
-                        <BookOpen className="w-5 h-5" />
-                        <span>Start Writing</span>
-                      </>
-                    )}
+                  <p className="text-off-70 mb-6">You'll start with a blank story and can write freely. You can always use AI assistance later.</p>
+                  <button onClick={handleManualStory} disabled={loading} className="btn-violet px-8 py-4 text-lg flex items-center space-x-3 mx-auto disabled:cursor-not-allowed">
+                    {loading ? 'Creating…' : 'Start Writing'}
                   </button>
                 </div>
-
-                {/* Error Display */}
                 {error && (
                   <div className="text-center">
-                    <div className="text-red-400 text-sm p-3 bg-red-900/20 border border-red-800 rounded-lg">
-                      {error}
-                    </div>
+                    <div className="text-red-400 text-sm p-3 bg-red-900/20 border border-red-800 rounded-lg">{error}</div>
                   </div>
                 )}
               </div>
@@ -713,7 +276,112 @@ const StoryCreator = () => {
     );
   }
 
-  return null;
+  // AI flow
+  return (
+    <div className="deep-space starfield text-off">
+      <div className="glow glow-violet" />
+      <div className="glow glow-cyan" />
+      <div className="container py-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="card-soft p-8">
+            <div className="text-center mb-8">
+              <div className="flex items-center justify-center space-x-3 mb-4">
+                <Sparkles className="w-8 h-8 text-violet-400" />
+                <h1 className="font-sora text-4xl font-bold text-off">Start with AI</h1>
+              </div>
+              <p className="text-off-70">Transform your ideas into compelling narratives with AI assistance</p>
+            </div>
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-off-80 mb-3">What's your story idea?</label>
+                <textarea
+                  placeholder="Enter your story idea..."
+                  value={idea}
+                  onChange={(e) => setIdea(e.target.value)}
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-off placeholder-off-60 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 resize-none"
+                  rows={4}
+                />
+              </div>
+              <div className="text-center pt-6">
+                <button onClick={handleGenerate} disabled={loading || !idea.trim()} className="btn-violet px-8 py-4 text-lg flex items-center space-x-3 mx-auto disabled:cursor-not-allowed">
+                  {loading ? 'Generating…' : (<><Wand2 className="w-5 h-5" /><span>Generate Story Outline</span></>)}
+                </button>
+              </div>
+              {error && (
+                <div className="text-center">
+                  <div className="text-red-400 text-sm p-3 bg-red-900/20 border border-red-800 rounded-lg">{error}</div>
+                </div>
+              )}
+            </div>
+
+            {result && (
+              <div className="mt-8 space-y-6">
+                <div className="card-soft p-5 md:p-6">
+                  <input
+                    type="text"
+                    value={storyTitle}
+                    onChange={(e) => setStoryTitle(e.target.value)}
+                    placeholder="Untitled Story"
+                    className="bg-transparent w-full font-sora text-2xl md:text-3xl lg:text-4xl outline-none text-off text-center"
+                    maxLength={100}
+                  />
+                </div>
+                <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-10 lg:gap-16">
+                  <div className="space-y-6">
+                    <details open className="card-soft p-5">
+                      <summary className="flex items-center justify-between cursor-pointer">
+                        <span className="font-medium">Story Outline</span>
+                      </summary>
+                      <p className="text-off-80 leading-relaxed mt-4 whitespace-pre-wrap">{result}</p>
+                    </details>
+                    {chapterTitles.length > 0 && (
+                      <div className="card-soft p-5">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-medium">Chapters</h3>
+                        </div>
+                        <div className="divide-y divide-white/10">
+                          {chapterTitles.map((t, i) => (
+                            <div key={`${i}-${t}`} className="py-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="text-violet-300 font-mono text-xs w-8 text-right">{String(i + 1).padStart(2, '0')}</span>
+                                <span className="text-off truncate">{t}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <aside className="space-y-4 lg:sticky lg:top-24 h-fit">
+                    {storyGenre && (
+                      <div className="card-soft p-5">
+                        <div className="text-sm text-off-70 mb-2">Genre</div>
+                        <div className="text-off font-medium">{storyGenre}</div>
+                      </div>
+                    )}
+                    <div className="card-soft p-5">
+                      <div className="text-sm text-off-70 mb-2">Next</div>
+                      <button className="btn-outline w-full mb-2" onClick={handleSaveOutline} disabled={saveOutlineLoading || !user}>
+                        {saveOutlineLoading ? 'Saving…' : 'Save Outline'}
+                      </button>
+                      <button className="btn-violet w-full" onClick={handleGenerateChapter} disabled={!outlineSaved || !storyId}>
+                        Go to Editor (Chapter 1)
+                      </button>
+                      {saveSuccess && <div className="text-green-400 text-xs mt-2">{saveSuccess}</div>}
+                      {saveOutlineError && <div className="text-red-400 text-xs mt-2">{saveOutlineError}</div>}
+                    </div>
+                  </aside>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* Bottom action row removed per request */}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default StoryCreator;
+
+

@@ -42,18 +42,15 @@ function SectionHeading({ eyebrow, title, subtitle }) {
 }
 
 export default function LandingPage() {
-  const [pricingYearly, setPricingYearly] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
   const { user, session, signOut } = useAuth();
 
-  const price = (m, y) => (pricingYearly ? y : m);
-
   const handleStart = () => {
     setIsTransitioning(true);
     // Allow the overlay to animate before navigation for immersive feel
-    setTimeout(() => navigate('/create'), 500);
+    setTimeout(() => navigate('/create', { state: { flow: 'ai' } }), 500);
   };
 
   return (
@@ -65,7 +62,7 @@ export default function LandingPage() {
       {/* Header now provided globally via Layout/Header */}
 
       {/* Hero */}
-      <section className="hero container pt-10 md:pt-12 lg:pt-16 pb-16 lg:pb-24 grid lg:grid-cols-2 gap-10 items-center">
+      <section className="hero container pt-20 md:pt-28 lg:pt-32 pb-16 lg:pb-24 grid lg:grid-cols-2 gap-10 items-center">
         <div>
           <motion.h1
             initial={{ opacity: 0, y: 18 }}
@@ -73,7 +70,7 @@ export default function LandingPage() {
             transition={{ duration: 0.7 }}
             className="font-sora text-5xl md:text-6xl leading-tight text-off mt-0"
           >
-            Write worlds readers can’t put down.
+            Every Great Story Deserves to Be Cinematic. Let’s Write Yours.
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 18 }}
@@ -177,52 +174,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Pricing */}
-      <section id="pricing" className="container section">
-        <SectionHeading eyebrow="Pricing" title="Pick your pace" />
-        <div className="flex items-center justify-center gap-3 mb-6">
-          <button
-            className={`chip ${!pricingYearly ? "chip-active" : ""}`}
-            onClick={() => setPricingYearly(false)}
-          >
-            Monthly
-          </button>
-          <button
-            className={`chip ${pricingYearly ? "chip-active" : ""}`}
-            onClick={() => setPricingYearly(true)}
-          >
-            Annual <span className="ml-2 text-cyan-300/80">Save 20%</span>
-          </button>
-        </div>
-        <div className="grid md:grid-cols-3 gap-5">
-          {[
-            ["Free", price("$0", "$0"), ["Basic writing", "Limited saves", "Community explore"]],
-            ["Pro", price("$14", "$11"), ["Unlimited chapters", "DNA continuity", "Rewrite/styles"]],
-            ["Studio", price("$39", "$32"), ["Team seats", "Brand art models", "Priority support"]],
-          ].map(([name, amt, features]) => (
-            <div
-              key={name}
-              className={`card-soft h-full ${name === "Pro" ? "shadow-violet" : ""}`}
-            >
-              <div className="font-sora text-xl text-off">{name}</div>
-              <div className="mt-2 text-3xl font-semibold text-off">
-                {amt}
-                <span className="text-base text-off-60 ml-1">
-                  {pricingYearly ? "/mo billed yearly" : "/mo"}
-                </span>
-              </div>
-              <ul className="mt-4 space-y-2 text-off-80 text-sm">
-                {features.map((f) => (
-                  <li key={f}>• {f}</li>
-                ))}
-              </ul>
-              <button className="btn-violet mt-5 w-full" onClick={handleStart}>
-                {name === "Free" ? "Start Free" : "Go " + name}
-              </button>
-            </div>
-          ))}
-        </div>
-      </section>
+      {/* Pricing removed per request */}
 
       {/* FAQ */}
       <section className="container section">

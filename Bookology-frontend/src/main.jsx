@@ -4,6 +4,16 @@ import './index.css'
 import App from './App.jsx'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
+// Silence console logs in production builds while preserving errors/warnings
+if (import.meta.env.MODE !== 'development') {
+  const noop = () => {}
+  // Keep error/warn/info; silence log/debug
+  // eslint-disable-next-line no-console
+  console.log = noop
+  // eslint-disable-next-line no-console
+  console.debug = noop
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

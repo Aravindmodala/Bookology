@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Response, BackgroundTasks
 from pydantic import BaseModel, Field
+from starlette.responses import StreamingResponse
 
 from app.dependencies.supabase import (
     get_authenticated_user,
@@ -15,6 +16,10 @@ from app.schemas import ChapterInput
 
 router = APIRouter()
 logger = setup_logger(__name__)
+
+
+def sse_event(event_type: str, data: dict) -> str:
+	return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 
 class GenerateChoicesInput(BaseModel):
@@ -186,14 +191,53 @@ async def generate_chapter_with_choice_endpoint(
             user_id=user_id,
         )
 
+        # Persist chapter (same behavior as /generate_next_chapter)
+        chapter_content = result.get("chapter_content") or result.get("content", "")
+        chapter_title = result.get("title", f"Chapter {request.next_chapter_num}")
+
+        # Deactivate previous version if exists and insert new
+        supabase.table("Chapters").update({"is_active": False}).eq("story_id", request.story_id).eq("chapter_number", request.next_chapter_num).eq("is_active", True).execute()
+        insert_resp = supabase.table("Chapters").insert({
+            "story_id": request.story_id,
+            "chapter_number": request.next_chapter_num,
+            "title": chapter_title,
+            "content": chapter_content,
+            "is_active": True,
+        }).execute()
+        chapter_id = insert_resp.data[0]["id"] if insert_resp.data else None
+
+        # Save choices if any
+        from app.services.chapter_versioning import save_choices_for_chapter
+        gen_choices = result.get("choices", [])
+        if gen_choices and chapter_id:
+            await save_choices_for_chapter(
+                story_id=request.story_id,
+                chapter_id=chapter_id,
+                chapter_number=request.next_chapter_num,
+                choices=gen_choices,
+                user_id=user_id,
+                supabase=supabase,
+            )
+
+        # Increase-only update of current_chapter (rewrites shouldn't bump)
+        try:
+            current_val_resp = supabase.table("Stories").select("current_chapter").eq("id", request.story_id).single().execute()
+            current_val = (current_val_resp.data or {}).get("current_chapter") or 0
+            if int(current_val) < int(request.next_chapter_num):
+                supabase.table("Stories").update({"current_chapter": request.next_chapter_num}).eq("id", request.story_id).execute()
+                logger.info(f"✅ Updated story current_chapter to {request.next_chapter_num}")
+        except Exception as update_error:
+            logger.warning(f"⚠️ Could not update story current_chapter: {update_error}")
+
         return {
             "success": result.get("success", True),
-            "chapter": result.get("chapter_content", result.get("content", "")),
-            "choices": result.get("choices", []),
+            "chapter": chapter_content,
+            "choices": gen_choices,
             "metadata": {
                 "chapter_number": request.next_chapter_num,
-                "word_count": len(result.get("chapter_content", result.get("content", "")).split()),
-                "choices_count": len(result.get("choices", [])),
+                "word_count": len(chapter_content.split()),
+                "choices_count": len(gen_choices),
+                "chapter_id": chapter_id,
             },
         }
     except HTTPException:
@@ -254,7 +298,18 @@ async def generate_chapter_endpoint(
             import json
             outline_json = json.loads(chapter.outline)
             story_summary = outline_json.get("summary", "")
+            # Prefer genre from DB when story_id is provided
             genre = outline_json.get("genre", "General Fiction")
+            if chapter.story_id:
+                try:
+                    db_story_row = (
+                        supabase.table("Stories").select("genre").eq("id", chapter.story_id).single().execute().data
+                    )
+                    if db_story_row and db_story_row.get("genre"):
+                        genre = db_story_row.get("genre")
+                except Exception:
+                    # Fallback to outline_json genre if DB lookup fails
+                    pass
             tone = outline_json.get("tone", "Engaging")
             chapters_data = outline_json.get("chapters", [])
             target_chapter = None
@@ -264,17 +319,24 @@ async def generate_chapter_endpoint(
                     break
             if not target_chapter:
                 raise ValueError(f"Chapter {chapter.chapter_number} not found in outline")
-            result = generator.generate_chapter_from_outline(
+            result = await generator.generate_chapter_from_outline(
                 story_title=target_chapter.get("title", f"Chapter {chapter.chapter_number}"),
                 story_outline=story_summary,
                 genre=genre,
                 tone=tone,
             )
         except Exception:
-            result = generator.generate_chapter_from_outline(
+            result = await generator.generate_chapter_from_outline(
                 story_title=f"Chapter {chapter.chapter_number}",
                 story_outline=chapter.outline,
-                genre="General Fiction",
+                # Prefer genre from DB when story_id is provided
+                genre=(
+                    (
+                        supabase.table("Stories").select("genre").eq("id", chapter.story_id).single().execute().data.get("genre")
+                        if chapter.story_id else None
+                    )
+                    or "General Fiction"
+                ),
                 tone="Engaging",
             )
 
@@ -321,6 +383,37 @@ async def generate_chapter_endpoint(
                         ).execute()
                         if chapter_response.data:
                             chapter_id = chapter_response.data[0]["id"]
+                            # Fallback path: also save choices if present
+                            if choices:
+                                # Normalize choices to expected shape
+                                normalized_choices = []
+                                for i, ch in enumerate(choices, 1):
+                                    if isinstance(ch, dict) and ("text" in ch or "consequence" in ch):
+                                        normalized_choices.append({
+                                            "title": (ch.get("text") or "").strip(),
+                                            "description": (ch.get("consequence") or "").strip(),
+                                            "story_impact": (ch.get("consequence") or "").strip(),
+                                            "choice_type": ch.get("choice_type", "story_choice"),
+                                            "choice_id": ch.get("id", str(i)),
+                                        })
+                                    else:
+                                        normalized_choices.append(ch)
+                                try:
+                                    for rec in normalized_choices:
+                                        supabase.table("story_choices").insert({
+                                            "story_id": chapter.story_id,
+                                            "chapter_id": chapter_id,
+                                            "chapter_number": 1,
+                                            "choice_id": rec.get("choice_id", str(i)),
+                                            "title": rec.get("title", ""),
+                                            "description": rec.get("description", ""),
+                                            "story_impact": rec.get("story_impact", ""),
+                                            "choice_type": rec.get("choice_type", "story_choice"),
+                                            "is_selected": False,
+                                            "user_id": getattr(user, 'id', None),
+                                        }).execute()
+                                except Exception:
+                                    pass
                     except Exception:
                         pass
 
@@ -460,6 +553,7 @@ async def generate_next_chapter_compat(
         previous = (
             supabase.table("Chapters").select("*")
             .eq("story_id", request.story_id)
+            .eq("is_active", True)
             .lte("chapter_number", current_chapter_number)
             .order("chapter_number")
             .execute().data
@@ -494,6 +588,22 @@ async def generate_next_chapter_compat(
         # Save choices if any
         from app.services.chapter_versioning import save_choices_for_chapter
         gen_choices = result.get("choices", [])
+        # Normalize choice shape from first-chapter generator (text/consequence) to title/description
+        if gen_choices:
+            normalized_choices = []
+            for i, ch in enumerate(gen_choices, 1):
+                if isinstance(ch, dict) and ("text" in ch or "consequence" in ch):
+                    normalized_choices.append({
+                        "title": (ch.get("text") or "").strip(),
+                        "description": (ch.get("consequence") or "").strip(),
+                        "story_impact": (ch.get("consequence") or "").strip(),
+                        "choice_type": ch.get("choice_type", "story_choice"),
+                        "choice_id": ch.get("id", str(i)),
+                    })
+                else:
+                    normalized_choices.append(ch)
+            gen_choices = normalized_choices
+
         if gen_choices and chapter_id:
             await save_choices_for_chapter(
                 story_id=request.story_id,
@@ -565,6 +675,16 @@ async def generate_next_chapter_compat(
         except Exception as _e:
             logger.warning(f"Failed to schedule background tasks: {_e}")
 
+        # Increase-only update of current_chapter (rewrites shouldn't bump)
+        try:
+            current_val_resp = supabase.table("Stories").select("current_chapter").eq("id", request.story_id).single().execute()
+            current_val = (current_val_resp.data or {}).get("current_chapter") or 0
+            if int(current_val) < int(next_num):
+                supabase.table("Stories").update({"current_chapter": next_num}).eq("id", request.story_id).execute()
+                logger.info(f"✅ Updated story current_chapter to {next_num}")
+        except Exception as update_error:
+            logger.warning(f"⚠️ Could not update story current_chapter: {update_error}")
+
         return {"success": True, "chapter": chapter_content, "choices": gen_choices, "chapter_id": chapter_id}
 
         # If we got here without choices and service failed (unlikely), fallback to a simple generator
@@ -601,7 +721,7 @@ async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
             raise HTTPException(
                 status_code=400, detail=f"Chapter {chapter.chapter_number} not found in JSON outline"
             )
-        result = generator.generate_chapter_from_outline(
+        result = await generator.generate_chapter_from_outline(
             story_title=target_chapter.get("title", f"Chapter {chapter.chapter_number}"),
             story_outline=story_summary,
             genre=genre,
@@ -639,5 +759,163 @@ async def generate_chapter_from_json_endpoint(chapter: JsonChapterInput):
     except Exception as e:
         logger.error("Enhanced chapter generation from JSON failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stream_first_chapter")
+async def stream_first_chapter(
+	chapter: ChapterInput,
+	user = Depends(get_authenticated_user_optional),
+):
+	"""
+	Streams Chapter 1 prose token-by-token, then emits choices JSON after the '### choices' delimiter.
+	- Streams: chapter_token
+	- On delimiter: saves chapter, emits chapter_done
+	- After JSON parse: saves choices, emits choices
+	"""
+	supabase = deps_get_supabase_client()
+
+	# Resolve outline/title/genre/tone (mirror your non-stream logic, but simplified)
+	story_title = "Chapter 1"
+	story_outline = chapter.outline
+	genre = "General Fiction"
+	tone = "Engaging"
+
+	# Try to parse JSON outline for better metadata
+	try:
+		outline_obj = json.loads(chapter.outline)
+		story_outline = outline_obj.get("summary", chapter.outline)
+		genre = outline_obj.get("genre", genre)
+		tone = outline_obj.get("tone", tone)
+		for ch in outline_obj.get("chapters", []):
+			if ch.get("chapter_number") == 1:
+				story_title = ch.get("title", story_title)
+				break
+	except Exception:
+		pass
+
+	# If story_id provided, prefer DB genre if present
+	if chapter.story_id:
+		try:
+			db_story = (
+				supabase.table("Stories")
+				.select("genre, story_title, story_outline")
+				.eq("id", chapter.story_id)
+				.single()
+				.execute()
+				.data
+			) or {}
+			if db_story.get("genre"):
+				genre = db_story["genre"]
+			if db_story.get("story_title"):
+				story_title = db_story["story_title"] or story_title
+			if db_story.get("story_outline"):
+				story_outline = db_story["story_outline"] or story_outline
+		except Exception:
+			pass
+
+	from app.flows.generation.enhanced_first_chapter import EnhancedChapterGenerator
+	generator = EnhancedChapterGenerator()
+
+	async def event_stream():
+		chapter_id = None
+		chapter_text = ""
+		try:
+			async for ev in generator.generate_chapter_streaming(
+				story_title=story_title,
+				story_outline=story_outline,
+				genre=genre,
+				tone=tone,
+			):
+				typ = ev.get("type")
+
+				if typ == "chapter_token":
+					yield sse_event("chapter_token", {"token": ev["token"]})
+
+				elif typ == "chapter_done":
+					# Save chapter 1 when prose completes
+					chapter_text = ev["content"]
+					word_count = ev.get("word_count", len(chapter_text.split()))
+
+					try:
+						# Deactivate any active Chapter 1 then insert new
+						if chapter.story_id:
+							supabase.table("Chapters").update({"is_active": False}).eq("story_id", chapter.story_id).eq("chapter_number", 1).eq("is_active", True).execute()
+							insert_resp = supabase.table("Chapters").insert({
+								"story_id": chapter.story_id,
+								"chapter_number": 1,
+								"title": story_title or "Chapter 1",
+								"content": chapter_text,
+								"word_count": word_count,
+								"version_number": 1,
+								"is_active": True,
+							}).execute()
+							chapter_id = insert_resp.data[0]["id"] if insert_resp.data else None
+
+							# Bump current_chapter to 1 if smaller
+							try:
+								curr = supabase.table("Stories").select("current_chapter").eq("id", chapter.story_id).single().execute().data or {}
+								if int(curr.get("current_chapter") or 0) < 1:
+									supabase.table("Stories").update({"current_chapter": 1}).eq("id", chapter.story_id).execute()
+							except Exception:
+								pass
+					except Exception:
+						pass
+
+					yield sse_event("chapter_done", {
+						"chapter_id": chapter_id,
+						"chapter_number": 1,
+						"word_count": word_count
+					})
+
+				elif typ == "choices":
+					# Normalize to your DB schema (keep schema EXACT)
+					raw_choices = ev.get("choices", [])
+					normalized = []
+					for i, ch in enumerate(raw_choices, 1):
+						raw_id = ch.get("id", f"choice_{i}")
+						if isinstance(raw_id, str) and raw_id.startswith("choice_"):
+							choice_id = raw_id
+						else:
+							choice_id = f"choice_{raw_id}"
+
+						normalized.append({
+							"id": choice_id,
+							"title": (ch.get("text") or ch.get("title") or "").strip(),
+							"description": (ch.get("consequence") or ch.get("description") or "").strip(),
+							"story_impact": (ch.get("consequence") or ch.get("story_impact") or "").strip(),
+							"choice_type": ch.get("choice_type", "story_choice"),
+						})
+
+					# Save choices if we saved the chapter
+					if chapter_id and chapter.story_id and normalized:
+						try:
+							from app.services.chapter_versioning import save_choices_for_chapter
+							await save_choices_for_chapter(
+								story_id=chapter.story_id,
+								chapter_id=chapter_id,
+								chapter_number=1,
+								choices=normalized,
+								user_id=getattr(user, "id", None),
+								supabase=supabase,
+							)
+						except Exception:
+							pass
+
+					yield sse_event("choices", normalized)
+
+				elif typ == "error":
+					yield sse_event("error", {"message": ev.get("message", "Unknown error")})
+
+		except Exception as e:
+			yield sse_event("error", {"message": str(e)})
+
+	return StreamingResponse(
+		event_stream(),
+		media_type="text/event-stream",
+		headers={
+			"Cache-Control": "no-cache",
+			"Connection": "keep-alive",
+		},
+	)
 
 

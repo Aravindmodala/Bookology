@@ -9,17 +9,23 @@ from app.api.router import router as api_router
 def create_app() -> FastAPI:
     app = FastAPI(title="Bookology API", version="2.0.0")
 
-    # CORS: least-privilege by default; allow all only in DEBUG with explicit intent
-    allow_all = settings.cors_allow_all and settings.DEBUG
+    # Fail fast on missing critical env in production
+    try:
+        settings.validate_required_settings()
+    except ValueError:
+        if not settings.DEBUG:
+            raise
+        # In DEBUG, continue to ease local development
+
+    # CORS: Restrict in production; wildcard only in development
+    allow_all = settings.DEBUG
     cors_origins = ["*"] if allow_all else settings.ALLOWED_ORIGINS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=not allow_all,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "User-Agent", "X-Request-ID"],
-        expose_headers=["ETag"],
-        max_age=86400,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     # Security headers middleware

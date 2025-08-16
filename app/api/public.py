@@ -9,6 +9,8 @@ from app.dependencies.supabase import (
     get_supabase_client as deps_get_supabase_client,
 )
 from app.core.logger_config import setup_logger
+from app.core.config import settings
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 
 
@@ -258,48 +260,121 @@ async def get_public_stories(
     supabase = deps_get_supabase_client()
     try:
         logger.info(f"Fetching public stories - page: {page}, limit: {limit}, genre: {genre}")
+        # Avoid leaking infrastructure details in production logs
+        if settings.DEBUG:
+            logger.info(f"Supabase URL: {settings.SUPABASE_URL}")
+            try:
+                import socket
+                supabase_host = urlparse(settings.SUPABASE_URL).netloc
+                logger.info(f"Resolving hostname: {supabase_host}")
+                ip_address = socket.gethostbyname(supabase_host)
+                logger.info(f"Resolved to IP: {ip_address}")
+            except Exception as e:
+                logger.error(f"Failed to resolve hostname: {e}")
+            try:
+                supabase_host = urlparse(settings.SUPABASE_URL).netloc
+                if supabase_host:
+                    logger.info(f"Public stories using Supabase host: {supabase_host}")
+            except Exception:
+                pass
 
-        query = supabase.table("Stories").select("*").eq("is_public", True)
-        if genre:
-            query = query.eq("genre", genre)
+        # Base query
+        def build_query():
+            q = supabase.table("Stories").select("*").eq("is_public", True)
+            return q.eq("genre", genre) if genre else q
 
         valid_sort_fields = ["published_at", "created_at", "story_title", "total_chapters"]
         if sort_by not in valid_sort_fields:
             sort_by = "published_at"
 
-        result = query.order(sort_by, desc=True).range((page - 1) * limit, page * limit - 1).execute()
+        # Try requested sort; if it fails (e.g., column missing), gracefully fall back to created_at
+        result = build_query().order(sort_by, desc=True).range((page - 1) * limit, page * limit - 1).execute()
+        if getattr(result, "error", None):
+            logger.warning(
+                f"Ordering by '{sort_by}' failed ({getattr(result, 'error', None)}); falling back to 'created_at'"
+            )
+            result = build_query().order("created_at", desc=True).range((page - 1) * limit, page * limit - 1).execute()
+            if getattr(result, "error", None):
+                logger.error(f"Supabase error fetching public stories even after fallback: {result.error}")
+                raise HTTPException(status_code=500, detail="Failed to fetch public stories (db error)")
 
         count_query = supabase.table("Stories").select("id", count="exact").eq("is_public", True)
         if genre:
             count_query = count_query.eq("genre", genre)
         count_result = count_query.execute()
+        if getattr(count_result, "error", None):
+            logger.error(f"Supabase error counting public stories: {count_result.error}")
+            raise HTTPException(status_code=500, detail="Failed to fetch public stories (count error)")
         total_count = count_result.count or 0
 
-        enhanced_stories = []
-        for story in result.data:
-            story_id_val = story["id"]
-            like_count_response = (
-                supabase.table("StoryLikes").select("id", count="exact").eq("story_id", story_id_val).execute()
-            )
-            like_count = like_count_response.count or 0
+        stories = result.data or []
+        logger.info(f"Public stories rows={len(stories)}; sample_ids={[s.get('id') for s in stories[:5]]}")
 
-            comment_count_response = (
-                supabase.table("StoryComments").select("id", count="exact").eq("story_id", story_id_val).execute()
-            )
-            comment_count = comment_count_response.count or 0
+        enhanced_stories = []
+        for story in stories:
+            story_id_val = story["id"]
+            # Gracefully handle missing engagement tables
+            try:
+                like_count_response = (
+                    supabase.table("StoryLikes").select("id", count="exact").eq("story_id", story_id_val).execute()
+                )
+                like_count = like_count_response.count or 0
+            except Exception as e:
+                logger.warning(f"Like count lookup failed for story {story_id_val}: {e}")
+                like_count = 0
+
+            try:
+                comment_count_response = (
+                    supabase.table("StoryComments").select("id", count="exact").eq("story_id", story_id_val).execute()
+                )
+                comment_count = comment_count_response.count or 0
+            except Exception as e:
+                logger.warning(f"Comment count lookup failed for story {story_id_val}: {e}")
+                comment_count = 0
 
             user_liked = False
             if user:
-                user_like_response = (
-                    supabase.table("StoryLikes").select("id").eq("story_id", story_id_val).eq("user_id", user.id).execute()
-                )
-                user_liked = len(user_like_response.data) > 0
+                try:
+                    user_like_response = (
+                        supabase.table("StoryLikes").select("id").eq("story_id", story_id_val).eq("user_id", user.id).execute()
+                    )
+                    user_liked = len(user_like_response.data) > 0
+                except Exception as e:
+                    logger.warning(f"User-like lookup failed for story {story_id_val}: {e}")
+                    user_liked = False
+
+            # Compute author display name with fallbacks
+            author_name = story.get("author_name") or ""
+            if not author_name:
+                try:
+                    user_id_val = story.get("user_id")
+                    if user_id_val:
+                        admin_user = supabase.auth.admin.get_user_by_id(user_id_val).user
+                        if admin_user:
+                            meta = getattr(admin_user, "user_metadata", {}) or {}
+                            full_name = (
+                                meta.get("full_name")
+                                or meta.get("name")
+                                or meta.get("display_name")
+                                or meta.get("first_name")
+                            )
+                            if isinstance(full_name, str) and full_name.strip():
+                                author_name = full_name.strip().split()[0]
+                            elif isinstance(meta.get("first_name"), str) and meta.get("first_name").strip():
+                                author_name = meta.get("first_name").strip()
+                            elif getattr(admin_user, "email", None):
+                                author_name = admin_user.email
+                except Exception as e:
+                    logger.warning(f"Could not resolve author for story {story_id_val}: {e}")
+            if not author_name:
+                author_name = "Anonymous"
 
             enhanced_story = {
                 **story,
                 "like_count": like_count,
                 "comment_count": comment_count,
                 "user_liked": user_liked,
+                "author_name": author_name,
             }
             enhanced_stories.append(enhanced_story)
 

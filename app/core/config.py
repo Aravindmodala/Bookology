@@ -44,6 +44,13 @@ class Settings:
     VECTOR_COLLECTION_NAME: str = os.getenv("VECTOR_COLLECTION_NAME", "chapter_chunks")
     VECTOR_SEARCH_K: int = int(os.getenv("VECTOR_SEARCH_K", "5"))
     
+    # Optional local vector search (disabled by default to avoid heavy deps at runtime)
+    ENABLE_LOCAL_VECTOR_SEARCH: bool = os.getenv("ENABLE_LOCAL_VECTOR_SEARCH", "False").lower() in ("true", "1", "yes")
+    
+    # Database URL compatibility (for components expecting DATABASE_URL)
+    # Falls back to Supabase connection string if DATABASE_URL is not explicitly set
+    DATABASE_URL: str = os.getenv("DATABASE_URL", os.getenv("SUPABASE_CONNECTION_STRING", ""))
+    
     # CORS Configuration
     # Default to empty list in production to enforce least-privilege unless explicitly set
     ALLOWED_ORIGINS: list[str] = [o for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o]

@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
-import { Sparkles, ChevronDown, Zap, Type, MessageSquare, Lightbulb } from 'lucide-react';
+import { Sparkles, ChevronDown, Zap, Type, MessageSquare, Lightbulb, Repeat } from 'lucide-react';
 
-function AssistantPanel({ isForcedClosed, onContinue, onImprove, onDialogue, onBrainstorm }) {
+function AssistantPanel({ isForcedClosed, onContinue, onImprove, onDialogue, onBrainstorm, onRewriteChapter }) {
   const panelId = useId();
   const [open, setOpen] = useState(false);
 
@@ -50,38 +50,25 @@ function AssistantPanel({ isForcedClosed, onContinue, onImprove, onDialogue, onB
             <Lightbulb className="w-4 h-4 text-violet-300" />
             <span>Brainstorm Ideas</span>
           </button>
+          <button onClick={onRewriteChapter} className="w-full text-left px-4 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:translate-y-[1px] transition flex items-center gap-2">
+            <Repeat className="w-4 h-4 text-violet-300" />
+            <span>Rewrite Chapter</span>
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function QuickActionsList({ onContinue, onImprove, onDialogue }) {
-  return (
-    <div className="mt-4 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-3 space-y-2">
-      <div className="text-sm font-semibold mb-1 text-white/90">Quick Actions</div>
-      <button onClick={onContinue} className="w-full text-left px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition flex items-center gap-2">
-        <Zap className="w-4 h-4 text-violet-300" />
-        <span className="text-sm">Continue Chapter</span>
-      </button>
-      <button onClick={onImprove} className="w-full text-left px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition flex items-center gap-2">
-        <Type className="w-4 h-4 text-violet-300" />
-        <span className="text-sm">Improve Writing</span>
-      </button>
-      <button onClick={onDialogue} className="w-full text-left px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition flex items-center gap-2">
-        <MessageSquare className="w-4 h-4 text-violet-300" />
-        <span className="text-sm">Add Dialogue</span>
-      </button>
-    </div>
-  );
-}
+// QuickActions removed per UX consolidation
 
 export default function RightSidebar({
   focusCollapsed = false,
   onContinue,
   onImprove,
   onDialogue,
-  onBrainstorm
+  onBrainstorm,
+  onRewriteChapter
 }) {
   return (
     <div className={`w-[320px] border-l border-white/10 p-4 overflow-y-auto no-scrollbar ${focusCollapsed ? 'hidden xl:block opacity-0 scale-95 translate-y-1' : ''}`}>
@@ -91,11 +78,7 @@ export default function RightSidebar({
         onImprove={onImprove}
         onDialogue={onDialogue}
         onBrainstorm={onBrainstorm}
-      />
-      <QuickActionsList
-        onContinue={onContinue}
-        onImprove={onImprove}
-        onDialogue={onDialogue}
+        onRewriteChapter={onRewriteChapter}
       />
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Image, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
+import { Image, Loader2, RefreshCw, AlertCircle, ChevronDown, Palette, Upload, Trash2 } from 'lucide-react';
 import { createApiUrl, API_ENDPOINTS } from '../config';
 import { useAuth } from '../AuthContext';
 import ImageModal from './ImageModal';
@@ -17,12 +17,28 @@ const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
   const [error, setError] = useState('');
   const [lastGenerated, setLastGenerated] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   
   // Add ref to track if we're already polling
   const isPollingRef = useRef(false);
+  const dropdownRef = useRef(null);
 
   // Cache key for localStorage
   const cacheKey = `cover_cache_${storyId}`;
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Load from cache immediately on mount
   useEffect(() => {
@@ -311,6 +327,80 @@ const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
     }
   };
 
+  const handleUploadCover = async (e) => {
+    try {
+      const file = e.target.files?.[0];
+      if (!file || !session?.access_token) return;
+      setError('');
+      setIsLoading(true);
+
+      const form = new FormData();
+      form.append('file', file);
+
+      const resp = await fetch(createApiUrl(API_ENDPOINTS.UPLOAD_COVER.replace('{story_id}', storyId)), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: form
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+
+      setCoverImageUrl(data.cover_image_url);
+      setImageWidth(data.image_width);
+      setImageHeight(data.image_height);
+      setAspectRatio(data.aspect_ratio);
+      setGenerationStatus('uploaded');
+      setLastGenerated(new Date().toISOString());
+      setIsLoading(false);
+
+      saveToCache({
+        cover_image_url: data.cover_image_url,
+        image_width: data.image_width,
+        image_height: data.image_height,
+        aspect_ratio: data.aspect_ratio,
+        status: 'uploaded',
+        generated_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error('Upload failed', err);
+      setIsLoading(false);
+      setError(err.message || 'Upload failed');
+    } finally {
+      // reset file input so same file can be re-selected later
+      const input = document.getElementById(`cover-file-input-${storyId}`);
+      if (input) input.value = '';
+    }
+  };
+
+  const handleRemoveCover = async () => {
+    try {
+      if (!session?.access_token) return;
+      setIsLoading(true);
+      const resp = await fetch(createApiUrl(API_ENDPOINTS.REMOVE_COVER.replace('{story_id}', storyId)), {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Failed to remove cover');
+
+      setCoverImageUrl(null);
+      setImageWidth(null);
+      setImageHeight(null);
+      setAspectRatio(null);
+      setGenerationStatus('none');
+      setIsLoading(false);
+      cacheService.remove(cacheKey);
+    } catch (err) {
+      setIsLoading(false);
+      setError(err.message || 'Failed to remove cover');
+    }
+  };
+
   const handleGenerateCover = async () => {
     if (!session?.access_token || isGenerating) return;
 
@@ -395,14 +485,6 @@ const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
 
   return (
     <div className="mb-6 bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium text-white">Book Cover</h3>
-        <div className={`text-xs font-medium ${getStatusColor(generationStatus)}`}>
-          {getStatusText(generationStatus)}
-        </div>
-      </div>
-
       {/* Cover Image Display */}
       <div className="relative mb-4">
         {isLoading && !coverImageUrl ? (
@@ -456,27 +538,80 @@ const StoryCover = ({ storyId, storyTitle = "Untitled Story" }) => {
       </div>
 
       {/* Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          {lastGenerated && generationStatus === 'completed' && (
-            <div className="text-xs text-gray-500">
-              {new Date(lastGenerated).toLocaleDateString()}
+      <div className="flex items-center justify-end">
+        <div className="relative inline-block text-left" ref={dropdownRef}>
+          <button
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            disabled={isGenerating}
+            className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              isGenerating
+                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                : isDropdownOpen
+                ? 'bg-blue-700 text-white'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Palette className="w-3 h-3" />
+            )}
+            <span>{isGenerating ? 'Generating...' : 'Cover Options'}</span>
+            {!isGenerating && (
+              <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+            )}
+          </button>
+
+          {/* Dropdown menu */}
+          {isDropdownOpen && (
+            <div className="absolute right-0 mt-2 w-48 origin-top-right rounded-md bg-gray-800 shadow-lg ring-1 ring-black/5 focus:outline-none border border-gray-700 z-10">
+              <div className="py-1">
+                <button
+                  onClick={() => {
+                    handleGenerateCover();
+                    setIsDropdownOpen(false);
+                  }}
+                  disabled={isGenerating}
+                  className="flex items-center w-full px-4 py-2 text-xs text-gray-200 hover:bg-gray-700"
+                >
+                  <Palette className="w-3 h-3 mr-2 text-blue-400" />
+                  Generate AI Cover
+                </button>
+                <button
+                  onClick={() => {
+                    document.getElementById(`cover-file-input-${storyId}`).click();
+                    setIsDropdownOpen(false);
+                  }}
+                  className="flex items-center w-full px-4 py-2 text-xs text-gray-200 hover:bg-gray-700"
+                >
+                  <Upload className="w-3 h-3 mr-2 text-green-400" />
+                  Upload Image
+                </button>
+                {coverImageUrl && (
+                  <button
+                    onClick={() => {
+                      handleRemoveCover();
+                      setIsDropdownOpen(false);
+                    }}
+                    className="flex items-center w-full px-4 py-2 text-xs text-red-300 hover:bg-gray-700"
+                  >
+                    <Trash2 className="w-3 h-3 mr-2 text-red-400" />
+                    Remove Cover
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
 
-        <button
-          onClick={handleGenerateCover}
-          disabled={isGenerating}
-          className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-            isGenerating
-              ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
-          }`}
-        >
-          <RefreshCw className={`w-3 h-3 ${isGenerating ? 'animate-spin' : ''}`} />
-          <span>{coverImageUrl ? 'Regenerate' : 'Generate Cover'}</span>
-        </button>
+        {/* Hidden file input for uploads */}
+        <input
+          type="file"
+          id={`cover-file-input-${storyId}`}
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display: 'none' }}
+          onChange={handleUploadCover}
+        />
       </div>
 
       {/* Error Display */}

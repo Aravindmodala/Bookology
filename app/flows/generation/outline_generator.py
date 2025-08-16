@@ -642,43 +642,63 @@ class RewriteTextModule(dspy.Module):
 
 def rewrite_text_with_context(original_text: str, story_context: Dict[str, Any] = None) -> str:
     """
-    Rewrite the given text using AI to improve clarity, flow, and engagement.
-    
+    Style-preserving rewrite: improve clarity, flow, and correctness WITHOUT changing meaning.
+
+    We intentionally avoid supplying large story context here to prevent the model from
+    introducing or removing narrative details. The only accepted input is the selected text,
+    with strict rewrite constraints.
+
     Args:
-        original_text (str): The text to be rewritten
-        story_context (Dict[str, Any], optional): Context about the story for better rewrites
-        
+        original_text: The passage selected by the user
+        story_context: Ignored except for optional tiny hints (tone/level) if provided
+
     Returns:
-        str: The rewritten, improved text
+        The rewritten passage, or the original text on failure
     """
     try:
-        logger.info(f"[REWRITE_FUNCTION] Starting rewrite for {len(original_text)} characters")
-        
-        # Initialize the rewrite module
-        rewriter = RewriteTextModule()
-        
-        # Use provided context or empty dict
-        context = story_context or {}
-        
-        # Call the rewrite function
-        logger.info("[REWRITE_FUNCTION] Calling DSPy rewrite module...")
-        result = rewriter.forward(original_text, context)
-        
-        if not result or not hasattr(result, 'rewritten_text'):
-            logger.error("[REWRITE_FUNCTION] No rewritten_text in result")
-            return original_text  # Return original if rewrite fails
-        
-        rewritten = result.rewritten_text.strip()
-        
+        logger.info(f"[REWRITE_FUNCTION] Style-preserving rewrite for {len(original_text)} chars")
+
+        # Optional lightweight hints
+        tone = (story_context or {}).get("tone") if isinstance(story_context, dict) else None
+        reading_level = (story_context or {}).get("reading_level") if isinstance(story_context, dict) else None
+
+        # Build a strict, self-contained prompt
+        constraints = [
+            "Preserve the exact meaning, facts, and implications.",
+            "Do not add new information or remove details.",
+            "Maintain the original point of view and verb tense.",
+            "Keep names and terms exactly as written.",
+            "Keep the length within ±10% of the original.",
+            "Improve grammar, punctuation, clarity, and rhythm.",
+            "Output only the rewritten passage with no commentary.",
+        ]
+        if tone:
+            constraints.insert(0, f"Target tone: {tone}.")
+        if reading_level:
+            constraints.insert(1, f"Target reading level: {reading_level}.")
+
+        system_prompt = (
+            "You are a careful line editor. You polish prose while strictly preserving meaning."
+        )
+        user_prompt = (
+            "Rewrite the passage to improve clarity, flow, and style while preserving its exact meaning.\n"
+            + "\n".join(f"- {c}" for c in constraints)
+            + "\n\nPassage:\n" + original_text
+        )
+
+        # Use OpenAI chat model directly to avoid the broader DSPy chain-of-thought for this task
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(model=settings.OPENAI_MODEL, openai_api_key=settings.OPENAI_API_KEY)
+        response = llm.invoke([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ])
+        rewritten = (response.content or "").strip()
         if not rewritten:
-            logger.warning("[REWRITE_FUNCTION] Empty rewritten text, returning original")
+            logger.warning("[REWRITE_FUNCTION] Empty response; returning original text")
             return original_text
-        
-        logger.info(f"[REWRITE_FUNCTION] Successfully rewritten text: {len(original_text)} -> {len(rewritten)} characters")
-        
         return rewritten
-        
+
     except Exception as e:
-        logger.error(f"[REWRITE_FUNCTION] Error during rewrite: {str(e)}")
-        # Return original text if rewrite fails
+        logger.error(f"[REWRITE_FUNCTION] Error during rewrite: {e}")
         return original_text

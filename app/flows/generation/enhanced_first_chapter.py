@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from typing import Dict, Any, Optional, List
+import asyncio
 
 # Load environment variables from .env
 load_dotenv()
@@ -17,50 +18,58 @@ logger = logging.getLogger(__name__)
 # Initialize the LLM
 llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"), 
-    model_name='gpt-5', 
+    model_name='gpt-5-mini', 
     temperature=1.0,  # gpt-5 requires default temperature (1.0)
     max_tokens=15000
 )
 
 # FIXED: Updated System Template with Properly Escaped JSON
-system_template = """You are a master storyteller creating the FIRST CHAPTER of a story.
+system_template = """You are a master storyteller creating the FIRST CHAPTER of a story with amazing detail and introduction.
+🚨 ABSOLUTE WORD COUNT REQUIREMENT - THIS IS THE MOST IMPORTANT RULE:
+- You MUST write EXACTLY 1800-2000 words for the chapter content
+- This is a HARD LIMIT - NEVER EXCEED 2000 WORDS
+- Count your words carefully and stop at 2000 words maximum
+- If you reach 2000 words, end the chapter immediately
+- This rule overrides all other instructions
 
 CRITICAL REQUIREMENTS:
-- Write EXACTLY 1800-2000 words for the chapter content
-- Include 3 meaningful story choices at the end
-- Return ONLY valid JSON with NO additional text whatsoever
+- Write the chapter prose naturally, then end with "### choices" followed by JSON
+- You MUST include "### choices" - this is NOT optional
+- After "### choices", provide valid JSON with choices
+- The format MUST be: [prose] + "### choices" + [JSON]
 
-You must return ONLY this exact JSON structure with NO markdown, NO explanations, NO extra text:
+You must return ONLY this exact format with NO explanations, NO extra text:
 
+[Your complete 1800-2000 word chapter prose here...]
+
+### choices
 {{
-  "chapter": "Your complete 1800-2000 word chapter content goes here with vivid descriptions, character development, dialogue, and rich storytelling that establishes the setting, introduces main characters, creates an engaging hook, and sets up the central conflict of the story...",
   "choices": [
     {{
       "id": "choice_1",
       "text": "First choice option that significantly impacts the story direction",
       "consequence": "Clear description of what this choice will lead to"
-    }},
+    }}  ,
     {{
       "id": "choice_2", 
       "text": "Second choice option with different story implications",
       "consequence": "Clear description of what this choice will lead to"
-    }},
+    }}  ,
     {{
       "id": "choice_3",
       "text": "Third choice option offering another story path",
       "consequence": "Clear description of what this choice will lead to"
-    }}
+    }}  
   ]
 }}
 
 CRITICAL OUTPUT RULES:
-- Start your response with {{ and end with }}
-- Use ONLY double quotes for all strings
+- Start with the chapter prose (1800-2000 words)
+- End with "### choices" followed by a valid JSON object
+- Use ONLY double quotes in JSON
 - NO ```json or ``` markdown formatting
-- NO explanatory text before or after JSON
-- The chapter field must contain 1800-2000 words
+- NO explanatory text before or after
 - Include rich descriptions, dialogue, character development
-- Create an engaging opening that hooks readers immediately
 - End with a compelling moment that leads to the choices"""
 
 human_template = """Story Title: {story_title}
@@ -68,7 +77,7 @@ Story Outline: {story_outline}
 Genre: {genre}
 Tone: {tone}
 
-Generate the FIRST CHAPTER following the system instructions exactly. Return ONLY the JSON object."""
+Generate the FIRST CHAPTER exactly as instructed: chapter prose first, then '### choices' followed by a valid JSON object. Do not use markdown fences."""
 
 # Create the prompt template
 prompt = ChatPromptTemplate.from_messages([
@@ -88,12 +97,12 @@ class EnhancedChapterGenerator:
     def __init__(self):
         logger.info("🚀 EnhancedChapterGenerator initialized for FIRST CHAPTER generation")
     
-    def generate_chapter_from_outline(
+    async def generate_chapter_from_outline(
         self, 
         story_title: str,
         story_outline: str, 
         genre: str = "General Fiction",
-        tone: str = "Dramatic",
+        tone: str = "Engaging",
         max_retries: int = 3
     ) -> Dict[str, Any]:
         """
@@ -118,11 +127,11 @@ class EnhancedChapterGenerator:
                 start_time = time.time()
                 
                 # Generate chapter using modern LangChain syntax
-                result = chain.invoke({
+                result = await chain.ainvoke({
                     "story_title": story_title,
                     "story_outline": story_outline,
                     "genre": genre,
-                    "tone": tone
+                    "tone": tone,
                 })
                 
                 # FIXED: Correct way to access LangChain response
@@ -181,7 +190,7 @@ class EnhancedChapterGenerator:
                     # Wait before retry with exponential backoff
                     wait_time = 2 ** attempt
                     logger.info(f"⏳ Waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
                     
             except Exception as e:
                 logger.error(f"❌ Attempt {attempt + 1} failed with exception: {str(e)}")
@@ -197,7 +206,7 @@ class EnhancedChapterGenerator:
                 # Wait before retry
                 wait_time = 2 ** attempt
                 logger.info(f"⏳ Waiting {wait_time}s before retry...")
-                time.sleep(wait_time)
+                await asyncio.sleep(wait_time)
         
         return {
             "content": "Failed to generate first chapter after all attempts",
@@ -207,164 +216,166 @@ class EnhancedChapterGenerator:
             "error": "Max retries exceeded"
         }
     
-    def _parse_and_validate_response(self, response_content: str, attempt_num: int) -> Dict[str, Any]:
-        """
-        Parse and validate the LLM response for first chapter generation.
-        FIXED: Simplified parsing with strict validation.
-        """
+    async def generate_chapter_streaming(
+        self,
+        story_title: str,
+        story_outline: str,
+        genre: str = "General Fiction",
+        tone: str = "Engaging",
+    ):
+        """Stream first chapter tokens, detect '### choices', then parse choices JSON."""
+        logger.info(f"🎯 Streaming FIRST CHAPTER generation for: {story_title}")
         try:
-            # Clean the response
-            cleaned_response = response_content.strip()
-            
-            # Remove markdown code blocks if present (though they shouldn't be there)
-            if cleaned_response.startswith('```json'):
-                cleaned_response = cleaned_response[7:]
-                logger.warning("⚠️ Found ```json wrapper - LLM didn't follow instructions")
-            elif cleaned_response.startswith('```'):
-                cleaned_response = cleaned_response[3:]
-                logger.warning("⚠️ Found ``` wrapper - LLM didn't follow instructions")
-            
-            if cleaned_response.endswith('```'):
-                cleaned_response = cleaned_response[:-3]
-            
-            cleaned_response = cleaned_response.strip()
-            
-            # Log cleaned response for debugging
-            logger.info(f"🧹 Cleaned response length: {len(cleaned_response)} characters")
-            logger.info(f"🔍 First 200 chars: {cleaned_response[:200]}...")
-            logger.info(f"🔍 Last 200 chars: ...{cleaned_response[-200:]}")
-            
-            # FIXED: Direct JSON parsing with better error handling
-            try:
-                parsed_data = json.loads(cleaned_response)
-                logger.info("✅ JSON parsed successfully")
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ JSON parsing failed on attempt {attempt_num}: {str(e)}")
-                logger.error(f"🔍 Error position: {e.pos if hasattr(e, 'pos') else 'unknown'}")
-                
-                # Try to find where the JSON might be malformed
-                lines = cleaned_response.split('\n')
-                for i, line in enumerate(lines[:10]):  # Show first 10 lines
-                    logger.error(f"Line {i+1}: {line}")
-                
+            start_time = time.time()
+            result = chain.astream({
+                "story_title": story_title,
+                "story_outline": story_outline,
+                "genre": genre,
+                "tone": tone,
+            })
+
+            chapter_buffer: list[str] = []
+            choices_buffer: list[str] = []
+            in_chapter = True
+            chapter_text = ""
+
+            async for chunk in result:
+                content = getattr(chunk, "content", str(chunk))
+                if in_chapter:
+                    chapter_buffer.append(content)
+                    full_text = "".join(chapter_buffer)
+                    if "### choices" in full_text:
+                        parts = full_text.split("### choices", 1)
+                        chapter_text = parts[0].strip()
+                        choices_part = parts[1].strip()
+                        in_chapter = False
+                        choices_buffer.append(choices_part)
+                        yield {"type": "chapter_done", "content": chapter_text, "word_count": len(chapter_text.split())}
+                    else:
+                        yield {"type": "chapter_token", "token": content}
+                else:
+                    choices_buffer.append(content)
+
+            if choices_buffer:
+                try:
+                    choices_text = "".join(choices_buffer).strip()
+                    if choices_text.startswith("```json"):
+                        choices_text = choices_text[len("```json"):].strip()
+                    elif choices_text.startswith("```"):
+                        choices_text = choices_text[len("```"):].strip()
+                    if choices_text.endswith("```"):
+                        choices_text = choices_text[:-3].strip()
+
+                    data = json.loads(choices_text)
+                    yield {"type": "choices", "choices": data.get("choices", [])}
+                    logger.info("✅ Streaming first chapter completed in %.2fs", time.time() - start_time)
+                except Exception as e:
+                    logger.error("❌ Failed to parse choices JSON: %s", e)
+                    yield {"type": "error", "message": f"Failed to parse choices: {e}"}
+        except Exception as e:
+            logger.error("❌ Streaming chapter generation failed: %s", e)
+            yield {"type": "error", "message": str(e)}
+    
+    def _parse_and_validate_response(self, response_content: str, attempt_num: int) -> Dict[str, Any]:
+        try:
+            text = (response_content or "").strip()
+
+            # If it's pure JSON, parse directly (backwards-compatible)
+            if text.lstrip().startswith("{"):
+                parsed = json.loads(text)
+                chapter_content = parsed.get("chapter", "")
+                choices = parsed.get("choices", [])
+                if not chapter_content:
+                    return {
+                        "success": False,
+                        "error": "Missing 'chapter' field in JSON response",
+                        "raw_response": text,
+                    }
+            else:
+                # Hybrid format: prose + "### choices" + JSON
+                if "### choices" not in text:
+                    return {
+                        "success": False,
+                        "error": "Missing '### choices' delimiter in model output",
+                        "raw_response": text,
+                    }
+
+                chapter_content, choices_part = text.split("### choices", 1)
+                chapter_content = chapter_content.strip()
+                choices_text = choices_part.strip()
+
+                # Strip optional code fences if the model added them
+                if choices_text.startswith("```json"):
+                    choices_text = choices_text[len("```json"):].strip()
+                elif choices_text.startswith("```"):
+                    choices_text = choices_text[len("```"):].strip()
+                if choices_text.endswith("```"):
+                    choices_text = choices_text[:-3].strip()
+
+                parsed = json.loads(choices_text)
+                choices = parsed.get("choices", [])
+
+            # Validate chapter
+            if not isinstance(chapter_content, str) or len(chapter_content.strip()) < 100:
                 return {
-                    "success": False, 
-                    "error": f"Invalid JSON (attempt {attempt_num}): {str(e)}", 
-                    "raw_response": cleaned_response
+                    "success": False,
+                    "error": "Chapter content too short or invalid",
+                    "raw_response": response_content,
                 }
-            
-            # FIXED: Strict validation of required fields
-            if "chapter" not in parsed_data:
-                logger.error("❌ Missing 'chapter' field in response")
-                return {
-                    "success": False, 
-                    "error": "Missing 'chapter' field", 
-                    "raw_response": cleaned_response
-                }
-            
-            chapter_content = parsed_data["chapter"]
-            if not isinstance(chapter_content, str):
-                logger.error(f"❌ Chapter content is not a string: {type(chapter_content)}")
-                return {
-                    "success": False, 
-                    "error": "Chapter content must be a string", 
-                    "raw_response": cleaned_response
-                }
-            
-            if len(chapter_content.strip()) < 100:
-                logger.error(f"❌ Chapter content too short: {len(chapter_content)} characters")
-                return {
-                    "success": False, 
-                    "error": f"Chapter content too short: {len(chapter_content)} characters", 
-                    "raw_response": cleaned_response
-                }
-            
-            # Calculate word count for logging - NO VALIDATION, accept whatever LLM gives
-            word_count = len(chapter_content.split())
-            logger.info(f"📊 Chapter word count: {word_count} words (accepting any length)")
-            
-            # Validate choices
-            choices = parsed_data.get("choices", [])
-            if not isinstance(choices, list):
-                logger.error(f"❌ Choices must be a list, got: {type(choices)}")
-                return {
-                    "success": False, 
-                    "error": "Choices must be a list", 
-                    "raw_response": cleaned_response
-                }
-            
-            # FIXED: Strict choice validation with integer IDs
+
+            # Validate choices (existing logic)
             valid_choices = []
+            if not isinstance(choices, list):
+                return {"success": False, "error": "Choices must be a list", "raw_response": response_content}
             for i, choice in enumerate(choices):
                 if not isinstance(choice, dict):
-                    logger.warning(f"⚠️ Choice {i+1} is not a dict: {choice}")
                     continue
-                
                 if "text" not in choice:
-                    logger.warning(f"⚠️ Choice {i+1} missing 'text' field: {choice}")
                     continue
-                
-                # Convert choice ID to integer format for database compatibility
+
                 raw_choice_id = choice.get("id", f"choice_{i+1}")
                 if isinstance(raw_choice_id, str) and raw_choice_id.startswith("choice_"):
-                    # Extract number from "choice_1", "choice_2", etc.
                     try:
                         choice_id = int(raw_choice_id.split("_")[1])
-                    except (ValueError, IndexError):
+                    except Exception:
                         choice_id = i + 1
                 elif isinstance(raw_choice_id, str) and raw_choice_id.isdigit():
-                    # Already a numeric string
                     choice_id = int(raw_choice_id)
                 elif isinstance(raw_choice_id, int):
-                    # Already an integer
                     choice_id = raw_choice_id
                 else:
-                    # Fallback to index + 1
                     choice_id = i + 1
-                
-                choice_text = choice["text"]
-                choice_consequence = choice.get("consequence", "")
-                
-                if len(choice_text.strip()) < 10:
-                    logger.warning(f"⚠️ Choice {i+1} text too short: {choice_text}")
+
+                choice_text = choice["text"].strip()
+                if len(choice_text) < 10:
                     continue
-                
+
                 valid_choices.append({
                     "id": choice_id,
-                    "text": choice_text.strip(),
-                    "consequence": choice_consequence.strip()
+                    "text": choice_text,
+                    "consequence": choice.get("consequence", "").strip(),
                 })
-            
-            if len(valid_choices) == 0:
-                logger.error("❌ No valid choices found")
-                return {
-                    "success": False, 
-                    "error": "No valid choices found", 
-                    "raw_response": cleaned_response
-                }
-            
-            logger.info(f"✅ Validation successful: {word_count} words, {len(valid_choices)} choices")
-            
+
+            if not valid_choices:
+                return {"success": False, "error": "No valid choices found", "raw_response": response_content}
+
             return {
                 "success": True,
                 "chapter": chapter_content,
                 "choices": valid_choices,
-                "word_count": word_count
+                "word_count": len(chapter_content.split()),
             }
-            
+
+        except json.JSONDecodeError as e:
+            return {"success": False, "error": f"Invalid JSON: {str(e)}", "raw_response": response_content}
         except Exception as e:
-            logger.error(f"❌ Unexpected parsing error: {str(e)}")
-            return {
-                "success": False, 
-                "error": f"Parsing error: {str(e)}", 
-                "raw_response": response_content
-            }
+            return {"success": False, "error": f"Parsing error: {str(e)}", "raw_response": response_content}
 
 # Global instance
 enhanced_generator = EnhancedChapterGenerator()
 
 # FIXED: Convenience function with better error handling
-def generate_first_chapter_from_outline(
+async def generate_first_chapter_from_outline(
     story_title: str,
     story_outline: str,
     genre: str = "General Fiction",
@@ -401,7 +412,7 @@ def generate_first_chapter_from_outline(
             "error": "Story outline too short"
         }
     
-    return enhanced_generator.generate_chapter_from_outline(
+    return await enhanced_generator.generate_chapter_from_outline(
         story_title=story_title.strip(),
         story_outline=story_outline.strip(),
         genre=genre.strip(),

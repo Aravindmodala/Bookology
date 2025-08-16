@@ -5,6 +5,7 @@
 fastapi>=0.104.0,<0.120.0
 uvicorn[standard]>=0.24.0,<0.35.0
 pydantic>=2.5.0,<3.0.0
+python-multipart>=0.0.9
 
 # AI/ML and Language Models
 openai>=1.3.0,<2.0.0
@@ -25,10 +26,13 @@ python-dotenv>=1.0.0,<2.0.0
 jinja2>=3.1.0,<4.0.0
 requests>=2.31.0
 aiohttp>=3.9.0
+Pillow>=10.0.0,<11.0.0
 
-# Performance optimization dependencies
-sentence-transformers>=2.2.0,<3.0.0
-torch>=2.0.0,<2.5.0
+# Optional heavy ML deps for local vector search (disabled by default).
+# Keep them commented to reduce image size and cold start times.
+# Enable via settings.ENABLE_LOCAL_VECTOR_SEARCH=true and install separately.
+# sentence-transformers>=2.2.0,<3.0.0
+# torch>=2.0.0,<2.5.0
 numpy>=1.24.0,<2.0.0
 psutil>=5.9.0,<6.0.0
 sqlalchemy>=2.0.0,<3.0.0

@@ -211,8 +211,9 @@ class StoryService:
         if not previous_Chapters:
             return [], [], "list"
 
-        # Ensure sorted by chapter_number
-        prev_sorted = sorted(previous_Chapters, key=lambda c: c.get("chapter_number", 0))
+        # Ensure only active chapters and sorted by chapter_number
+        prev_filtered = [c for c in previous_Chapters if c.get("is_active", True)]
+        prev_sorted = sorted(prev_filtered, key=lambda c: c.get("chapter_number", 0))
 
         # Last-2 DNA (most recent)
         lower_bound = max(1, next_chapter_number - 2)
@@ -271,6 +272,48 @@ class StoryService:
         Returns:
             dict with generated chapter content, choices, and enhanced metrics
         """
+        # Route Chapter 1 to the dedicated first-chapter generator (no previous openings/DNA)
+        if int(next_chapter_number) == 1:
+            try:
+                logger.info("[SERVICE] Routing Chapter 1 to Enhanced FIRST CHAPTER generator")
+                from app.flows.generation.enhanced_first_chapter import EnhancedChapterGenerator
+                import asyncio
+                generator = EnhancedChapterGenerator()
+                loop = asyncio.get_event_loop()
+
+                result = await generator.generate_chapter_from_outline(
+                        story_title=story.get('story_title', 'Chapter 1'),
+                        story_outline=story.get('story_outline', ''),
+                        genre=story.get('genre', 'General Fiction'),
+                        tone="Engaging",
+                    )
+                
+                # Defensive unwrapping in case some code path returned a 1-tuple
+                if isinstance(result, tuple):
+                    result = result[0] if result else {}
+
+                chapter_content = result.get("content", "")
+                choices = result.get("choices", [])
+                logger.info(
+                    "[SERVICE] Chapter 1 generated via Enhanced FIRST CHAPTER generator: %s words, %s choices",
+                    len(chapter_content.split()),
+                    len(choices),
+                )
+
+                return {
+                    "chapter_content": chapter_content,
+                    "content": chapter_content,
+                    "choices": choices,
+                    "success": result.get("success", True),
+                    "generation_method": "FIRST_CHAPTER_ENHANCED",
+                    "summaries_used": 0,
+                    "is_game_mode": False,
+                    "token_metrics": {},
+                }
+            except Exception as e:
+                logger.error(f"❌ Error generating Chapter 1 with EnhancedChapterGenerator: {e}")
+                raise
+
         # Build DNA and summary context using rolling policy
         story_dna_contexts, summaries, summaries_mode = self._build_generation_context(previous_Chapters, next_chapter_number)
         

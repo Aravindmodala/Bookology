@@ -81,6 +81,33 @@ async def get_story_details(story_id: int, user = Depends(get_authenticated_user
 
         story = story_response.data[0]
 
+        # Resolve author display name with fallbacks: first name > full name > email > Anonymous
+        author_name = story.get("author_name") or ""
+        if not author_name:
+            try:
+                user_id_val = story.get("user_id")
+                if user_id_val:
+                    admin_user = supabase.auth.admin.get_user_by_id(user_id_val).user
+                    if admin_user:
+                        meta = getattr(admin_user, "user_metadata", {}) or {}
+                        full_name = (
+                            meta.get("full_name")
+                            or meta.get("name")
+                            or meta.get("display_name")
+                            or meta.get("first_name")
+                        )
+                        if isinstance(full_name, str) and full_name.strip():
+                            author_name = full_name.strip().split()[0]
+                        elif isinstance(meta.get("first_name"), str) and meta.get("first_name").strip():
+                            author_name = meta.get("first_name").strip()
+                        elif getattr(admin_user, "email", None):
+                            author_name = admin_user.email
+            except Exception as e:
+                logger.warning(f"Could not resolve author name for story {story_id}: {e}")
+
+        if not author_name:
+            author_name = "Anonymous"
+
         return {
             "id": story["id"],
             "story_title": story["story_title"],
@@ -92,7 +119,7 @@ async def get_story_details(story_id: int, user = Depends(get_authenticated_user
             "total_chapters": story.get("total_chapters", 0),
             "current_chapter": story.get("current_chapter", 0),
             "is_public": story.get("is_public", False),
-            "author_name": story.get("author_name", "Anonymous Author"),
+            "author_name": author_name,
             "cover_image_url": story.get("cover_image_url"),
             "estimated_total_words": story.get("estimated_total_words", 0),
         }

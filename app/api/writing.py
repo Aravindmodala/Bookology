@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.dependencies.supabase import (
     get_authenticated_user_optional,
+    get_authenticated_user,
 )
 from app.core.logger_config import setup_logger
 
@@ -162,3 +163,28 @@ async def suggest_continue_endpoint(
         )
 
 
+@router.post("/story_chat")
+async def story_chat_endpoint(
+    payload: dict,
+    user = Depends(get_authenticated_user),
+):
+    """Chat about a story with retrieval-backed context.
+
+    Expects: { user_id, story_id, message, session_id }
+    """
+    try:
+        from app.services.chatbot import story_chatbot, ChatbotError
+        if not story_chatbot:
+            raise HTTPException(status_code=500, detail="Chatbot not initialized")
+        user_id = str(user.id)
+        story_id = str(payload.get("story_id"))
+        message = str(payload.get("message") or "").strip()
+        session_id = payload.get("session_id")
+        if not story_id or not message:
+            raise HTTPException(status_code=400, detail="story_id and message are required")
+        result = story_chatbot.chat(user_id=user_id, story_id=story_id, message=message, session_id=session_id)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat failed: {e}")

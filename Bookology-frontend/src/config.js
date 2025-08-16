@@ -13,6 +13,7 @@ export const API_ENDPOINTS = {
   GENERATE_OUTLINE: '/lc_generate_outline',
   SAVE_OUTLINE: '/save_outline',  // New endpoint for saving edited outline
   GENERATE_CHAPTER: '/lc_generate_chapter',
+  STREAM_FIRST_CHAPTER: '/stream_first_chapter',
   SAVE_STORY: '/stories/save',
   GENERATE_NEXT_CHAPTER: '/generate_next_chapter',
   SAVE_CHAPTER: '/save_chapter_with_summary',
@@ -42,6 +43,8 @@ export const API_ENDPOINTS = {
   // Cover generation endpoints
   GENERATE_COVER: '/story/{story_id}/generate_cover',
   GET_COVER_STATUS: '/story/{story_id}/cover_status',
+  UPLOAD_COVER: '/story/{story_id}/upload_cover',
+  REMOVE_COVER: '/story/{story_id}/cover',
   // Rewrite functionality
   REWRITE_TEXT: '/rewrite_text',
   SUGGEST_CONTINUE: '/suggest_continue',

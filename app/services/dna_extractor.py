@@ -145,15 +145,6 @@ Extract ALL essential story elements and return as JSON:
         "tension_level": "high/medium/low",
         "emotional_arcs": {{"character_name": "emotional journey this chapter"}}
     }},
-    "ending_genetics": {{
-        "final_scene_context": "detailed description of chapter ending",
-        "last_dialogue": "final spoken words with speaker",
-        "last_action": "final significant action with who did it",
-        "immediate_situation": "what situation characters are in RIGHT NOW",
-        "scene_status": "ongoing/complete/transitional",
-        "cliffhanger_type": "question/decision/suspense/revelation/none",
-        "urgent_needs": ["what characters urgently need to address next"]
-    }},
     "continuity_anchors": [
         {{
             "type": "character_fact/relationship/object/location/rule",

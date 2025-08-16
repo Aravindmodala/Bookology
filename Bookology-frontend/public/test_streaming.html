@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Bookology - Test Chapter 1 Streaming</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; color: #0a0a0a; }
+        #output { border: 1px solid #e5e7eb; padding: 16px; min-height: 320px; background: #fafafa; white-space: pre-wrap; }
+        button { padding: 10px 16px; font-size: 15px; margin: 8px 8px 16px 0; cursor: pointer; }
+        .token { color: #111827; }
+        .chapter-done { color: #16a34a; font-weight: 600; }
+        .choices { color: #2563eb; font-weight: 600; }
+        .error { color: #dc2626; }
+        .row { margin: 8px 0; }
+        textarea { width: 100%; min-height: 140px; font-family: inherit; font-size: 14px; padding: 8px; }
+        input { padding: 8px; font-size: 14px; width: 140px; }
+        label { font-size: 14px; color: #374151; }
+    </style>
+</head>
+<body>
+    <h1>Chapter 1 Streaming Test</h1>
+    <p>This page tests the backend endpoint <code>/stream_first_chapter</code> by streaming tokens, then emitting choices after the "### choices" delimiter.</p>
+
+    <div class="row">
+        <label>API URL</label><br />
+        <input id="api" value="http://127.0.0.1:8000/stream_first_chapter" />
+    </div>
+    <div class="row">
+        <label>Story ID</label><br />
+        <input id="storyId" value="123" />
+    </div>
+    <div class="row">
+        <label>Outline</label><br />
+        <textarea id="outline">A young explorer discovers an ancient civilization hidden in the Amazon rainforest. The story follows their journey through mysterious ruins, encounters with indigenous tribes, and the discovery of a powerful artifact that could change the world. The explorer must navigate dangerous terrain, solve ancient puzzles, and make difficult choices about whether to share their discovery with the outside world or protect the secrets they've uncovered.</textarea>
+    </div>
+
+    <button onclick="startStream()">Start Streaming Chapter 1</button>
+    <button onclick="clearOutput()">Clear Output</button>
+
+    <div id="output">Ready to test streaming...</div>
+
+    <script>
+        async function startStream() {
+            const output = document.getElementById('output');
+            const api = document.getElementById('api').value.trim();
+            const storyId = parseInt(document.getElementById('storyId').value, 10) || null;
+            const outline = document.getElementById('outline').value.trim();
+
+            output.textContent = 'Starting stream...\n\n';
+
+            try {
+                const response = await fetch(api, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ outline, chapter_number: 1, story_id: storyId })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    let idx;
+                    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                        const chunk = buffer.slice(0, idx);
+                        buffer = buffer.slice(idx + 2);
+                        const lines = chunk.split('\n');
+                        const ev = (lines.find(l => l.startsWith('event: ')) || '').slice(7).trim();
+                        const dataLine = (lines.find(l => l.startsWith('data: ')) || '').slice(6);
+                        if (!ev || !dataLine) continue;
+                        try {
+                            const data = JSON.parse(dataLine);
+                            if (ev === 'chapter_token') {
+                                output.innerHTML += `<span class="token">${data.token}</span>`;
+                            } else if (ev === 'chapter_done') {
+                                output.innerHTML += `\n\n<span class="chapter-done">✅ Chapter complete</span>\n`;
+                                output.innerHTML += `Word count: ${data.word_count} | Chapter ID: ${data.chapter_id ?? 'N/A'}\n\n`;
+                            } else if (ev === 'choices') {
+                                output.innerHTML += `<span class="choices">Choices:</span>\n`;
+                                (Array.isArray(data) ? data : []).forEach((c, i) => {
+                                    output.innerHTML += `${i + 1}. ${c.title}\n   ${c.description}\n\n`;
+                                });
+                            } else if (ev === 'error') {
+                                output.innerHTML += `<span class="error">Error: ${data.message}</span>\n`;
+                            }
+                        } catch (e) {
+                            output.innerHTML += `<span class="error">Parse error: ${e.message}</span>\n`;
+                        }
+                    }
+                }
+
+                output.innerHTML += '\nStreaming complete.\n';
+            } catch (err) {
+                output.innerHTML += `<span class="error">${err.message}</span>\n`;
+                console.error(err);
+            }
+        }
+
+        function clearOutput() {
+            document.getElementById('output').textContent = 'Ready to test streaming...';
+        }
+    </script>
+</body>
+</html>
+
+

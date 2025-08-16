@@ -68,8 +68,7 @@ export default function Header({ variant = 'default' }) {
       <div className="container py-4 flex items-center justify-between">
         <Brand />
         <nav className="hidden md:flex items-center gap-6 text-sm nav-roman">
-          <a href="#how" className="nav-soft">How it works</a>
-          <a href="#pricing" className="nav-soft">Pricing</a>
+          <Link to="/#how" className="nav-soft">How it works</Link>
           <Link to="/explore" className="nav-soft">Explore</Link>
           <Link to="/stories" className="nav-soft">Library</Link>
         </nav>

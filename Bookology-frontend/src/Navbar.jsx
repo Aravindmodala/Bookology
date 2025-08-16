@@ -147,9 +147,10 @@ export default function Navbar() {
                       <button
                         className="flex items-center w-full text-left px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-lg transition-all duration-200 focus:outline-none focus:bg-gray-800"
                         onClick={() => { 
-                          console.log('Profile details clicked');
-                          setDropdownOpen(false); 
-                          alert('Profile details coming soon!'); 
+                          if (import.meta.env.MODE === 'development') {
+                            console.log('Profile details clicked');
+                          }
+                          setDropdownOpen(false);
                         }}
                         type="button"
                         data-testid="profile-details-button"

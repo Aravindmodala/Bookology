@@ -5,7 +5,7 @@ import { useAuth } from './AuthContext';
 import RichTextEditor from './components/RichTextEditor';
 import { createApiUrl, API_ENDPOINTS } from './config';
 import StoryCover from './components/StoryCover';
-import { ArrowLeft, Save, Sparkles, Edit3, MessageSquare, Lightbulb, Zap, Type } from 'lucide-react';
+import { ArrowLeft, Save, Sparkles, Edit3, MessageSquare, Lightbulb, Zap, Type, Bold as BoldIcon, Italic as ItalicIcon, Image as ImageIcon, Minus, Plus, RefreshCw, Feather } from 'lucide-react';
 import RightSidebar from './components/RightSidebar';
 
 function DNASection({ title, children }) {
@@ -65,8 +65,34 @@ export default function MinimalEditor() {
   const [choices, setChoices] = useState([]);
   const [selectedChoiceId, setSelectedChoiceId] = useState(null);
   const [generateWithChoiceLoading, setGenerateWithChoiceLoading] = useState(false);
+  // Writing animations & states
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [pageFlip, setPageFlip] = useState(false);
+  const [isRewriting, setIsRewriting] = useState(false);
+  const [previousHtml, setPreviousHtml] = useState('');
+  const [showUndo, setShowUndo] = useState(false);
+  const [wiping, setWiping] = useState(false);
+
+  const triggerPageFlip = useCallback(() => {
+    setPageFlip(true);
+    setTimeout(() => setPageFlip(false), 350);
+  }, []);
   const [sidebarChapters, setSidebarChapters] = useState([]); // [{chapter_number, title, exists, id?}]
   const chapter1TriggeredRef = useRef(false);
+  // Streaming helpers
+  const streamAbortRef = useRef(null);
+  const streamPlainRef = useRef('');
+  const streamUpdateScheduledRef = useRef(false);
+  // Track editor instance and selection for Improve Writing
+  const editorRef = useRef(null);
+  const selectionRef = useRef({ text: '', from: 0, to: 0 });
+  const appendTokenToEditor = useCallback((token) => {
+    try {
+      const editor = editorRef.current;
+      if (!editor || !token) return;
+      editor.chain().focus().insertContent(token).run();
+    } catch {}
+  }, []);
 
   const totalChapters = story?.total_chapters ?? 0;
   const progressPct = useMemo(() => {
@@ -218,7 +244,16 @@ export default function MinimalEditor() {
   const generateChapter1FromOutline = useCallback(async () => {
     if (!story?.id || !story?.story_outline || !session?.access_token) return;
     try {
-      const resp = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_CHAPTER), {
+      setIsGenerating(true);
+      // Prepare editor for typewriter: show Chapter 1 editor immediately
+      setActiveChapter({ id: null, chapter_number: 1, title: 'Chapter 1' });
+      setEditorHtml('');
+      streamPlainRef.current = '';
+
+      // Streaming POST to /stream_first_chapter
+      const controller = new AbortController();
+      streamAbortRef.current = controller;
+      const res = await fetch(createApiUrl(API_ENDPOINTS.STREAM_FIRST_CHAPTER), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -228,17 +263,88 @@ export default function MinimalEditor() {
           outline: story.story_outline,
           chapter_number: 1,
           story_id: story.id
-        })
+        }),
+        signal: controller.signal
       });
-      if (resp.ok) {
-        await fetchData();
-      } else {
-        console.warn('Failed to generate Chapter 1:', resp.status);
+      if (!res.ok || !res.body) {
+        console.warn('Stream failed to start', res.status);
+        setIsGenerating(false);
+        return;
       }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      const flushToEditor = () => {
+        if (streamUpdateScheduledRef.current) return;
+        streamUpdateScheduledRef.current = true;
+        setTimeout(() => {
+          const text = streamPlainRef.current;
+          const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+          setWordCount(words);
+          setReadMinutes(Math.max(1, Math.ceil(words / 200)));
+          streamUpdateScheduledRef.current = false;
+        }, 30);
+      };
+
+      const pump = async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
+
+          for (const evt of events) {
+            const lines = evt.split('\n');
+            let eventType = null;
+            let dataLine = '';
+            for (const line of lines) {
+              if (line.startsWith('event:')) eventType = line.slice(6).trim();
+              if (line.startsWith('data:')) dataLine = line.slice(5).trim();
+            }
+            if (!eventType) continue;
+            try {
+              const payload = dataLine ? JSON.parse(dataLine) : {};
+              if (eventType === 'chapter_token') {
+                const token = payload.token || '';
+                streamPlainRef.current += token;
+                // Append directly into TipTap for true typewriter effect
+                appendTokenToEditor(token);
+                flushToEditor();
+              } else if (eventType === 'chapter_done') {
+                // Server already saved if story_id present; we’ll refresh after choices
+                if (typeof payload.word_count === 'number') {
+                  setWordCount(payload.word_count);
+                  setReadMinutes(Math.max(1, Math.ceil(payload.word_count / 200)));
+                }
+              } else if (eventType === 'choices') {
+                // Finalize stream
+                setIsGenerating(false);
+                // Refresh to load saved chapter + choices from DB
+                await fetchData();
+                triggerPageFlip();
+              } else if (eventType === 'error') {
+                console.warn('Stream error:', payload?.message || payload);
+                setIsGenerating(false);
+              }
+            } catch (e) {
+              // Non-JSON data line; ignore
+            }
+          }
+        }
+      };
+
+      await pump();
     } catch (e) {
-      console.warn('Error generating Chapter 1 from outline:', e);
+      console.warn('Error streaming Chapter 1:', e);
+    } finally {
+      setIsGenerating(false);
+      streamAbortRef.current = null;
     }
-  }, [story?.id, story?.story_outline, session?.access_token, fetchData]);
+  }, [story?.id, story?.story_outline, session?.access_token, fetchData, convertTextToHtml, triggerPageFlip]);
 
   useEffect(() => {
     if (
@@ -301,6 +407,11 @@ export default function MinimalEditor() {
 
   const characters = outline?.characters || outline?.dna?.characters || [];
   const setting = outline?.setting || outline?.dna?.setting || outline?.world || '';
+  // Which chapter number is being generated (for sidebar indicator)
+  const generatingChapterNumber = useMemo(() => {
+    if (!isGenerating) return null;
+    return (activeChapter?.chapter_number || 0) + 1;
+  }, [isGenerating, activeChapter?.chapter_number]);
 
   const handleGenerateAI = () => {
     if (!storyId) return;
@@ -346,6 +457,7 @@ export default function MinimalEditor() {
     }
     if (!story?.id || !session?.access_token || !activeChapter) return;
     setGenerateWithChoiceLoading(true);
+    setIsGenerating(true);
     try {
       // Compute next chapter number from activeChapter
       const nextChapterNumber = (activeChapter?.chapter_number || 0) + 1;
@@ -366,12 +478,14 @@ export default function MinimalEditor() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       // Refresh story and first chapter after generation
       await fetchData();
+      triggerPageFlip();
       setSelectedChoiceId(null);
       await fetchChoices();
     } catch (e) {
       setChoicesError('Failed to continue with the selected choice.');
     } finally {
       setGenerateWithChoiceLoading(false);
+      setIsGenerating(false);
     }
   }, [selectedChoiceId, story?.id, session?.access_token, activeChapter, choices, fetchData, fetchChoices]);
 
@@ -379,6 +493,7 @@ export default function MinimalEditor() {
   const handleGenerateNextChapter = useCallback(async () => {
     if (!storyId || !session?.access_token || !activeChapter) return;
     try {
+      setIsGenerating(true);
       const nextChapterNumber = (activeChapter?.chapter_number || 0) + 1;
       const resp = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_NEXT_CHAPTER), {
         method: 'POST',
@@ -394,9 +509,13 @@ export default function MinimalEditor() {
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       await fetchData();
+      triggerPageFlip();
       if (gameMode) await fetchChoices();
     } catch (e) {
       console.warn('Failed to generate next chapter:', e);
+    }
+    finally {
+      setIsGenerating(false);
     }
   }, [storyId, session?.access_token, activeChapter, story?.story_outline, fetchData, gameMode, fetchChoices]);
 
@@ -452,6 +571,112 @@ export default function MinimalEditor() {
   }, [storyId, user?.id, session?.access_token, gameMode, fetchChoices, convertTextToHtml]);
 
   const title = story?.story_title || story?.title || 'Untitled Story';
+  // Prefer persisted chapter.title; fallback to outline sidebar title; else generic
+  const activeChapterTitle = useMemo(() => {
+    const num = activeChapter?.chapter_number;
+    const fromSidebar = sidebarChapters.find(ch => ch.chapter_number === num)?.title;
+    const isGeneric = (t) => !!t && /^\s*chapter\s+\d+\s*$/i.test(String(t));
+    // Prefer outline/sidebar title if present and non-generic
+    if (fromSidebar && String(fromSidebar).trim() && !isGeneric(fromSidebar)) return fromSidebar;
+    // Otherwise use DB title if non-generic
+    if (activeChapter?.title && String(activeChapter.title).trim() && !isGeneric(activeChapter.title)) return activeChapter.title;
+    // Fallbacks
+    return num ? `Chapter ${num}` : 'Chapter 1';
+  }, [activeChapter?.title, activeChapter?.chapter_number, sidebarChapters]);
+
+  // Toolbar actions for TipTap editor
+  const applyBold = () => editorRef.current?.chain().focus().toggleBold().run();
+  const applyItalic = () => editorRef.current?.chain().focus().toggleItalic().run();
+  const [fontSizeRem, setFontSizeRem] = useState(1.0); // selection font size multiplier
+  const applyFontSize = (rem) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (Math.abs(rem - 1.0) < 0.01) {
+      editor.chain().focus().unsetMark('textStyle').run();
+    } else {
+      editor.chain().focus().setMark('textStyle', { fontSize: `${rem}rem` }).run();
+    }
+  };
+  const increaseFont = () => {
+    setFontSizeRem((prev) => {
+      const next = Math.min(1.5, +(prev + 0.05).toFixed(2));
+      applyFontSize(next);
+      return next;
+    });
+  };
+  const decreaseFont = () => {
+    setFontSizeRem((prev) => {
+      const next = Math.max(0.85, +(prev - 0.05).toFixed(2));
+      applyFontSize(next);
+      return next;
+    });
+  };
+  const resetFont = () => {
+    setFontSizeRem(1.0);
+    const editor = editorRef.current;
+    editor?.chain().focus().unsetMark('textStyle').run();
+  };
+
+  const handleInsertImage = async () => {
+    try {
+      // Create a hidden file input for image selection
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/webp';
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        // Ask for alt text
+        const alt = window.prompt('Alt text for accessibility (required):', '') || '';
+        // Basic size cap (client-side)
+        if (file.size > 8 * 1024 * 1024) {
+          alert('Please choose an image under 8MB.');
+          return;
+        }
+        // Insert a temporary base64 image immediately
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const tempSrc = String(reader.result || '');
+          const editor = editorRef.current;
+          editor?.chain().focus().setImage({ src: tempSrc, alt }).run();
+
+          // Try to upload to Supabase Storage and swap the src once available
+          try {
+            const userId = user?.id;
+            const storyId = story?.id || storyIdFromPath || sp.get('story');
+            const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+            const path = `editor-assets/${userId || 'anon'}/${storyId || 'unknown'}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+            const { data: up, error: upErr } = await supabase.storage.from('editor-assets').upload(path, file, {
+              cacheControl: '3600',
+              upsert: true,
+              contentType: file.type || 'image/jpeg'
+            });
+            if (!upErr) {
+              const pub = supabase.storage.from('editor-assets').getPublicUrl(path);
+              const publicUrl = pub?.data?.publicUrl;
+              if (publicUrl) {
+                // Replace temp src with public URL
+                editor?.chain().focus().command(({ tr, state }) => {
+                  let replaced = false;
+                  state.doc.descendants((node, pos) => {
+                    if (node.type.name === 'image' && node.attrs.src === tempSrc) {
+                      tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: publicUrl });
+                      replaced = true;
+                      return false;
+                    }
+                    return true;
+                  });
+                  return true;
+                }).run();
+              }
+            }
+          } catch {}
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    } catch {}
+  };
 
   // Fetch stories for story picker
   useEffect(() => {
@@ -490,7 +715,7 @@ export default function MinimalEditor() {
           <button onClick={() => navigate(-1)} className="p-2 hover:bg-white/10 rounded" aria-label="Back">
             <ArrowLeft className="w-4 h-4 text-off" />
           </button>
-          <div className="text-sm text-[#A9B1C7]">Chapter {activeChapter?.chapter_number || 1}</div>
+          <div className="text-sm text-[#A9B1C7]">{activeChapterTitle}</div>
         </div>
         <div className="flex-1 flex items-center justify-center">
           <div className="text-sm text-[#A9B1C7] truncate">
@@ -536,6 +761,12 @@ export default function MinimalEditor() {
       </div>
 
       <div className="h-px bg-white/10" />
+      {/* Story Beam progress line */}
+      {isGenerating && (
+        <div className="relative h-[2px] bg-transparent">
+          <div className="story-beam" />
+        </div>
+      )}
 
       <div className={`flex-1 flex overflow-hidden transition-all ${focus ? 'bg-black/20' : ''}`}>
         {/* Left Sidebar */}
@@ -579,13 +810,19 @@ export default function MinimalEditor() {
           {/* Planned Chapters from Outline */}
           {sidebarChapters.length > 0 && (
             <div className="mt-8">
-              <div className="text-sm font-semibold mb-2 text-off">Chapters</div>
+              <div className="text-sm font-semibold mb-1 text-off">Chapters</div>
+              {isGenerating && (
+                <div className="mb-2 text-xs text-violet-300 flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+                  <span>Writing Chapter {generatingChapterNumber}…</span>
+                </div>
+              )}
               <div className="space-y-1">
                 {sidebarChapters.map(ch => (
                   <button
                     key={ch.chapter_number}
                     onClick={() => handleLoadChapter(ch.chapter_number)}
-                    className={`w-full text-left px-3 py-2 rounded border backdrop-blur-md ${
+                    className={`relative w-full text-left px-3 py-2 rounded border backdrop-blur-md ${
                       activeChapter?.chapter_number === ch.chapter_number
                         ? 'bg-white/10 border-violet-400/40 text-off'
                         : ch.exists
@@ -594,8 +831,17 @@ export default function MinimalEditor() {
                     }`}
                     title={ch.exists ? 'Open chapter' : 'Planned (not yet written)'}
                   >
-                    <span className="text-sm">Chapter {ch.chapter_number}: {ch.title}</span>
-                    {!ch.exists && <span className="ml-2 text-xs text-yellow-300/90">(planned)</span>}
+                    {isGenerating && ch.chapter_number === generatingChapterNumber ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-violet-500/90 animate-pulse" />
+                        <span className="text-sm text-off">Generating chapter…</span>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-sm">Chapter {ch.chapter_number}: {ch.title}</span>
+                        {!ch.exists && <span className="ml-2 text-xs text-yellow-300/90">(planned)</span>}
+                      </>
+                    )}
                   </button>
                 ))}
               </div>
@@ -607,48 +853,103 @@ export default function MinimalEditor() {
         {/* Editor Center */}
         <div className="flex-1 p-8 md:p-10 overflow-y-auto no-scrollbar">
           {!activeChapter ? (
-            <div className="border border-white/10 rounded-xl p-12 text-center bg-white/5 backdrop-blur-md shadow-[0_8px_40px_rgba(0,0,0,0.45)]">
-              <div className="mx-auto w-14 h-14 rounded-lg bg-violet-500/15 flex items-center justify-center text-violet-400 mb-6">
-                <BookIcon />
+            isGenerating ? (
+              <div className="relative border border-white/10 rounded-xl p-10 text-center bg-white/5 backdrop-blur-md shadow-[0_8px_40px_rgba(0,0,0,0.45)]" aria-busy="true">
+                <div className="mx-auto w-14 h-14 rounded-lg bg-violet-500/15 flex items-center justify-center text-violet-400 mb-5">
+                  <Feather className="w-6 h-6 animate-float" />
+                </div>
+                <div className="text-xl font-semibold mb-1 text-off">Your professional writer is crafting your opening…</div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/70 text-xs whisper-dots" aria-live="polite">
+                  <span>Crafting Chapter 1</span>
+                  <span className="dots" />
+                </div>
+                {/* Skeleton paragraphs */}
+                <div className="mt-8 space-y-3">
+                  <div className="skeleton-line" />
+                  <div className="skeleton-line w-11/12" />
+                  <div className="skeleton-line w-10/12" />
+                  <div className="skeleton-line w-9/12" />
+                  <div className="skeleton-line w-11/12" />
+                </div>
+                {/* Page-turn corner for when it completes */}
+                <div className={`page-corner ${pageFlip ? 'page-corner--flip' : ''}`} aria-hidden="true" />
               </div>
-              <div className="text-2xl font-semibold mb-2 text-off">Ready to Write Chapter 1?</div>
-              <div className="text-white/70 mb-8">Generate your chapter with AI or start writing from scratch.</div>
-              <div className="flex items-center justify-center gap-4">
-                <button
-                  onClick={handleGenerateAI}
-                  className="px-4 py-2 rounded bg-violet-600 hover:bg-violet-500 text-sm font-medium text-white flex items-center space-x-2 shadow-[0_8px_40px_rgba(0,0,0,0.45)]"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Generate with AI</span>
-                </button>
-                <button
-                  onClick={handleStartScratch}
-                  className="px-4 py-2 rounded bg-white/5 hover:bg-white/10 text-sm font-medium text-off flex items-center space-x-2 border border-white/10 backdrop-blur-md"
-                >
-                  <Edit3 className="w-4 h-4" />
-                  <span>Start from Scratch</span>
-                </button>
+            ) : (
+              <div className="border border-white/10 rounded-xl p-12 text-center bg-white/5 backdrop-blur-md shadow-[0_8px_40px_rgba(0,0,0,0.45)]">
+                <div className="mx-auto w-14 h-14 rounded-lg bg-violet-500/15 flex items-center justify-center text-violet-400 mb-6">
+                  <BookIcon />
+                </div>
+                <div className="text-2xl font-semibold mb-2 text-off">Ready to Write Chapter 1?</div>
+                <div className="text-white/70 mb-8">Generate your chapter with AI or start writing from scratch.</div>
+                <div className="flex items-center justify-center gap-4">
+                  <button
+                    onClick={handleGenerateAI}
+                    className="px-4 py-2 rounded bg-violet-600 hover:bg-violet-500 text-sm font-medium text-white flex items-center space-x-2 shadow-[0_8px_40px_rgba(0,0,0,0.45)]"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Generate with AI</span>
+                  </button>
+                  <button
+                    onClick={handleStartScratch}
+                    className="px-4 py-2 rounded bg-white/5 hover:bg-white/10 text-sm font-medium text-off flex items-center space-x-2 border border-white/10 backdrop-blur-md"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    <span>Start from Scratch</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )
           ) : (
             <div className={`${focus ? 'max-w-[900px]' : 'max-w-[820px]'} mx-auto`}>
               <div className="mb-6">
+                <div className="mx-auto w-full max-w-[920px] px-2 sm:px-3">
                 <h1 className="text-3xl font-semibold text-off">{title}</h1>
-                <div className="mt-1 text-sm text-white/70">
-                  {activeChapter?.title ? activeChapter.title : `Chapter ${activeChapter?.chapter_number ?? ''}`}
+                  <div className="mt-1 text-sm text-white/70">{activeChapterTitle}</div>
+                  {/* Inline Toolbar */}
+                  <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-2 flex flex-wrap items-center gap-2">
+                    <button onClick={applyBold} title="Bold (Ctrl+B)" aria-label="Bold" className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+                      <BoldIcon className="w-4 h-4" />
+                    </button>
+                    <button onClick={applyItalic} title="Italic (Ctrl+I)" aria-label="Italic" className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+                      <ItalicIcon className="w-4 h-4" />
+                    </button>
+                    <div className="h-6 w-px bg-white/10" />
+                    <div className="flex items-center gap-2">
+                      <Type className="w-4 h-4 text-white/70" />
+                      <button onClick={decreaseFont} title="Decrease font" aria-label="Decrease font" className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+                        <Minus className="w-4 h-4" />
+                      </button>
+                      <span className="px-2 py-1 text-xs text-white/80 bg-white/5 border border-white/10 rounded min-w-[48px] text-center">{Math.round(fontSizeRem * 100)}%</span>
+                      <button onClick={increaseFont} title="Increase font" aria-label="Increase font" className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+                        <Plus className="w-4 h-4" />
+                      </button>
+                      <button onClick={resetFont} title="Reset font" aria-label="Reset font" className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+                        <RefreshCw className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="h-6 w-px bg-white/10" />
+                    <button onClick={handleInsertImage} title="Insert image" aria-label="Insert image" className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+                      <ImageIcon className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
-              <RichTextEditor
-                value={editorHtml}
-                onChange={(html) => {
-                  setEditorHtml(html);
-                  const text = html.replace(/<[^>]*>/g, '');
-                  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-                  setWordCount(words);
-                  setReadMinutes(Math.max(1, Math.ceil(words / 200)));
-                }}
-                className={`${gameMode ? 'outline outline-1 outline-violet-400/40' : ''} editor-paragraphs relative w-full min-h-[700px] bg-white/5 border border-white/10 rounded-2xl p-8 text-off text-[18px] leading-8 focus:outline-none backdrop-blur-md before:content-[''] before:absolute before:inset-0 before:rounded-2xl before:pointer-events-none`}
-              />
+              {/* Editor with optional wipe transition */}
+              <div className={`${wiping ? 'transition duration-200 ease-out opacity-0 blur-[2px]' : ''}`}>
+                <RichTextEditor
+                  value={editorHtml}
+                  onChange={(html) => {
+                    setEditorHtml(html);
+                    const text = html.replace(/<[^>]*>/g, '');
+                    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+                    setWordCount(words);
+                    setReadMinutes(Math.max(1, Math.ceil(words / 200)));
+                  }}
+                  onSelectionChange={(text, range) => { selectionRef.current = { text, ...range }; }}
+                  onReady={(editor) => { editorRef.current = editor; }}
+                  className={`${gameMode ? 'outline outline-1 outline-violet-400/40' : ''} editor-paragraphs relative w-full min-h-[700px] bg-white/5 border border-white/10 rounded-2xl p-8 text-off text-[18px] leading-8 focus:outline-none backdrop-blur-md before:content-[''] before:absolute before:inset-0 before:rounded-2xl before:pointer-events-none`}
+                />
+              </div>
 
               {/* Game Mode: Choices Under Editor */}
               {gameMode && (
@@ -724,6 +1025,21 @@ export default function MinimalEditor() {
                   </div>
                 </div>
               )}
+              {/* Undo banner for rewrite */}
+              {showUndo && (
+                <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white/10 border border-white/20 text-white/90 rounded-xl px-4 py-2 shadow-lg backdrop-blur-md flex items-center gap-3 z-50">
+                  <span>New version saved.</span>
+                  <button
+                    className="px-2 py-1 text-xs rounded bg-white/15 hover:bg-white/25 border border-white/20"
+                    onClick={() => {
+                      setEditorHtml(previousHtml);
+                      setShowUndo(false);
+                    }}
+                  >
+                    Undo rewrite
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -732,9 +1048,74 @@ export default function MinimalEditor() {
         <RightSidebar
           focusCollapsed={focus}
           onContinue={handleGenerateNextChapter}
-          onImprove={() => {}}
+          onImprove={async () => {
+            try {
+              const token = session?.access_token;
+              if (!token) return;
+              const selText = (selectionRef.current?.text || '').trim();
+              if (!selText) return;
+              const resp = await fetch(createApiUrl(API_ENDPOINTS.REWRITE_TEXT), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ selected_text: selText, story_context: {} })
+              });
+              if (!resp.ok) return;
+              const data = await resp.json();
+              const rewritten = (data && data.rewritten_text) ? String(data.rewritten_text) : '';
+              if (!rewritten || !editorRef.current) return;
+              const editor = editorRef.current;
+              const { from, to } = selectionRef.current;
+              editor.chain().focus().command(({ tr }) => { tr.insertText(rewritten, from, to); return true; }).run();
+              const text = editor.getText();
+              const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+              setWordCount(words);
+              setReadMinutes(Math.max(1, Math.ceil(words / 200)));
+            } catch {}
+          }}
           onDialogue={() => {}}
           onBrainstorm={() => {}}
+          onRewriteChapter={async () => {
+            // Re-generate the current chapter content using backend next-chapter API with same chapter number
+            if (!storyId || !session?.access_token || !activeChapter) return;
+            try {
+              // Prepare rewrite UX: page wipe + skeletons
+              setPreviousHtml(editorHtml);
+              setWiping(true);
+              setTimeout(() => {
+                setEditorHtml('');
+                setWiping(false);
+              }, 200);
+              setIsRewriting(true);
+              setIsGenerating(true);
+              // Reuse generate_next_chapter with same chapter number to rewrite
+              const resp = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_NEXT_CHAPTER), {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({
+                  story_id: parseInt(storyId),
+                  chapter_number: activeChapter.chapter_number,
+                  story_outline: story?.story_outline || ''
+                })
+              });
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              await fetchData();
+              // Ensure we reload the same chapter number if user switched
+              await handleLoadChapter(activeChapter.chapter_number);
+              triggerPageFlip();
+              setShowUndo(true);
+              setTimeout(() => setShowUndo(false), 30000);
+            } catch (e) {
+              console.warn('Failed to rewrite chapter:', e);
+              // Restore previous content if error
+              setEditorHtml(previousHtml);
+            } finally {
+              setIsGenerating(false);
+              setIsRewriting(false);
+            }
+          }}
         />
       </div>
     </div>
