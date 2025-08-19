@@ -26,7 +26,7 @@ export default function HeroCarousel({ stories }: Props) {
 			<motion.img
 				src={current.coverUrl}
 				alt={current.title}
-				className="absolute inset-0 w-full h-full object-cover"
+				className="absolute inset-0 w-full h-full object-cover transform-gpu will-change-transform"
 				style={{ x: springX, y: springY }}
 				decoding="async"
 				fetchpriority="high"
@@ -49,8 +49,11 @@ export default function HeroCarousel({ stories }: Props) {
 						<div className="w-8 h-8 rounded-full bg-white/20" aria-hidden />
 					)}
 					<span className="text-white/80 text-sm">{current.author?.name}</span>
-					<Link to={`/story/${current.id}`} className="ml-4 px-4 py-2 rounded-lg bg-white text-black font-semibold shadow">
-						Read
+					<Link to={`/story/${current.id}`} className="ml-4 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold shadow">
+						Read Now
+					</Link>
+					<Link to={`/story/${current.id}`} className="px-4 py-2 rounded-lg border border-white/30 text-white hover:bg-white/10">
+						More Info
 					</Link>
 				</div>
 			</div>

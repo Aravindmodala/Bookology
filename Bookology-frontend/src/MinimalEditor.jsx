@@ -79,20 +79,9 @@ export default function MinimalEditor() {
   }, []);
   const [sidebarChapters, setSidebarChapters] = useState([]); // [{chapter_number, title, exists, id?}]
   const chapter1TriggeredRef = useRef(false);
-  // Streaming helpers
-  const streamAbortRef = useRef(null);
-  const streamPlainRef = useRef('');
-  const streamUpdateScheduledRef = useRef(false);
   // Track editor instance and selection for Improve Writing
   const editorRef = useRef(null);
   const selectionRef = useRef({ text: '', from: 0, to: 0 });
-  const appendTokenToEditor = useCallback((token) => {
-    try {
-      const editor = editorRef.current;
-      if (!editor || !token) return;
-      editor.chain().focus().insertContent(token).run();
-    } catch {}
-  }, []);
 
   const totalChapters = story?.total_chapters ?? 0;
   const progressPct = useMemo(() => {
@@ -240,20 +229,13 @@ export default function MinimalEditor() {
     if (storyId) fetchData();
   }, [fetchData, storyId]);
 
-  // Trigger Chapter 1 generation when arriving from StoryCreator with outline
+  // Trigger Chapter 1 generation when arriving from StoryCreator with outline (non-streaming)
   const generateChapter1FromOutline = useCallback(async () => {
     if (!story?.id || !story?.story_outline || !session?.access_token) return;
     try {
       setIsGenerating(true);
-      // Prepare editor for typewriter: show Chapter 1 editor immediately
-      setActiveChapter({ id: null, chapter_number: 1, title: 'Chapter 1' });
-      setEditorHtml('');
-      streamPlainRef.current = '';
-
-      // Streaming POST to /stream_first_chapter
-      const controller = new AbortController();
-      streamAbortRef.current = controller;
-      const res = await fetch(createApiUrl(API_ENDPOINTS.STREAM_FIRST_CHAPTER), {
+      // Call non-streaming endpoint to generate and save Chapter 1
+      const res = await fetch(createApiUrl(API_ENDPOINTS.GENERATE_CHAPTER), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -263,86 +245,16 @@ export default function MinimalEditor() {
           outline: story.story_outline,
           chapter_number: 1,
           story_id: story.id
-        }),
-        signal: controller.signal
+        })
       });
-      if (!res.ok || !res.body) {
-        console.warn('Stream failed to start', res.status);
-        setIsGenerating(false);
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-
-      const flushToEditor = () => {
-        if (streamUpdateScheduledRef.current) return;
-        streamUpdateScheduledRef.current = true;
-        setTimeout(() => {
-          const text = streamPlainRef.current;
-          const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-          setWordCount(words);
-          setReadMinutes(Math.max(1, Math.ceil(words / 200)));
-          streamUpdateScheduledRef.current = false;
-        }, 30);
-      };
-
-      const pump = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          const events = buffer.split('\n\n');
-          buffer = events.pop() || '';
-
-          for (const evt of events) {
-            const lines = evt.split('\n');
-            let eventType = null;
-            let dataLine = '';
-            for (const line of lines) {
-              if (line.startsWith('event:')) eventType = line.slice(6).trim();
-              if (line.startsWith('data:')) dataLine = line.slice(5).trim();
-            }
-            if (!eventType) continue;
-            try {
-              const payload = dataLine ? JSON.parse(dataLine) : {};
-              if (eventType === 'chapter_token') {
-                const token = payload.token || '';
-                streamPlainRef.current += token;
-                // Append directly into TipTap for true typewriter effect
-                appendTokenToEditor(token);
-                flushToEditor();
-              } else if (eventType === 'chapter_done') {
-                // Server already saved if story_id present; we’ll refresh after choices
-                if (typeof payload.word_count === 'number') {
-                  setWordCount(payload.word_count);
-                  setReadMinutes(Math.max(1, Math.ceil(payload.word_count / 200)));
-                }
-              } else if (eventType === 'choices') {
-                // Finalize stream
-                setIsGenerating(false);
-                // Refresh to load saved chapter + choices from DB
-                await fetchData();
-                triggerPageFlip();
-              } else if (eventType === 'error') {
-                console.warn('Stream error:', payload?.message || payload);
-                setIsGenerating(false);
-              }
-            } catch (e) {
-              // Non-JSON data line; ignore
-            }
-          }
-        }
-      };
-
-      await pump();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // After backend saves, refresh chapters and show content
+      await fetchData();
+      triggerPageFlip();
     } catch (e) {
-      console.warn('Error streaming Chapter 1:', e);
+      console.warn('Error generating Chapter 1:', e);
     } finally {
       setIsGenerating(false);
-      streamAbortRef.current = null;
     }
   }, [story?.id, story?.story_outline, session?.access_token, fetchData, convertTextToHtml, triggerPageFlip]);
 
@@ -619,63 +531,114 @@ export default function MinimalEditor() {
 
   const handleInsertImage = async () => {
     try {
+      console.log('🖼️ Starting image upload...');
+
       // Create a hidden file input for image selection
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/png,image/jpeg,image/webp';
       input.onchange = async () => {
         const file = input.files?.[0];
-        if (!file) return;
+        if (!file) {
+          console.log('❌ No file selected');
+          return;
+        }
+
+        console.log('📁 File selected:', file.name, file.size, file.type);
+
         // Ask for alt text
         const alt = window.prompt('Alt text for accessibility (required):', '') || '';
+        if (!alt) {
+          console.warn('⚠️ Proceeding without alt text');
+        }
+
         // Basic size cap (client-side)
         if (file.size > 8 * 1024 * 1024) {
           alert('Please choose an image under 8MB.');
           return;
         }
+
         // Insert a temporary base64 image immediately
         const reader = new FileReader();
         reader.onload = async () => {
           const tempSrc = String(reader.result || '');
+          console.log('🖼️ Base64 image created, length:', tempSrc.length);
+
           const editor = editorRef.current;
-          editor?.chain().focus().setImage({ src: tempSrc, alt }).run();
+          if (!editor) {
+            console.error('❌ Editor not available');
+            return;
+          }
+
+          // Insert base64 image
+          editor.chain().focus().setImage({ src: tempSrc, alt }).run();
+          console.log('✅ Base64 image inserted into editor');
 
           // Try to upload to Supabase Storage and swap the src once available
           try {
+            console.log('☁️ Starting Supabase upload...');
+
             const userId = user?.id;
             const storyId = story?.id || storyIdFromPath || sp.get('story');
+            console.log('👤 User ID:', userId, '📚 Story ID:', storyId);
+
             const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
             const path = `editor-assets/${userId || 'anon'}/${storyId || 'unknown'}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-            const { data: up, error: upErr } = await supabase.storage.from('editor-assets').upload(path, file, {
-              cacheControl: '3600',
-              upsert: true,
-              contentType: file.type || 'image/jpeg'
-            });
-            if (!upErr) {
-              const pub = supabase.storage.from('editor-assets').getPublicUrl(path);
-              const publicUrl = pub?.data?.publicUrl;
-              if (publicUrl) {
-                // Replace temp src with public URL
-                editor?.chain().focus().command(({ tr, state }) => {
-                  let replaced = false;
-                  state.doc.descendants((node, pos) => {
-                    if (node.type.name === 'image' && node.attrs.src === tempSrc) {
-                      tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: publicUrl });
-                      replaced = true;
-                      return false;
-                    }
-                    return true;
-                  });
-                  return true;
-                }).run();
-              }
+            console.log('📂 Upload path:', path);
+
+            console.log('🔧 Supabase client available:', !!supabase, 'storage:', !!supabase?.storage);
+
+            const { data: up, error: upErr } = await supabase.storage
+              .from('editor-assets')
+              .upload(path, file, {
+                cacheControl: '3600',
+                upsert: true,
+                contentType: file.type || 'image/jpeg'
+              });
+
+            if (upErr) {
+              console.error('❌ Upload error:', upErr);
+              return;
             }
-          } catch {}
+
+            console.log('✅ Upload successful:', up);
+
+            const pub = supabase.storage.from('editor-assets').getPublicUrl(path);
+            const publicUrl = pub?.data?.publicUrl;
+
+            if (!publicUrl) {
+              console.error('❌ Failed to get public URL');
+              return;
+            }
+
+            console.log('🔗 Public URL:', publicUrl);
+
+            // Replace temp src with public URL
+            editor.chain().focus().command(({ tr, state }) => {
+              let replaced = false;
+              state.doc.descendants((node, pos) => {
+                if (node.type.name === 'image' && node.attrs.src === tempSrc) {
+                  tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: publicUrl });
+                  replaced = true;
+                  return false;
+                }
+                return true;
+              });
+              return true;
+            }).run();
+
+            console.log('✅ Image URL replaced with Supabase URL');
+          } catch (uploadError) {
+            console.error('❌ Upload process failed:', uploadError);
+          }
         };
+        reader.onerror = (e) => console.error('❌ FileReader error:', e);
         reader.readAsDataURL(file);
       };
       input.click();
-    } catch {}
+    } catch (error) {
+      console.error('❌ Image upload failed:', error);
+    }
   };
 
   // Fetch stories for story picker

@@ -203,6 +203,7 @@ a:hover {
   
   .section {
     @apply py-16 sm:py-20 lg:py-24;
+    scroll-margin-top: 6rem; /* account for fixed header when using #hash links */
   }
   
   /* Modal Component */
@@ -492,6 +493,11 @@ a:hover {
   position: relative;
 }
 
+/* Remove default focus outline around TipTap surface */
+.ProseMirror:focus {
+  outline: none !important;
+}
+
 .editor-enhanced::before {
   content: '';
   position: absolute;
@@ -695,10 +701,10 @@ a:hover {
 }
 
 /* Light editor overrides (scoped) */
+/* Override: keep editor seamless with page theme (no white box) */
 .editor-light {
-  /* Book paper (recycled/acid-free) */
-  background: #F5EDE2;
-  color: #0a0a0a;
+  background: transparent !important;
+  color: inherit !important;
 }
 
 .editor-light p,
@@ -711,7 +717,7 @@ a:hover {
 .editor-light h4,
 .editor-light h5,
 .editor-light h6 {
-  color: #0a0a0a !important;
+  color: inherit !important;
 }
 
 .editor-light a {
@@ -719,16 +725,10 @@ a:hover {
 }
 
 /* Paragraph spacing inside TipTap content */
-.editor-light .ProseMirror p {
-  margin: 0 0 1rem 0;
-}
-.editor-light .ProseMirror div {
-  /* fallback if content uses divs */
-  margin-bottom: 1rem;
-}
-.editor-light .ProseMirror > *:last-child {
-  margin-bottom: 0;
-}
+.editor-light .ProseMirror { background: transparent !important; }
+.editor-light .ProseMirror p { margin: 0 0 1rem 0; }
+.editor-light .ProseMirror div { margin-bottom: 1rem; }
+.editor-light .ProseMirror > *:last-child { margin-bottom: 0; }
 
 /* Spacing-only utility (no background or color changes) */
 .editor-paragraphs .ProseMirror p {
@@ -752,6 +752,7 @@ a:hover {
 
 /* Premium Landing Page (scoped) */
 .font-sora { font-family: 'Sora', system-ui, sans-serif; }
+.font-display { font-family: 'Bebas Neue', 'Sora', system-ui, sans-serif; letter-spacing: 0.02em; }
 .text-off { color: #EDEFF6; }
 .text-off-90 { color: rgba(237,239,246,0.9); }
 .text-off-80 { color: rgba(237,239,246,0.8); }

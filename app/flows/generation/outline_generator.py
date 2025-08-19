@@ -383,7 +383,7 @@ class OutlineGenerator(dspy.Module):
             print("Continuing with non-optimized version...")
             return self
 
-def generate_book_outline_json(idea: str, use_optimized=True, save_result=False, include_chapters=True) -> Dict[str, Any]:
+def generate_book_outline_json(idea: str, use_optimized=False, save_result=False, include_chapters=True) -> Dict[str, Any]:
     """
     Generate a cinematic story summary with a hook using CoT and DSPy.
     
@@ -689,10 +689,12 @@ def rewrite_text_with_context(original_text: str, story_context: Dict[str, Any] 
         # Use OpenAI chat model directly to avoid the broader DSPy chain-of-thought for this task
         from langchain_openai import ChatOpenAI
         llm = ChatOpenAI(model=settings.OPENAI_MODEL, openai_api_key=settings.OPENAI_API_KEY)
-        response = llm.invoke([
+        from app.core.concurrency import acquire_llm_thread_semaphore
+        with acquire_llm_thread_semaphore():
+            response = llm.invoke([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ])
+            ])
         rewritten = (response.content or "").strip()
         if not rewritten:
             logger.warning("[REWRITE_FUNCTION] Empty response; returning original text")

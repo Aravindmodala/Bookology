@@ -34,9 +34,17 @@ USER app
 
 EXPOSE 8000
 
+# Set async event loop policy for better performance
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONASYNCIODEBUG=0 \
+    UVICORN_WORKERS=4 \
+    UVICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker \
+    UVICORN_WORKER_CONNECTIONS=1000
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8000/healthz | grep -q 'ok' || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Optimized for concurrency: 4 workers, async worker class, high connection limit
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--limit-concurrency", "1000", "--timeout-keep-alive", "5"]
 
 

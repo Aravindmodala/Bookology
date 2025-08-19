@@ -15,6 +15,7 @@ export type Story = {
 	isFeatured?: boolean;
 	isPublic: boolean;
 	createdAt: string;
+  aspectRatio?: number; // width / height
 };
 
 type Props = { story: Story; highlightGold?: boolean };
@@ -30,8 +31,8 @@ export default memo(function StoryCard({ story, highlightGold }: Props) {
 	return (
 		<Link to={`/story/${story.id}`} aria-label={`Open story ${story.title}`}>
 			<motion.div
-				className={`relative rounded-xl overflow-hidden card-surface group ${highlightGold ? 'gold-ring' : ''}`}
-				style={{ perspective: 1000 }}
+				className={`relative rounded-xl overflow-hidden card-surface group ${highlightGold ? 'gold-ring' : ''} transform-gpu`}
+				style={{ perspective: 1000, willChange: 'transform' }}
 				onMouseMove={(e) => {
 					const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
 					x.set(e.clientX - rect.left - rect.width / 2);
@@ -40,20 +41,34 @@ export default memo(function StoryCard({ story, highlightGold }: Props) {
 				onMouseLeave={() => {
 					x.set(0); y.set(0);
 				}}
-				whileHover={{ scale: 1.02 }}
+				whileHover={{ scale: 1.025 }}
+				transition={{ type: 'spring', stiffness: 260, damping: 22, mass: 0.9 }}
 			>
-				<motion.div style={{ rotateX: springX, rotateY: springY }} className="h-60">
-					<img
+				<motion.div style={{ rotateX: springX, rotateY: springY }} className="will-change-transform" >
+					<div
 						src={story.coverUrl}
-						alt={story.title}
-						loading="lazy"
-						className="w-full h-full object-cover"
-					/>
+						style={{
+							aspectRatio: (story.aspectRatio && story.aspectRatio > 0) ? `${story.aspectRatio} / 1` : undefined,
+						}}
+						className="w-full select-none"
+					>
+						<img
+							src={story.coverUrl}
+							alt={story.title}
+							loading="lazy"
+							decoding="async"
+							fetchPriority="low"
+							className="w-full h-full object-cover"
+						/>
+					</div>
 					<div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
 					<div className="absolute top-2 left-2"><GenrePill genre={story.genre} /></div>
+					<div className="absolute bottom-0 left-0 right-0 p-3">
+						<h3 className="font-display text-lg md:text-xl text-white leading-tight drop-shadow-sm">{story.title}</h3>
+					</div>
 				</motion.div>
-				<div className="absolute bottom-0 inset-x-0 p-3 flex items-end justify-between">
-					<div>
+				<div className="absolute bottom-0 inset-x-0 p-3 pt-10 flex items-end justify-between">
+					<div className="sr-only">
 						<h3 className="text-white font-semibold line-clamp-1">{story.title}</h3>
 						<p className="text-white/70 text-xs line-clamp-1">{story.author?.name}</p>
 					</div>

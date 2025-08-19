@@ -6,9 +6,12 @@ import TextAlign from '@tiptap/extension-text-align';
 import CharacterCount from '@tiptap/extension-character-count';
 import { TextStyle } from '@tiptap/extension-text-style';
 import Image from '@tiptap/extension-image';
+import Gapcursor from '@tiptap/extension-gapcursor';
+import Focus from '@tiptap/extension-focus';
+import DragHandle from '@tiptap/extension-drag-handle';
 import { Extension } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
-import { Selection } from 'prosemirror-state';
+import { Selection, Plugin, PluginKey } from 'prosemirror-state';
 
 // Allow fontSize via TextStyle mark
 const FontSize = Extension.create({
@@ -47,15 +50,21 @@ const WordLikeImageNode = (props) => {
     if (el.complete && el.naturalWidth) apply(); else el.onload = apply;
   }, []);
 
-  const startRef = useRef({ x: 0, y: 0, w: 0, h: 0, dir: 'e' });
+  const [isResizing, setIsResizing] = useState(false);
+  const startRef = useRef({ x: 0, y: 0, w: 0, h: 0, dir: 'e', lastTs: 0 });
   const onPointerDown = (e, dir) => {
     e.preventDefault();
     e.stopPropagation();
+    setIsResizing(true);
     const img = imgRef.current;
     if (!img) return;
     const rect = img.getBoundingClientRect();
-    startRef.current = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height, dir };
+    startRef.current = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height, dir, lastTs: 0 };
     const onMove = (ev) => {
+      // throttle to ~60fps for smoothness
+      const now = performance.now();
+      if (startRef.current.lastTs && now - startRef.current.lastTs < 14) return;
+      startRef.current.lastTs = now;
       const dx = ev.clientX - startRef.current.x;
       const dy = ev.clientY - startRef.current.y;
       const dir = startRef.current.dir;
@@ -83,11 +92,12 @@ const WordLikeImageNode = (props) => {
         }
       }
 
-      newW = Math.max(50, Math.round(newW));
-      newH = Math.max(50, Math.round(newH));
-      updateAttributes({ widthPx: newW, heightPx: newH });
+      newW = Math.max(60, Math.round(newW));
+      newH = Math.max(60, Math.round(newH));
+      requestAnimationFrame(() => updateAttributes({ widthPx: newW, heightPx: newH }));
     };
     const onUp = () => {
+      setIsResizing(false);
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
     };
@@ -132,13 +142,35 @@ const WordLikeImageNode = (props) => {
   const Handle = ({ pos }) => (
     <div
       onPointerDown={(e) => onPointerDown(e, pos)}
-      className={`absolute w-3 h-3 bg-white rounded shadow border border-black/20 ${
+      className={`absolute w-3.5 h-3.5 rounded-full shadow-md border transition-transform duration-150 bg-gradient-to-br from-blue-500 to-indigo-600 border-white ${
         pos.includes('n') ? 'top-0 -translate-y-1/2' : pos.includes('s') ? 'bottom-0 translate-y-1/2' : 'top-1/2 -translate-y-1/2'
-      } ${pos.includes('e') ? 'right-0 translate-x-1/2' : pos.includes('w') ? 'left-0 -translate-x-1/2' : 'left-1/2 -translate-x-1/2'} cursor-${
+      } ${pos.includes('e') ? 'right-0 translate-x-1/2' : pos.includes('w') ? 'left-0 -translate-x-1/2' : 'left-1/2 -translate-x-1/2'} hover:scale-110 cursor-${
         pos === 'ne' || pos === 'sw' ? 'nesw-resize' : pos === 'nw' || pos === 'se' ? 'nwse-resize' : pos === 'n' || pos === 's' ? 'ns-resize' : 'ew-resize'
-      }`} style={{ zIndex: 5 }}
+      }`} style={{ zIndex: 8 }}
     />
   );
+
+  const [isDragging, setIsDragging] = useState(false);
+  const onDragStart = (e) => {
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      // custom ghost
+      const img = imgRef.current;
+      if (img) {
+        const ghost = img.cloneNode(true);
+        ghost.style.position = 'absolute';
+        ghost.style.top = '-10000px';
+        ghost.style.left = '-10000px';
+        ghost.style.opacity = '0.8';
+        ghost.style.transform = 'rotate(1.5deg) scale(0.9)';
+        document.body.appendChild(ghost);
+        e.dataTransfer.setDragImage(ghost, ghost.width / 2, ghost.height / 2);
+        setTimeout(() => ghost.remove(), 0);
+      }
+      setIsDragging(true);
+    } catch {}
+  };
+  const onDragEnd = () => setIsDragging(false);
 
   return (
     <NodeViewWrapper
@@ -154,10 +186,12 @@ const WordLikeImageNode = (props) => {
         src={node.attrs.src}
         alt={node.attrs.alt || ''}
         title={node.attrs.title || ''}
-        draggable
+        draggable={true}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
         data-drag-handle
-        style={{ ...styleDim, ...alignStyle, maxWidth: '100%', cursor: hover || selected ? 'move' : 'default' }}
-        className={hover || selected ? 'outline outline-2 outline-violet-400/60' : ''}
+        style={{ ...styleDim, ...alignStyle, maxWidth: '100%', cursor: isDragging ? 'grabbing' : (hover || selected ? 'grab' : 'default'), opacity: isDragging ? 0.6 : 1, transition: 'opacity 160ms ease, transform 160ms ease', transform: isDragging ? 'scale(0.98)' : 'scale(1)' }}
+        className={`${hover || selected ? 'outline outline-2 outline-violet-400/60' : ''} ${isResizing ? 'select-none' : ''}`}
       />
       {(hover || selected) && (
         <>
@@ -193,6 +227,75 @@ const WordLikeImageNode = (props) => {
 
 const WordLikeImage = Image.extend({
   draggable: true,
+  addProseMirrorPlugins() {
+    const key = new PluginKey('wordLikeImageDnD');
+    let dragFromPos = null;
+    // Drop indicator disabled for cleaner drag UI
+    const showIndicatorAt = () => {};
+    const hideIndicator = () => {};
+
+    return [
+      new Plugin({
+        key,
+        props: {
+          handleDOMEvents: {
+            dragstart(view, event) {
+              const target = event.target;
+              const img = target && target.closest && target.closest('img');
+              if (!img) return false;
+              const pos = view.posAtDOM(img, 0);
+              dragFromPos = pos;
+              return false;
+            },
+            dragover(view, event) {
+              if (dragFromPos == null) return false;
+              event.preventDefault();
+              const coords = { left: event.clientX, top: event.clientY };
+              const pos = view.posAtCoords(coords);
+              if (pos && pos.pos != null) {
+                const box = view.coordsAtPos(pos.pos);
+                showIndicatorAt({ top: box.top });
+              }
+              return true;
+            },
+            drop(view, event) {
+              if (dragFromPos == null) return false;
+              hideIndicator();
+              event.preventDefault();
+              const result = view.posAtCoords({ left: event.clientX, top: event.clientY });
+              if (!result || result.pos == null) { dragFromPos = null; return true; }
+              let dropPos = result.pos;
+              // Prevent no-op/self drop nearby
+              if (Math.abs(dropPos - dragFromPos) < 2) { dragFromPos = null; return true; }
+
+              // Resolve the node at dragFromPos
+              const $from = view.state.doc.resolve(dragFromPos);
+              const node = $from.nodeAfter || $from.nodeBefore;
+              if (!node) { dragFromPos = null; return true; }
+
+              // If moving forward past the removed position, account for deletion shift
+              if (dropPos > dragFromPos) {
+                dropPos -= node.nodeSize || 1;
+              }
+
+              const tr = view.state.tr;
+              tr.delete(dragFromPos, dragFromPos + (node.nodeSize || 1));
+              tr.insert(dropPos, node.type.create(node.attrs));
+              view.dispatch(tr);
+              view.focus();
+              dragFromPos = null;
+              return true;
+            },
+            dragend() {
+              hideIndicator();
+              dragFromPos = null;
+              return false;
+            },
+          },
+        },
+      })
+    ];
+  },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -255,20 +358,56 @@ export default function RichTextEditor({
   onReady,
   className,
 }) {
+  const wrapperRef = useRef(null);
+  const [hoverAnchor, setHoverAnchor] = useState(null); // { el: HTMLElement, rect: DOMRect }
+  const [showPopover, setShowPopover] = useState(false);
+  const popoverHoverRef = useRef(false);
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      // Disable built-ins so we can provide tuned versions below
+      StarterKit.configure({
+        dropcursor: false,
+        gapcursor: false,
+      }),
       TextStyle,
       FontSize,
-      WordLikeImage.configure({ inline: false, allowBase64: true }),
+      WordLikeImage.configure({ inline: false, allowBase64: false }),
       CharacterCount,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Placeholder.configure({ placeholder: 'Start writing your story…' }),
+      // Performance/UX enhancements
+      // Dropcursor removed to avoid blue drop line during drags
+      Gapcursor,
+      Focus.configure({ className: 'has-focus', mode: 'all' }),
+      DragHandle.configure({
+        // Show a handle for block nodes including images for precise dragging
+        // Defaults are fine; extension detects nodes with draggable spec
+      }),
     ],
     content: value || '',
     editable: !disabled,
     onUpdate: ({ editor }) => onChange?.(editor.getHTML()),
   });
+
+  // Keep the paragraph arrow anchored to the current selection (static presence)
+  useEffect(() => {
+    if (!editor) return;
+    const setFromSelection = () => {
+      try {
+        const { from } = editor.state.selection;
+        const domPos = editor.view.domAtPos(from);
+        const baseEl = domPos && domPos.node ? (domPos.node.nodeType === 1 ? domPos.node : domPos.node.parentElement) : null;
+        if (!baseEl) return;
+        const para = baseEl.closest && baseEl.closest('p');
+        if (!para || !editor.view.dom.contains(para)) return;
+        const rect = para.getBoundingClientRect();
+        setHoverAnchor({ el: para, rect });
+      } catch {}
+    };
+    editor.on('selectionUpdate', setFromSelection);
+    setFromSelection();
+    return () => editor.off('selectionUpdate', setFromSelection);
+  }, [editor]);
 
   // Notify parent when editor is ready
   useEffect(() => {
@@ -301,8 +440,151 @@ export default function RichTextEditor({
   }, [editor, onSelectionChange]);
 
   return (
-    <div className="mx-auto w-full max-w-[920px] px-2 sm:px-3 relative">
-      <EditorContent editor={editor} className={className} />
+    <div
+      ref={wrapperRef}
+      className="mx-auto w-full max-w-[920px] px-2 sm:px-3 relative"
+      onMouseLeave={() => { setShowPopover(false); }}
+    >
+      {/* global drop indicator bar */}
+      <div id="drop-indicator" style={{position:'fixed',left:0,top:0,height:'2px',background:'rgb(59,130,246)',display:'none',zIndex:9999}} />
+      <EditorContent
+        editor={editor}
+        className={className}
+        onMouseMove={(e) => {
+          try {
+            const root = wrapperRef.current;
+            if (!root || !editor?.view?.dom) return;
+            const pm = editor.view.dom;
+            let target = e.target;
+            if (!(target instanceof Element)) return;
+            // Find closest paragraph inside ProseMirror
+            const para = target.closest('p');
+            // Do not clear anchor when mouse leaves paragraph area; keep static arrow
+            if (!para || !pm.contains(para)) { return; }
+            const rect = para.getBoundingClientRect();
+            setHoverAnchor({ el: para, rect });
+          } catch {}
+        }}
+        onMouseLeave={() => { /* keep anchor while interacting with the arrow/popover */ }}
+      />
+
+      {/* Paragraph-side arrow affordance */}
+      {hoverAnchor && (
+        <div
+          style={{
+            position: 'absolute',
+            top: `${Math.max(0, (hoverAnchor.rect.top - (wrapperRef.current?.getBoundingClientRect()?.top || 0)) + 2)}px`,
+            // Fix: position arrow relative to editor content left edge to keep it visible
+            left: `-24px`,
+            zIndex: 20,
+          }}
+          onMouseEnter={() => { popoverHoverRef.current = true; setShowPopover(true); }}
+          onMouseLeave={() => { popoverHoverRef.current = false; setShowPopover(false); }}
+        >
+          <button
+            type="button"
+            aria-label="Paragraph actions"
+            className="w-6 h-6 bg-transparent text-white/70 hover:text-white text-sm leading-6 text-center"
+          >
+            ›
+          </button>
+
+          {showPopover && (
+            <div className="mt-1 ml-6 rounded-lg bg-white/95 backdrop-blur text-black text-sm shadow-lg border border-black/10 overflow-hidden" role="menu"
+                 onMouseEnter={() => { popoverHoverRef.current = true; }}
+                 onMouseLeave={() => { popoverHoverRef.current = false; setShowPopover(false); }}>
+              <button
+                className="block w-full text-left px-3 py-2 hover:bg-black/5"
+                onClick={() => {
+                  // Placeholder for future AI flow
+                  setShowPopover(false);
+                }}
+              >
+                Create Image
+              </button>
+              <button
+                className="block w-full text-left px-3 py-2 hover:bg-black/5"
+                onClick={() => {
+                  try {
+                    setShowPopover(false);
+                    const para = hoverAnchor?.el;
+                    const view = editor?.view;
+                    if (!para || !view) return;
+                    const posAfter = view.posAtDOM(para, para.childNodes.length || 0);
+                    // File picker
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/png,image/jpeg,image/webp';
+                    input.onchange = async () => {
+                      const file = input.files?.[0];
+                      if (!file) return;
+                      
+                      // Auto-generate alt text from filename (optional)
+                      const alt = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+                      
+                      try {
+                        // Import Supabase client
+                        const { supabase } = await import('../supabaseClient.js');
+                        if (!supabase) {
+                          console.warn('Supabase not configured, falling back to base64');
+                          // Fallback to base64 if Supabase not available
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const src = String(reader.result || '');
+                            editor.chain().focus().insertContentAt(posAfter, [
+                              { type: 'image', attrs: { src, alt } },
+                            ]).run();
+                          };
+                          reader.readAsDataURL(file);
+                          return;
+                        }
+                        
+                        // Upload to Supabase Storage
+                        const timestamp = Date.now();
+                        const path = `editor-images/${timestamp}-${file.name}`;
+                        
+                        const { error: uploadError } = await supabase.storage
+                          .from('editor-assets')
+                          .upload(path, file, {
+                            cacheControl: '3600',
+                            upsert: true,
+                          });
+                        
+                        if (uploadError) {
+                          console.error('Upload failed:', uploadError);
+                          return;
+                        }
+                        
+                        // Get public URL
+                        const { data: urlData } = supabase.storage
+                          .from('editor-assets')
+                          .getPublicUrl(path);
+                        
+                        const src = urlData?.publicUrl;
+                        if (!src) {
+                          console.error('Failed to get public URL');
+                          return;
+                        }
+                        
+                        // Insert image with Supabase URL
+                        editor.chain().focus().insertContentAt(posAfter, [
+                          { type: 'image', attrs: { src, alt } },
+                        ]).run();
+                        
+                      } catch (error) {
+                        console.error('Image upload failed:', error);
+                      }
+                    };
+                    input.click();
+                  } catch {}
+                }}
+              >
+                Upload Image
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

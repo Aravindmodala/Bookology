@@ -7,6 +7,7 @@ import json
 import re
 from typing import Dict, List, Any, Optional
 from langchain_openai import ChatOpenAI
+from app.core.concurrency import acquire_llm_thread_semaphore
 from dotenv import load_dotenv
 import os
 
@@ -171,8 +172,9 @@ Return ONLY the JSON object, no additional text.
 """
 
         try:
-            # Get LLM response
-            response = self.dna_llm.invoke([{"role": "user", "content": extraction_prompt}])
+            # Get LLM response (throttled)
+            with acquire_llm_thread_semaphore():
+                response = self.dna_llm.invoke([{"role": "user", "content": extraction_prompt}])
             
             # Parse JSON response
             dna_dict = self._parse_llm_response(response.content)

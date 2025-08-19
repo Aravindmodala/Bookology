@@ -79,6 +79,7 @@ async def rewrite_text_endpoint(
             detail=f"Rewrite failed: {str(e)}",
         )
 
+"""Streaming rewrite removed; use /rewrite_text instead."""
 
 class SuggestContinueRequest(BaseModel):
     """Input model for AI writing suggestions."""

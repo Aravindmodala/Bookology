@@ -56,14 +56,24 @@ Tone: {tone}
 Story Outline:
 {outline}
 
+DONT GENERATE A IMAGE OF BOOK, GENERATE A IMAGE OF BOOK COVER
 Task: Produce ONE rich, professional book cover image prompt (mood, palette, key visuals). 
-Avoid camera jargon and technical photography terms."""
+Avoid camera jargon and technical photography terms
+check detailly the story outline, and if it is a kids story, make it more kid friendly like animated,
+if it is a sci-fi story, make it look realistic and futuristic,
+if it is a fantasy story, make it look magical and mystical,
+if it is a historical story, make it look like a historical period,
+if it is a horror story, make it look scary and eerie,
+if it is a mystery story, make it look mysterious and suspenseful,
+if it is a romance story, make it look romantic and passionate,
+if it is a thriller story, make it look tense and exciting.
+DONT FORGET TO ADD THE TITLE NAME ON THE COVER IMAGE"""
         ),
     ]
 )
 
 # Use a lightweight, fast model
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+llm = ChatOpenAI(model="gpt-5-mini")
 
 def _prep_prompt_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
     s = inputs["story"]

@@ -1,4 +1,5 @@
 from langchain_openai import ChatOpenAI
+from app.core.concurrency import acquire_llm_thread_semaphore
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from dotenv import load_dotenv
@@ -613,7 +614,9 @@ CRITICAL: Show consequences of this choice. Make it drive the chapter events tha
             except Exception as e:
                 logger.warning(f"[LLM-NEXT] Failed to log input vars: {e}")
 
-            result = self.base_chain.invoke(llm_vars)
+            # Throttle synchronous LLM call
+            with acquire_llm_thread_semaphore():
+                result = self.base_chain.invoke(llm_vars)
             
             # After LLM call, log the raw output for debugging
             llm_output = result.content
@@ -673,7 +676,8 @@ CRITICAL: Show consequences of this choice. Make it drive the chapter events tha
                 self.llm.temperature = min(0.9, original_temp + temp_adjustment)
                 
                 # Generate version with variety context
-                result = self.base_chain.invoke({
+                with acquire_llm_thread_semaphore():
+                    result = self.base_chain.invoke({
                     "story_title": story_title,
                     "story_outline": story_outline,
                     "story_dna_context": story_dna_context,

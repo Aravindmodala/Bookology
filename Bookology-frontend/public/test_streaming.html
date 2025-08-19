@@ -19,12 +19,12 @@
     </style>
 </head>
 <body>
-    <h1>Chapter 1 Streaming Test</h1>
-    <p>This page tests the backend endpoint <code>/stream_first_chapter</code> by streaming tokens, then emitting choices after the "### choices" delimiter.</p>
+    <h1>Chapter 1 Generation Test (non-stream)</h1>
+    <p>Streaming has been removed. Use <code>/lc_generate_chapter</code> to get the full chapter at once.</p>
 
     <div class="row">
         <label>API URL</label><br />
-        <input id="api" value="http://127.0.0.1:8000/stream_first_chapter" />
+        <input id="api" value="http://127.0.0.1:8000/lc_generate_chapter" />
     </div>
     <div class="row">
         <label>Story ID</label><br />
@@ -35,19 +35,19 @@
         <textarea id="outline">A young explorer discovers an ancient civilization hidden in the Amazon rainforest. The story follows their journey through mysterious ruins, encounters with indigenous tribes, and the discovery of a powerful artifact that could change the world. The explorer must navigate dangerous terrain, solve ancient puzzles, and make difficult choices about whether to share their discovery with the outside world or protect the secrets they've uncovered.</textarea>
     </div>
 
-    <button onclick="startStream()">Start Streaming Chapter 1</button>
+    <button onclick="generateFull()">Generate Chapter 1</button>
     <button onclick="clearOutput()">Clear Output</button>
 
     <div id="output">Ready to test streaming...</div>
 
     <script>
-        async function startStream() {
+        async function generateFull() {
             const output = document.getElementById('output');
             const api = document.getElementById('api').value.trim();
             const storyId = parseInt(document.getElementById('storyId').value, 10) || null;
             const outline = document.getElementById('outline').value.trim();
 
-            output.textContent = 'Starting stream...\n\n';
+            output.textContent = 'Generating...\n\n';
 
             try {
                 const response = await fetch(api, {
@@ -59,46 +59,17 @@
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder('utf-8');
-                let buffer = '';
-
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-
-                    let idx;
-                    while ((idx = buffer.indexOf('\n\n')) !== -1) {
-                        const chunk = buffer.slice(0, idx);
-                        buffer = buffer.slice(idx + 2);
-                        const lines = chunk.split('\n');
-                        const ev = (lines.find(l => l.startsWith('event: ')) || '').slice(7).trim();
-                        const dataLine = (lines.find(l => l.startsWith('data: ')) || '').slice(6);
-                        if (!ev || !dataLine) continue;
-                        try {
-                            const data = JSON.parse(dataLine);
-                            if (ev === 'chapter_token') {
-                                output.innerHTML += `<span class="token">${data.token}</span>`;
-                            } else if (ev === 'chapter_done') {
-                                output.innerHTML += `\n\n<span class="chapter-done">✅ Chapter complete</span>\n`;
-                                output.innerHTML += `Word count: ${data.word_count} | Chapter ID: ${data.chapter_id ?? 'N/A'}\n\n`;
-                            } else if (ev === 'choices') {
-                                output.innerHTML += `<span class="choices">Choices:</span>\n`;
-                                (Array.isArray(data) ? data : []).forEach((c, i) => {
-                                    output.innerHTML += `${i + 1}. ${c.title}\n   ${c.description}\n\n`;
-                                });
-                            } else if (ev === 'error') {
-                                output.innerHTML += `<span class="error">Error: ${data.message}</span>\n`;
-                            }
-                        } catch (e) {
-                            output.innerHTML += `<span class="error">Parse error: ${e.message}</span>\n`;
-                        }
-                    }
+                const data = await response.json();
+                output.textContent += `Chapter received (length: ${(data?.chapter || '').length})\n`;
+                output.textContent += `\n--- Chapter ---\n\n`;
+                output.textContent += (data?.chapter || '') + '\n\n';
+                const choices = data?.choices || [];
+                if (choices.length) {
+                    output.textContent += '--- Choices ---\n';
+                    choices.forEach((c, i) => {
+                        output.textContent += `${i + 1}. ${c.title}\n   ${c.description}\n\n`;
+                    });
                 }
-
-                output.innerHTML += '\nStreaming complete.\n';
             } catch (err) {
                 output.innerHTML += `<span class="error">${err.message}</span>\n`;
                 console.error(err);
@@ -111,5 +82,8 @@
     </script>
 </body>
 </html>
+
+
+
 
 

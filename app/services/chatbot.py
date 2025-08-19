@@ -89,7 +89,9 @@ Respond with only the intent category (one word): query, modify, multiverse, or 
     def classify(self, message: str) -> IntentType:
         try:
             prompt = self._classification_prompt.format(message=message)
-            response = self.llm.invoke(prompt)
+            from app.core.concurrency import acquire_llm_thread_semaphore
+            with acquire_llm_thread_semaphore():
+                response = self.llm.invoke(prompt)
             intent_str = response.content.strip().lower()
             intent_mapping = {
                 "query": IntentType.QUERY,
@@ -208,7 +210,9 @@ class StoryChatbot:
                 return_source_documents=True,
                 output_key="answer",
             )
-            result = chain.invoke({"question": message})
+            from app.core.concurrency import acquire_llm_thread_semaphore
+            with acquire_llm_thread_semaphore():
+                result = chain.invoke({"question": message})
             raw_sources = result.get("source_documents", [])
             unique_Chapters = {}
             for doc in raw_sources:

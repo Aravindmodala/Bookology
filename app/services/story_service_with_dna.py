@@ -12,6 +12,7 @@ from app.models.story_models import Story, Chapter, StoryWithChapters
 from .database_service import db_service
 from .cache_service import cache_service
 from app.core.logger_config import setup_logger
+from app.core.concurrency import LLM_SEMAPHORE
 
 logger = setup_logger(__name__)
 
@@ -367,20 +368,21 @@ class StoryService:
                 logger.warning(f"[SERVICE] Logging inputs failed: {log_err}")
 
             logger.info(f"🚀 Invoking NextChapterGeneratorWithDNA with saved DNA and summary context from DB")
-            # Ensure keyword args are forwarded (including is_game_mode)
-            result = await loop.run_in_executor(
-                None,
-                lambda: generator.generate_next_chapter(
-                    story_title=planned_chapter_title,
-                    story_outline=story_outline,
-                    story_dna_contexts=story_dna_contexts,
-                    chapter_number=next_chapter_number,
-                    user_choice=user_choice_made,
-                    previous_chapter_summaries=summaries,
-                    is_game_mode=bool(selected_choice),
-                    next_chapter_title=next_planned_chapter_title
+            # Ensure keyword args are forwarded (including is_game_mode) and limit concurrent LLM usage
+            async with LLM_SEMAPHORE:
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: generator.generate_next_chapter(
+                        story_title=planned_chapter_title,
+                        story_outline=story_outline,
+                        story_dna_contexts=story_dna_contexts,
+                        chapter_number=next_chapter_number,
+                        user_choice=user_choice_made,
+                        previous_chapter_summaries=summaries,
+                        is_game_mode=bool(selected_choice),
+                        next_chapter_title=next_planned_chapter_title
+                    )
                 )
-            )
             logger.info(f"✅ Chapter {next_chapter_number} generated successfully with saved DNA and summary context")
             return result
         except Exception as e:

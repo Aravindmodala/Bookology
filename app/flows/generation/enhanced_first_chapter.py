@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Dict, Any, Optional, List
 import asyncio
+from app.core.concurrency import LLM_SEMAPHORE
 
 # Load environment variables from .env
 load_dotenv()
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Initialize the LLM
 llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"), 
-    model_name='gpt-5-mini', 
+    model_name='gpt-5', 
     temperature=1.0,  # gpt-5 requires default temperature (1.0)
     max_tokens=15000
 )
@@ -32,18 +33,10 @@ system_template = """You are a master storyteller creating the FIRST CHAPTER of 
 - If you reach 2000 words, end the chapter immediately
 - This rule overrides all other instructions
 
-CRITICAL REQUIREMENTS:
-- Write the chapter prose naturally, then end with "### choices" followed by JSON
-- You MUST include "### choices" - this is NOT optional
-- After "### choices", provide valid JSON with choices
-- The format MUST be: [prose] + "### choices" + [JSON]
-
 You must return ONLY this exact format with NO explanations, NO extra text:
 
-[Your complete 1800-2000 word chapter prose here...]
-
-### choices
 {{
+"chapter": "Full immersive chapter content (1500 - 2000 words) - write the complete chapter as one continuous string with proper paragraph breaks using \\n\\n between paragraphs",
   "choices": [
     {{
       "id": "choice_1",
@@ -65,7 +58,6 @@ You must return ONLY this exact format with NO explanations, NO extra text:
 
 CRITICAL OUTPUT RULES:
 - Start with the chapter prose (1800-2000 words)
-- End with "### choices" followed by a valid JSON object
 - Use ONLY double quotes in JSON
 - NO ```json or ``` markdown formatting
 - NO explanatory text before or after
@@ -77,7 +69,8 @@ Story Outline: {story_outline}
 Genre: {genre}
 Tone: {tone}
 
-Generate the FIRST CHAPTER exactly as instructed: chapter prose first, then '### choices' followed by a valid JSON object. Do not use markdown fences."""
+Generate the FIRST CHAPTER exactly as instructed: in Json format. do not use markdown fences.
+make sure the chapter content is engaging and compelling like the famous books."""
 
 # Create the prompt template
 prompt = ChatPromptTemplate.from_messages([
@@ -126,13 +119,14 @@ class EnhancedChapterGenerator:
             try:
                 start_time = time.time()
                 
-                # Generate chapter using modern LangChain syntax
-                result = await chain.ainvoke({
-                    "story_title": story_title,
-                    "story_outline": story_outline,
-                    "genre": genre,
-                    "tone": tone,
-                })
+                # Generate chapter using modern LangChain syntax under LLM semaphore
+                async with LLM_SEMAPHORE:
+                    result = await chain.ainvoke({
+                        "story_title": story_title,
+                        "story_outline": story_outline,
+                        "genre": genre,
+                        "tone": tone,
+                    })
                 
                 # FIXED: Correct way to access LangChain response
                 if hasattr(result, 'content'):
@@ -216,65 +210,7 @@ class EnhancedChapterGenerator:
             "error": "Max retries exceeded"
         }
     
-    async def generate_chapter_streaming(
-        self,
-        story_title: str,
-        story_outline: str,
-        genre: str = "General Fiction",
-        tone: str = "Engaging",
-    ):
-        """Stream first chapter tokens, detect '### choices', then parse choices JSON."""
-        logger.info(f"🎯 Streaming FIRST CHAPTER generation for: {story_title}")
-        try:
-            start_time = time.time()
-            result = chain.astream({
-                "story_title": story_title,
-                "story_outline": story_outline,
-                "genre": genre,
-                "tone": tone,
-            })
-
-            chapter_buffer: list[str] = []
-            choices_buffer: list[str] = []
-            in_chapter = True
-            chapter_text = ""
-
-            async for chunk in result:
-                content = getattr(chunk, "content", str(chunk))
-                if in_chapter:
-                    chapter_buffer.append(content)
-                    full_text = "".join(chapter_buffer)
-                    if "### choices" in full_text:
-                        parts = full_text.split("### choices", 1)
-                        chapter_text = parts[0].strip()
-                        choices_part = parts[1].strip()
-                        in_chapter = False
-                        choices_buffer.append(choices_part)
-                        yield {"type": "chapter_done", "content": chapter_text, "word_count": len(chapter_text.split())}
-                    else:
-                        yield {"type": "chapter_token", "token": content}
-                else:
-                    choices_buffer.append(content)
-
-            if choices_buffer:
-                try:
-                    choices_text = "".join(choices_buffer).strip()
-                    if choices_text.startswith("```json"):
-                        choices_text = choices_text[len("```json"):].strip()
-                    elif choices_text.startswith("```"):
-                        choices_text = choices_text[len("```"):].strip()
-                    if choices_text.endswith("```"):
-                        choices_text = choices_text[:-3].strip()
-
-                    data = json.loads(choices_text)
-                    yield {"type": "choices", "choices": data.get("choices", [])}
-                    logger.info("✅ Streaming first chapter completed in %.2fs", time.time() - start_time)
-                except Exception as e:
-                    logger.error("❌ Failed to parse choices JSON: %s", e)
-                    yield {"type": "error", "message": f"Failed to parse choices: {e}"}
-        except Exception as e:
-            logger.error("❌ Streaming chapter generation failed: %s", e)
-            yield {"type": "error", "message": str(e)}
+    # Streaming removed; use generate_chapter_from_outline instead
     
     def _parse_and_validate_response(self, response_content: str, attempt_num: int) -> Dict[str, Any]:
         try:

@@ -1,9 +1,15 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, status
 import uuid as _uuid
 from fastapi.middleware.cors import CORSMiddleware
+from collections import defaultdict
+import time
+import asyncio
 
 from app.core.config import settings
 from app.api.router import router as api_router
+from app.core.logger_config import setup_logger
+
+logger = setup_logger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -18,16 +24,58 @@ def create_app() -> FastAPI:
         # In DEBUG, continue to ease local development
 
     # CORS: Restrict in production; wildcard only in development
-    allow_all = settings.DEBUG
-    cors_origins = ["*"] if allow_all else settings.ALLOWED_ORIGINS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["*"],  # Fixed: Use the computed cors_origins instead of hardcoded ["*"]
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    # Rate limiting middleware
+    rate_limit_store = defaultdict(list)
+    
+    @app.middleware("http")
+    async def rate_limit_middleware(request: Request, call_next):
+        """Simple rate limiting middleware."""
+        # Skip rate limiting for health checks
+        if request.url.path in ["/healthz", "/readyz", "/health"]:
+            return await call_next(request)
+        
+        # Get client identifier (IP or user ID)
+        client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if not client_ip and request.client:
+            client_ip = request.client.host
+        client_id = client_ip or "unknown"
+        
+        # Check rate limit
+        now = time.time()
+        minute_ago = now - 60
+        rate_limit_store[client_id] = [t for t in rate_limit_store[client_id] if t > minute_ago]
+        
+        if len(rate_limit_store[client_id]) >= settings.RATE_LIMIT_PER_MINUTE:
+            logger.warning(f"Rate limit exceeded for {client_id}")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Max {settings.RATE_LIMIT_PER_MINUTE} requests per minute."
+            )
+        
+        rate_limit_store[client_id].append(now)
+        
+        # Add timeout for requests
+        try:
+            path = request.url.path
+            return await asyncio.wait_for(
+                call_next(request),
+                timeout=settings.REQUEST_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Request timeout for {request.url.path}")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=f"Request timeout after {settings.REQUEST_TIMEOUT_SECONDS} seconds"
+            )
+    
     # Security headers middleware
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):

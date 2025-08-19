@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../AuthContext";
+import { useNavigate } from "react-router-dom";
 
 function SectionHeading({ eyebrow, title, subtitle }) {
   return (
@@ -43,9 +42,7 @@ function SectionHeading({ eyebrow, title, subtitle }) {
 
 export default function LandingPage() {
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
-  const { user, session, signOut } = useAuth();
 
   const handleStart = () => {
     setIsTransitioning(true);
@@ -83,13 +80,13 @@ export default function LandingPage() {
 
           <div className="mt-7 flex items-center gap-4">
             <button className="btn-violet" onClick={handleStart}>Start a Story</button>
-            <a href="#demo" className="btn-outline">Watch Demo</a>
+            <a href="/#how" className="btn-outline">How it works</a>
           </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-6 text-off-70">
-            <div>10,000+ chapters created</div>
-            <span className="opacity-30">|</span>
-            <div>Avg. read time 18 min</div>
+          <div className="mt-6 flex flex-wrap items-center gap-2 text-off-70">
+            <span className="chip">No credit card required</span>
+            <span className="chip">Keep your voice</span>
+            <span className="chip">Privacy-first</span>
           </div>
         </div>
         {/* Removed trailer preview per request; keep balanced layout with empty spacer on large screens */}
@@ -106,7 +103,7 @@ export default function LandingPage() {
         <div className="grid md:grid-cols-3 gap-5">
           {[
             { t: "Prompt", d: "Describe your idea and characters.", k: "📝" },
-            { t: "Trailer", d: "Get a short cinematic teaser.", k: "🎬" },
+            { t: "Outline", d: "Generate a tight outline with beats.", k: "🧭" },
             { t: "Chapter by Chapter", d: "Write interactively with choices.", k: "📖" },
           ].map((c, i) => (
             <motion.div
@@ -153,7 +150,7 @@ export default function LandingPage() {
       {/* Social Proof */}
       <section className="container section">
         <SectionHeading
-          eyebrow="Social Proof"
+          eyebrow="What creators say"
           title="Loved by writers, readers, and educators"
         />
         <div className="grid md:grid-cols-3 gap-5">
@@ -167,10 +164,6 @@ export default function LandingPage() {
               <div className="mt-2 text-off">{q}</div>
             </div>
           ))}
-        </div>
-        <div className="mt-5 card-soft">
-          <div className="text-xs uppercase tracking-widest text-off-60">Case study</div>
-          <div className="mt-1 text-off">From prompt to 20k reads in 14 days.</div>
         </div>
       </section>
 

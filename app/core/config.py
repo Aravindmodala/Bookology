@@ -51,6 +51,12 @@ class Settings:
     # Falls back to Supabase connection string if DATABASE_URL is not explicitly set
     DATABASE_URL: str = os.getenv("DATABASE_URL", os.getenv("SUPABASE_CONNECTION_STRING", ""))
     
+    # Concurrency Configuration
+    MAX_CONCURRENT_LLM_CALLS: int = int(os.getenv("MAX_CONCURRENT_LLM_CALLS", "5"))
+    MAX_CONCURRENT_DB_CONNECTIONS: int = int(os.getenv("MAX_CONCURRENT_DB_CONNECTIONS", "20"))
+    REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "120"))
+    RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    
     # CORS Configuration
     # Default to empty list in production to enforce least-privilege unless explicitly set
     ALLOWED_ORIGINS: list[str] = [o for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o]

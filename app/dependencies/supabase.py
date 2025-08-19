@@ -3,24 +3,51 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer
 from supabase import create_client, Client
+import asyncpg
+from typing import AsyncGenerator
 from app.core.logger_config import setup_logger
 from app.core.config import settings
 from collections import defaultdict
 import base64
 import json
 import time as _time
+import asyncio
 
 logger = setup_logger(__name__)
 
-# Lazy singleton Supabase client
+# Lazy singleton Supabase client (sync) and async PostgreSQL connection pool
 _supabase: Optional[Client] = None
+_async_pool: Optional[asyncpg.Pool] = None
+_async_lock = asyncio.Lock()
 
 def get_supabase_client() -> Client:
+    """Get synchronous Supabase client (for backward compatibility)"""
     global _supabase
     if _supabase is None:
         _supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-        logger.info("Supabase client initialized (dependencies)")
+        logger.info("Supabase sync client initialized")
     return _supabase
+
+async def get_async_db_pool() -> asyncpg.Pool:
+    """Get async PostgreSQL connection pool (RECOMMENDED for performance)"""
+    global _async_pool
+    if _async_pool is None:
+        async with _async_lock:
+            if _async_pool is None:
+                _async_pool = await asyncpg.create_pool(
+                    settings.SUPABASE_CONNECTION_STRING,
+                    min_size=5,
+                    max_size=settings.MAX_CONCURRENT_DB_CONNECTIONS,
+                    command_timeout=10
+                )
+                logger.info("Async PostgreSQL pool initialized")
+    return _async_pool
+
+async def get_async_db_connection() -> AsyncGenerator[asyncpg.Connection, None]:
+    """Get async database connection from pool"""
+    pool = await get_async_db_pool()
+    async with pool.acquire() as connection:
+        yield connection
 
 # Auth schemes
 auth_scheme = HTTPBearer()
