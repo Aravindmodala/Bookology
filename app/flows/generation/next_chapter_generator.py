@@ -987,6 +987,12 @@ CRITICAL: Show consequences of this choice. Make it drive the chapter events tha
             
             # Clean up the response
             cleaned_text = response_content.strip()
+
+            # Remove markdown code blocks before any other processing
+            if cleaned_text.startswith("```json"):
+                cleaned_text = cleaned_text[7:-3].strip()
+            elif cleaned_text.startswith("```"):
+                cleaned_text = cleaned_text[3:-3].strip()
             
             # Check if response starts with { (proper JSON)
             if not cleaned_text.startswith('{'):
@@ -997,18 +1003,6 @@ CRITICAL: Show consequences of this choice. Make it drive the chapter events tha
             if not cleaned_text.endswith('}'):
                 logger.error(f"❌ Response does not end with }} - ends with: '...{cleaned_text[-50:]}'")
                 raise ValueError("Response does not end with closing brace }")
-            
-            # Remove markdown code blocks (shouldn't exist with new prompt)
-            if cleaned_text.startswith("```json"):
-                logger.warning("⚠️ Found markdown code block despite strict instructions")
-                cleaned_text = cleaned_text[7:]
-            if cleaned_text.startswith("```"):
-                logger.warning("⚠️ Found code block despite strict instructions")
-                cleaned_text = cleaned_text[3:]
-            if cleaned_text.endswith("```"):
-                cleaned_text = cleaned_text[:-3]
-            
-            cleaned_text = cleaned_text.strip()
             
             # Fix common JSON issues
             cleaned_text = re.sub(r',(\s*[}\]])', r'\1', cleaned_text)
