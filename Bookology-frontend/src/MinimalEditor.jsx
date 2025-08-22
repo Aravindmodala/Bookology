@@ -5,7 +5,7 @@ import { useAuth } from './AuthContext';
 import RichTextEditor from './components/RichTextEditor';
 import { createApiUrl, API_ENDPOINTS } from './config';
 import StoryCover from './components/StoryCover';
-import { ArrowLeft, Save, Sparkles, Edit3, MessageSquare, Lightbulb, Zap, Type, Bold as BoldIcon, Italic as ItalicIcon, Image as ImageIcon, Minus, Plus, RefreshCw, Feather } from 'lucide-react';
+import { ArrowLeft, Save, Sparkles, Edit3, MessageSquare, Lightbulb, Zap, Type, Bold as BoldIcon, Italic as ItalicIcon, Image as ImageIcon, Minus, Plus, RefreshCw, Feather, Headphones } from 'lucide-react';
 import RightSidebar from './components/RightSidebar';
 
 function DNASection({ title, children }) {
@@ -690,6 +690,16 @@ export default function MinimalEditor() {
           </div>
         </div>
         <div className="flex items-center space-x-4">
+          {/* Placeholder Audio button for future audiobook feature */}
+          <button
+            onClick={() => console.log('🎧 Audio feature coming soon')}
+            className="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-sm font-medium text-off flex items-center space-x-2 border border-white/10 backdrop-blur-md"
+            title="Audio (coming soon)"
+            aria-label="Audio"
+          >
+            <Headphones className="w-4 h-4" />
+            <span>Audio</span>
+          </button>
           <div className="flex items-center space-x-2">
             <span className="text-xs text-[#A9B1C7]">Game Mode</span>
             <button
