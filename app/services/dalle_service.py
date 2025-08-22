@@ -111,7 +111,7 @@ class DalleService:
                             # Get image URL and metadata
                             image_data = images[0]  # DALL-E 3 returns 1 image
                             image_url = image_data.get("url")
-                            revised_prompt = data.get("revised_prompt", prompt)
+                            revised_prompt = image_data.get("revised_prompt", prompt)
                             
                             if not image_url:
                                 raise DalleAPIError("No image URL returned from DALL-E 3 API")
