@@ -2,7 +2,7 @@
 
 High-performance AI-powered story generation and interaction platform built with FastAPI.
 
-## 🏗️ Architecture
+## Architecture
 
 ### Service Layer Architecture
 - **Database Service**: Async connection pooling and database operations
@@ -17,7 +17,7 @@ High-performance AI-powered story generation and interaction platform built with
 - ✅ **Background task processing** for embeddings
 - ✅ **Comprehensive monitoring** and error handling
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Bookology.-backend/
@@ -45,7 +45,7 @@ Bookology.-backend/
 └── Bookology-frontend/        # React frontend application
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.9+
@@ -90,7 +90,7 @@ python scripts/create_tables.py
 python main.py
 ```
 
-## 📊 API Endpoints
+##  API Endpoints
 
 ### Core Endpoints
 - `GET /health` - Health check with service status
@@ -104,7 +104,7 @@ python main.py
 - `GET /admin/performance` - Performance statistics
 - `POST /admin/cache/clear` - Cache management
 
-## 🔧 Configuration
+##  Configuration
 
 The application uses a centralized configuration system in `config.py`:
 
@@ -113,7 +113,7 @@ The application uses a centralized configuration system in `config.py`:
 - **Vector Store**: pgvector with optimized chunk size (800 characters)
 - **CORS**: Configured for frontend development and production
 
-## 🎯 Key Features
+##  Key Features
 
 ### Story Generation
 - AI-powered outline and chapter generation
@@ -137,7 +137,7 @@ The application uses a centralized configuration system in `config.py`:
 - Performance metrics and statistics
 - Comprehensive error handling
 
-## 🧪 Development
+##  Development
 
 ### Running Tests
 ```bash
